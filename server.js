@@ -739,6 +739,11 @@ function cameraRoutes(ctx) {
     ).run(id, name, deviceKey, placeId, text(b.placeName), text(b.location), text(b.ipAddress), new Date(ctx.now()).toISOString());
     res.json({ camera: mapCamera(db.prepare("SELECT * FROM cameras WHERE id = ?").get(id)) });
   });
+  r.delete("/cameras/:id", requireRole("hr"), (req, res) => {
+    const result = db.prepare("DELETE FROM cameras WHERE id = ?").run(req.params.id);
+    if (Number(result.changes) === 0) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y camera");
+    res.json({ success: true });
+  });
   return r;
 }
 
@@ -928,6 +933,14 @@ function mapDay(r) {
   };
 }
 var MAX_RECOMPUTE_DAYS = 92;
+var DETAIL_FILTER = {
+  total: "1 = 1",
+  present: "a.user_id IS NOT NULL",
+  on_time: "a.late_minutes = 0",
+  late: "a.late_minutes > 0",
+  missing_out: "a.status = 'missing_out'",
+  not_checked_in: "a.user_id IS NULL"
+};
 function attendanceRoutes(ctx) {
   const { db } = ctx;
   const r = Router5();
@@ -1003,6 +1016,31 @@ function attendanceRoutes(ctx) {
       totalCameras: cameras.c
     };
     res.json(body);
+  });
+  r.get("/stats/details", (req, res) => {
+    const type = req.query.type;
+    if (typeof type !== "string" || !Object.hasOwn(DETAIL_FILTER, type)) throw new HttpError(400, "Lo\u1EA1i th\u1ED1ng k\xEA kh\xF4ng h\u1EE3p l\u1EC7");
+    const w = scopeWhere(scopeFor(currentUser(req)), "u.id", "u.department_id");
+    const date = toVnDate(ctx.now());
+    const rows = db.prepare(
+      `SELECT u.id, u.code, u.name, d.name AS department_name, a.first_in, a.last_out, a.late_minutes, a.status
+         FROM users u
+         LEFT JOIN departments d ON d.id = u.department_id
+         LEFT JOIN attendance_days a ON a.user_id = u.id AND a.work_date = ?
+         WHERE u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${w.sql} AND ${DETAIL_FILTER[type]}
+         ORDER BY a.first_in IS NULL, a.first_in, u.code`
+    ).all(date, ...w.params);
+    const out = rows.map((x) => ({
+      userId: x.id,
+      employeeCode: x.code,
+      employeeName: x.name,
+      departmentName: x.department_name ?? null,
+      firstIn: x.first_in ?? null,
+      lastOut: x.last_out ?? null,
+      lateMinutes: x.late_minutes ?? 0,
+      status: x.status ?? null
+    }));
+    res.json({ date, type, rows: out });
   });
   return r;
 }

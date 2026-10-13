@@ -43,5 +43,11 @@ export function cameraRoutes(ctx: AppContext): Router {
     res.json({ camera: mapCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(id) as Row) });
   });
 
+  r.delete('/cameras/:id', requireRole('hr'), (req, res) => {
+    const result = db.prepare('DELETE FROM cameras WHERE id = ?').run(req.params.id);
+    if (Number(result.changes) === 0) throw new HttpError(404, 'Không tìm thấy camera');
+    res.json({ success: true });
+  });
+
   return r;
 }

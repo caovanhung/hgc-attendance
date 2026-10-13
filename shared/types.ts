@@ -138,6 +138,19 @@ export interface StatsData {
   totalCameras: number;
 }
 
+export type StatsDetailType = 'total' | 'present' | 'on_time' | 'late' | 'missing_out' | 'not_checked_in';
+
+export interface StatsDetailRow {
+  userId: string;
+  employeeCode: string;
+  employeeName: string;
+  departmentName: string | null;
+  firstIn: number | null;
+  lastOut: number | null;
+  lateMinutes: number;
+  status: DayStatus | null;
+}
+
 export interface BackupInfo {
   name: string;
   size: number;

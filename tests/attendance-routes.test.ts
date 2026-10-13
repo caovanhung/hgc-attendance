@@ -159,3 +159,51 @@ test('tài khoản hệ thống ADMIN không tính vào số nhân sự', async 
     await app.close();
   }
 });
+
+test('HR xóa camera; camera không tồn tại trả 404', async () => {
+  const { app } = await setup();
+  try {
+    const hr = await loginAs(app, 'HR01');
+    const id = (await hr.post('/api/cameras', { name: 'Cửa chính', deviceKey: 'C21272C952' })).body.camera.id;
+    assert.equal((await hr.del(`/api/cameras/${id}`)).status, 200);
+    assert.equal((await hr.get('/api/cameras')).body.cameras.length, 0);
+    assert.equal((await hr.del(`/api/cameras/${id}`)).status, 404);
+    // mã thiết bị dùng lại được sau khi xóa
+    assert.equal((await hr.post('/api/cameras', { name: 'Cửa chính', deviceKey: 'C21272C952' })).status, 200);
+  } finally {
+    await app.close();
+  }
+});
+
+test('chi tiết thẻ thống kê: danh sách người khớp đúng con số', async () => {
+  const { app, ids } = await setup();
+  try {
+    seedUser(app.db, { code: 'ADMIN', role: 'hr' });
+    seedUser(app.db, { code: 'NV09', status: 'inactive' });
+    const hr = await loginAs(app, 'HR01');
+    const codes = async (type: string) => {
+      const r = await hr.get(`/api/stats/details?type=${type}`);
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      return (r.body.rows as { employeeCode: string }[]).map((x) => x.employeeCode).sort();
+    };
+    assert.deepEqual(await codes('total'), ['HR01', 'NV01', 'NV02', 'NV03', 'TP01']);
+    assert.deepEqual(await codes('present'), ['NV01', 'NV02']);
+    assert.deepEqual(await codes('on_time'), ['NV01']);
+    assert.deepEqual(await codes('late'), ['NV02']);
+    assert.deepEqual(await codes('missing_out'), ['NV01', 'NV02']);
+    assert.deepEqual(await codes('not_checked_in'), ['HR01', 'NV03', 'TP01']);
+
+    const late = (await hr.get('/api/stats/details?type=late')).body.rows[0];
+    assert.equal(late.userId, ids.nv2);
+    assert.equal(late.employeeName, 'Trần Thị Bình');
+    assert.equal(late.departmentName, 'Kinh doanh');
+    assert.equal(late.firstIn, at('08:40'));
+    assert.equal(late.lateMinutes, 40);
+
+    const tp = await loginAs(app, 'TP01');
+    assert.deepEqual(((await tp.get('/api/stats/details?type=total')).body.rows as { employeeCode: string }[]).map((x) => x.employeeCode).sort(), ['NV01', 'TP01']);
+    assert.equal((await hr.get('/api/stats/details?type=abc')).status, 400);
+  } finally {
+    await app.close();
+  }
+});

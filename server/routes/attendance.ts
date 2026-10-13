@@ -7,7 +7,7 @@ import { scopeFor, scopeWhere } from '../auth';
 import { recomputeRange } from '../attendance';
 import { NOT_SYSTEM_ADMIN } from '../bootstrap';
 import { daysBetween, isValidDate, toVnDate } from '../vntime';
-import type { AttendanceDay, Detection, StatsData } from '../../shared/types';
+import type { AttendanceDay, Detection, StatsData, StatsDetailRow, StatsDetailType } from '../../shared/types';
 
 const DAY_SELECT = `SELECT a.*, u.code AS employee_code, u.name AS employee_name, u.avatar_url, u.department_id,
   d.name AS department_name
@@ -35,6 +35,16 @@ function mapDay(r: Row): AttendanceDay {
 }
 
 export const MAX_RECOMPUTE_DAYS = 92;
+
+/** Điều kiện lọc của từng thẻ thống kê, dùng chung để danh sách chi tiết khớp đúng con số. */
+const DETAIL_FILTER: Record<StatsDetailType, string> = {
+  total: '1 = 1',
+  present: 'a.user_id IS NOT NULL',
+  on_time: 'a.late_minutes = 0',
+  late: 'a.late_minutes > 0',
+  missing_out: "a.status = 'missing_out'",
+  not_checked_in: 'a.user_id IS NULL',
+};
 
 export function attendanceRoutes(ctx: AppContext): Router {
   const { db } = ctx;
@@ -121,6 +131,34 @@ export function attendanceRoutes(ctx: AppContext): Router {
       totalCameras: cameras.c,
     };
     res.json(body);
+  });
+
+  r.get('/stats/details', (req, res) => {
+    const type = req.query.type as StatsDetailType;
+    if (typeof type !== 'string' || !Object.hasOwn(DETAIL_FILTER, type)) throw new HttpError(400, 'Loại thống kê không hợp lệ');
+    const w = scopeWhere(scopeFor(currentUser(req)), 'u.id', 'u.department_id');
+    const date = toVnDate(ctx.now());
+    const rows = db
+      .prepare(
+        `SELECT u.id, u.code, u.name, d.name AS department_name, a.first_in, a.last_out, a.late_minutes, a.status
+         FROM users u
+         LEFT JOIN departments d ON d.id = u.department_id
+         LEFT JOIN attendance_days a ON a.user_id = u.id AND a.work_date = ?
+         WHERE u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${w.sql} AND ${DETAIL_FILTER[type]}
+         ORDER BY a.first_in IS NULL, a.first_in, u.code`,
+      )
+      .all(date, ...w.params) as Row[];
+    const out: StatsDetailRow[] = rows.map((x) => ({
+      userId: x.id,
+      employeeCode: x.code,
+      employeeName: x.name,
+      departmentName: x.department_name ?? null,
+      firstIn: x.first_in ?? null,
+      lastOut: x.last_out ?? null,
+      lateMinutes: x.late_minutes ?? 0,
+      status: x.status ?? null,
+    }));
+    res.json({ date, type, rows: out });
   });
 
   return r;

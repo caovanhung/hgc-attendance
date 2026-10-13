@@ -180,7 +180,7 @@ export default function App() {
           </button>
         </div>
 
-        <StatsCards stats={stats} currentUser={currentUser} />
+        <StatsCards stats={stats} currentUser={currentUser} onOpenRequests={() => setActiveTab('requests')} />
 
         {tab === 'attendance' && (
           <AttendanceTable

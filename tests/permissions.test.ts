@@ -4,7 +4,7 @@ import { startTestApp, seedUser, seedDepartment, loginAs, Client, type TestApp }
 
 type Role = 'hr' | 'tp' | 'nv';
 interface Case {
-  method: 'GET' | 'POST' | 'PUT';
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
   path: (ids: Record<string, string>) => string;
   body?: unknown;
   allowed: Role[];
@@ -24,9 +24,11 @@ const CASES: Case[] = [
   { method: 'PUT', path: (i) => `/api/departments/${i.kt}`, body: { description: 'x' }, allowed: HR },
   { method: 'GET', path: () => '/api/cameras', allowed: ALL },
   { method: 'POST', path: () => '/api/cameras', body: { name: 'C', deviceKey: 'K1' }, allowed: HR },
+  { method: 'DELETE', path: () => '/api/cameras/cam-khong-co', allowed: HR },
   { method: 'GET', path: () => '/api/attendance', allowed: ALL },
   { method: 'POST', path: () => '/api/attendance/recompute', body: { from: '2026-10-13', to: '2026-10-13' }, allowed: HR },
   { method: 'GET', path: () => '/api/stats', allowed: ALL },
+  { method: 'GET', path: () => '/api/stats/details?type=present', allowed: ALL },
   { method: 'GET', path: () => '/api/requests', allowed: ALL },
   { method: 'POST', path: () => '/api/requests', body: { workDate: '2026-10-01', type: 'leave_request', reason: 'x' }, allowed: ALL },
   { method: 'PUT', path: (i) => `/api/requests/${i.req}`, body: { status: 'approved' }, allowed: ['hr', 'tp'] },

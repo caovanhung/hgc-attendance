@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { MapPin, Plus, Video } from 'lucide-react';
+import { MapPin, Plus, Trash2, Video } from 'lucide-react';
 import type { Camera, User } from '../types';
 import { api, errorMessage } from '../api';
-import { Field, Modal, inputCls, primaryBtn, secondaryBtn } from './ui';
+import { Field, Modal, dangerBtn, inputCls, primaryBtn, secondaryBtn } from './ui';
 
 interface CamerasTabProps {
   cameras: Camera[];
@@ -15,6 +15,25 @@ const EMPTY = { name: '', deviceKey: '', placeId: '', placeName: '', location: '
 export const CamerasTab: React.FC<CamerasTabProps> = ({ cameras, currentUser, onRefresh }) => {
   const [form, setForm] = useState<typeof EMPTY | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<Camera | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const isHr = currentUser.role === 'hr';
+
+  const confirmDelete = async () => {
+    if (!deleting) return;
+    setBusy(true);
+    setDeleteError(null);
+    try {
+      await api(`/api/cameras/${deleting.id}`, { method: 'DELETE' });
+      setDeleting(null);
+      onRefresh();
+    } catch (err) {
+      setDeleteError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,7 +57,7 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({ cameras, currentUser, on
           <h2 className="text-base font-bold text-slate-900">Camera Hanet</h2>
           <p className="text-xs text-slate-500 mt-0.5">Danh sách để tham chiếu tên thiết bị. Lượt nhận diện vẫn được ghi khi camera chưa có trong danh sách.</p>
         </div>
-        {currentUser.role === 'hr' && (
+        {isHr && (
           <button onClick={() => setForm({ ...EMPTY })} className={primaryBtn}>
             <Plus className="w-4 h-4" /> Thêm camera
           </button>
@@ -56,7 +75,22 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({ cameras, currentUser, on
             <div key={c.id} className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-4 text-xs space-y-2">
               <div className="flex items-center justify-between">
                 <h3 className="font-bold text-sm text-slate-900">{c.name}</h3>
-                <span className="font-mono text-[10px] px-1.5 rounded bg-slate-100 text-slate-600">{c.deviceKey}</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-mono text-[10px] px-1.5 rounded bg-slate-100 text-slate-600">{c.deviceKey}</span>
+                  {isHr && (
+                    <button
+                      onClick={() => {
+                        setDeleteError(null);
+                        setDeleting(c);
+                      }}
+                      className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                      title="Xóa camera"
+                      aria-label={`Xóa camera ${c.name}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
               {c.location && (
                 <div className="flex items-center gap-1.5 text-slate-500">
@@ -80,6 +114,26 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({ cameras, currentUser, on
             </div>
           ))}
         </div>
+      )}
+
+      {deleting && (
+        <Modal title="Xóa camera" onClose={() => setDeleting(null)}>
+          <div className="space-y-3.5">
+            <p>
+              Xóa camera <strong>{deleting.name}</strong> (<span className="font-mono">{deleting.deviceKey}</span>) khỏi danh sách?
+            </p>
+            <p className="text-slate-500">Lịch sử điểm danh không bị ảnh hưởng, và lượt nhận diện từ camera này vẫn tiếp tục được ghi nhận.</p>
+            {deleteError && <p className="text-rose-600">{deleteError}</p>}
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setDeleting(null)} className={`${secondaryBtn} flex-1`}>
+                Hủy
+              </button>
+              <button type="button" onClick={confirmDelete} disabled={busy} className={`${dangerBtn} flex-1`}>
+                Xóa camera
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {form && (
