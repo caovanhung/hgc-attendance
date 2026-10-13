@@ -3,7 +3,8 @@ import type { AppContext } from '../context';
 import type { Db } from '../db';
 import { newId } from '../db';
 import { HttpError } from '../errors';
-import { currentUser, requireRole } from '../middleware';
+import { currentUser, requireRole, requireSystemAdmin } from '../middleware';
+import { backupNow } from '../backup';
 import { USER_SELECT, getUser, mapUser, type Row } from '../repo';
 import { deleteUserSessions, generateTempPassword, hashPassword, scopeFor, scopeWhere } from '../auth';
 import { toVnDate } from '../vntime';
@@ -119,6 +120,18 @@ export function userRoutes(ctx: AppContext): Router {
     deleteUserSessions(db, target.id);
     console.warn(`[SECURITY] password_reset by=${actor.code} target=${target.code} ip=${req.ip}`);
     res.json({ tempPassword });
+  });
+
+  r.delete('/users/:id', requireSystemAdmin, (req, res) => {
+    const actor = currentUser(req);
+    const target = getUser(db, req.params.id);
+    if (!target) throw new HttpError(404, 'Không tìm thấy nhân sự');
+    if (target.id === actor.id) throw new HttpError(400, 'Không thể tự xóa tài khoản đang đăng nhập');
+    const backup = backupNow(db, ctx.config.backupDir, 'pre-delete', ctx.now());
+    // Khóa ngoại tự xóa phiên, lượt nhận diện, bảng công, đơn của người này; bỏ chức trưởng phòng nếu có.
+    db.prepare('DELETE FROM users WHERE id = ?').run(target.id);
+    console.warn(`[SECURITY] user_deleted by=${actor.code} target=${target.code} backup=${backup} ip=${req.ip}`);
+    res.json({ success: true, backup });
   });
 
   return r;

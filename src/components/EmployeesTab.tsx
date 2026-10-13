@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { KeyRound, Pencil, Search, UserPlus } from 'lucide-react';
+import { KeyRound, Pencil, Search, Trash2, UserPlus } from 'lucide-react';
 import type { Department, User } from '../types';
 import { api, errorMessage } from '../api';
-import { ROLE_LABEL } from '../format';
+import { ROLE_LABEL, SYSTEM_ADMIN_CODE } from '../format';
 import { UserFormModal } from './UserFormModal';
 import { TempPasswordDialog } from './TempPasswordDialog';
-import { inputCls, primaryBtn, secondaryBtn } from './ui';
+import { ConfirmDeleteDialog, inputCls, primaryBtn, secondaryBtn } from './ui';
 
 interface EmployeesTabProps {
   users: User[];
@@ -19,6 +19,8 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
   const [tempPassword, setTempPassword] = useState<{ label: string; password: string } | null>(null);
   const [deptFilter, setDeptFilter] = useState('');
   const [search, setSearch] = useState('');
+  const [deleting, setDeleting] = useState<User | null>(null);
+  const isSystemAdmin = currentUser.code === SYSTEM_ADMIN_CODE;
 
   const resetPassword = async (u: User) => {
     if (!window.confirm(`Đặt lại mật khẩu cho ${u.name} (${u.code})? Mật khẩu cũ và các phiên đăng nhập của người này sẽ mất hiệu lực.`)) return;
@@ -90,6 +92,16 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
               <button onClick={() => resetPassword(u)} className={`${secondaryBtn} flex-1 py-1.5`}>
                 <KeyRound className="w-3.5 h-3.5" /> Đặt lại mật khẩu
               </button>
+              {isSystemAdmin && (
+                <button
+                  onClick={() => setDeleting(u)}
+                  className={`${secondaryBtn} py-1.5 px-2.5 text-rose-600 hover:bg-rose-50 hover:border-rose-200`}
+                  title="Xóa nhân sự"
+                  aria-label={`Xóa ${u.name}`}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           </div>
         ))}
@@ -107,6 +119,28 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
             onRefresh();
           }}
         />
+      )}
+      {deleting && (
+        <ConfirmDeleteDialog
+          title="Xóa nhân sự"
+          confirmLabel="Xóa vĩnh viễn"
+          onClose={() => setDeleting(null)}
+          onConfirm={async () => {
+            await api(`/api/users/${deleting.id}`, { method: 'DELETE' });
+            setDeleting(null);
+            onRefresh();
+          }}
+        >
+          <p>
+            Xóa <strong>{deleting.name}</strong> (<span className="font-mono">{deleting.code}</span>)?
+          </p>
+          <p className="text-rose-700 bg-rose-50 border border-rose-100 rounded-xl p-2.5">
+            Toàn bộ lịch sử điểm danh, bảng công và đơn từ của người này cũng bị xóa. Hệ thống tự sao lưu trước khi xóa.
+          </p>
+          <p className="text-slate-500">
+            Nếu người này chỉ nghỉ việc, nên bấm <strong>Sửa</strong> và chuyển trạng thái sang <strong>Đã nghỉ</strong> để giữ lịch sử.
+          </p>
+        </ConfirmDeleteDialog>
       )}
       {tempPassword && <TempPasswordDialog employeeLabel={tempPassword.label} password={tempPassword.password} onClose={() => setTempPassword(null)} />}
     </div>

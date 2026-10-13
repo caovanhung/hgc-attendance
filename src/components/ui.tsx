@@ -1,4 +1,5 @@
 import React from 'react';
+import { errorMessage } from '../api';
 
 export const inputCls =
   'w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-hidden focus:border-orange-500 disabled:bg-slate-50';
@@ -35,3 +36,41 @@ export const Field: React.FC<{ label: string; children: React.ReactNode; hint?: 
     {hint && <span className="block text-[11px] text-slate-400 mt-0.5">{hint}</span>}
   </label>
 );
+
+/** Hộp xác nhận cho thao tác xóa: hiện lỗi từ server ngay trong hộp, khóa nút khi đang gửi. */
+export const ConfirmDeleteDialog: React.FC<{
+  title: string;
+  children: React.ReactNode;
+  confirmLabel: string;
+  onConfirm: () => Promise<void>;
+  onClose: () => void;
+}> = ({ title, children, confirmLabel, onConfirm, onClose }) => {
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const run = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await onConfirm();
+    } catch (err) {
+      setError(errorMessage(err));
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title={title} onClose={onClose}>
+      <div className="space-y-3.5">
+        {children}
+        {error && <p className="text-rose-600">{error}</p>}
+        <div className="flex gap-2">
+          <button type="button" onClick={onClose} className={`${secondaryBtn} flex-1`}>
+            Hủy
+          </button>
+          <button type="button" onClick={run} disabled={busy} className={`${dangerBtn} flex-1`}>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+};

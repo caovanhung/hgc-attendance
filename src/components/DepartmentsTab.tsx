@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { Building, Pencil, Plus, Shield, Users } from 'lucide-react';
+import { Building, Pencil, Plus, Shield, Trash2, Users } from 'lucide-react';
 import type { Department, User } from '../types';
 import { api, errorMessage } from '../api';
-import { ROLE_LABEL } from '../format';
-import { Field, Modal, inputCls, primaryBtn, secondaryBtn } from './ui';
+import { ROLE_LABEL, SYSTEM_ADMIN_CODE } from '../format';
+import { ConfirmDeleteDialog, Field, Modal, inputCls, primaryBtn, secondaryBtn } from './ui';
 
 interface DepartmentsTabProps {
   departments: Department[];
@@ -17,6 +17,8 @@ export const DepartmentsTab: React.FC<DepartmentsTabProps> = ({ departments, use
   const [selectedId, setSelectedId] = useState('');
   const [form, setForm] = useState<{ id?: string; code: string; name: string; description: string; managerId: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<Department | null>(null);
+  const isSystemAdmin = currentUser.code === SYSTEM_ADMIN_CODE;
 
   const active = departments.find((d) => d.id === selectedId) ?? departments[0];
   const members = users.filter((u) => u.departmentId === active?.id);
@@ -87,14 +89,21 @@ export const DepartmentsTab: React.FC<DepartmentsTabProps> = ({ departments, use
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between">
             <h3 className="font-bold text-sm text-slate-900">Nhân sự: {active.name}</h3>
-            {isHR && (
-              <button
-                onClick={() => setForm({ id: active.id, code: active.code, name: active.name, description: active.description, managerId: active.managerId ?? '' })}
-                className={`${secondaryBtn} py-1.5`}
-              >
-                <Pencil className="w-3.5 h-3.5" /> Sửa phòng ban
-              </button>
-            )}
+            <div className="flex gap-2">
+              {isHR && (
+                <button
+                  onClick={() => setForm({ id: active.id, code: active.code, name: active.name, description: active.description, managerId: active.managerId ?? '' })}
+                  className={`${secondaryBtn} py-1.5`}
+                >
+                  <Pencil className="w-3.5 h-3.5" /> Sửa phòng ban
+                </button>
+              )}
+              {isSystemAdmin && (
+                <button onClick={() => setDeleting(active)} className={`${secondaryBtn} py-1.5 text-rose-600 hover:bg-rose-50 hover:border-rose-200`}>
+                  <Trash2 className="w-3.5 h-3.5" /> Xóa phòng ban
+                </button>
+              )}
+            </div>
           </div>
           <table className="w-full text-left text-xs">
             <thead>
@@ -122,6 +131,30 @@ export const DepartmentsTab: React.FC<DepartmentsTabProps> = ({ departments, use
             </tbody>
           </table>
         </div>
+      )}
+
+      {deleting && (
+        <ConfirmDeleteDialog
+          title="Xóa phòng ban"
+          confirmLabel="Xóa phòng ban"
+          onClose={() => setDeleting(null)}
+          onConfirm={async () => {
+            await api(`/api/departments/${deleting.id}`, { method: 'DELETE' });
+            setDeleting(null);
+            setSelectedId('');
+            onRefresh();
+          }}
+        >
+          <p>
+            Xóa phòng ban <strong>{deleting.name}</strong> (<span className="font-mono">{deleting.code}</span>)?
+          </p>
+          <p className="text-slate-500">
+            {deleting.memberCount
+              ? `${deleting.memberCount} nhân sự trong phòng sẽ chuyển về "chưa có phòng ban"; nhân sự và lịch sử điểm danh của họ vẫn giữ nguyên.`
+              : 'Phòng ban này không có nhân sự nào.'}{' '}
+            Hệ thống tự sao lưu trước khi xóa.
+          </p>
+        </ConfirmDeleteDialog>
       )}
 
       {form && (

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { startTestApp, seedUser, seedDepartment, loginAs, Client, type TestApp } from './helpers';
+import { startTestApp, seedUser, seedDepartment, loginAs, addDetection, Client, type TestApp } from './helpers';
+import fs from 'node:fs';
 
 async function setup(): Promise<{ app: TestApp; kt: string; kd: string; ids: Record<string, string> }> {
   const app = await startTestApp();
@@ -159,6 +160,57 @@ test('danh sách nhân sự không gồm tài khoản hệ thống ADMIN', async
     seedUser(app.db, { code: 'ADMIN', role: 'hr' });
     const users = (await (await loginAs(app, 'ADMIN')).get('/api/users')).body.users as { code: string }[];
     assert.deepEqual(users.map((u) => u.code).sort(), ['HR01', 'NV01', 'NV02', 'TP01']);
+  } finally {
+    await app.close();
+  }
+});
+
+test('chỉ tài khoản ADMIN xóa được nhân sự; xóa kèm lịch sử và có sao lưu trước', async () => {
+  const { app, ids } = await setup();
+  try {
+    seedUser(app.db, { code: 'ADMIN', role: 'hr' });
+    addDetection(app.db, ids.nv1, Date.now());
+    const hr = await loginAs(app, 'HR01');
+    const tp = await loginAs(app, 'TP01');
+    assert.equal((await hr.del(`/api/users/${ids.nv1}`)).status, 403);
+    assert.equal((await tp.del(`/api/users/${ids.nv1}`)).status, 403);
+
+    const admin = await loginAs(app, 'ADMIN');
+    const r = await admin.del(`/api/users/${ids.nv1}`);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.match(r.body.backup, /pre-delete\.db$/);
+    assert.ok(fs.existsSync(`${app.ctx.config.backupDir}/${r.body.backup}`));
+    assert.equal(app.db.prepare('SELECT COUNT(*) AS c FROM users WHERE id = ?').get(ids.nv1)!.c, 0);
+    assert.equal(app.db.prepare('SELECT COUNT(*) AS c FROM detections WHERE user_id = ?').get(ids.nv1)!.c, 0);
+    assert.equal((await admin.del(`/api/users/${ids.nv1}`)).status, 404);
+
+    // xóa trưởng phòng → phòng ban mất trưởng phòng, không lỗi
+    app.db.prepare('UPDATE departments SET manager_id = ? WHERE code = ?').run(ids.tp, 'KT');
+    assert.equal((await admin.del(`/api/users/${ids.tp}`)).status, 200);
+    assert.equal(app.db.prepare("SELECT manager_id FROM departments WHERE code = 'KT'").get()!.manager_id, null);
+
+    // không tự xóa chính mình
+    const adminId = app.db.prepare("SELECT id FROM users WHERE code = 'ADMIN'").get()!.id as string;
+    assert.equal((await admin.del(`/api/users/${adminId}`)).status, 400);
+  } finally {
+    await app.close();
+  }
+});
+
+test('chỉ tài khoản ADMIN xóa được phòng ban; thành viên chuyển về chưa có phòng', async () => {
+  const { app, ids, kt } = await setup();
+  try {
+    seedUser(app.db, { code: 'ADMIN', role: 'hr' });
+    const hr = await loginAs(app, 'HR01');
+    assert.equal((await hr.del(`/api/departments/${kt}`)).status, 403);
+
+    const admin = await loginAs(app, 'ADMIN');
+    const r = await admin.del(`/api/departments/${kt}`);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.match(r.body.backup, /pre-delete\.db$/);
+    assert.equal(app.db.prepare('SELECT COUNT(*) AS c FROM departments WHERE id = ?').get(kt)!.c, 0);
+    assert.equal(app.db.prepare('SELECT department_id FROM users WHERE id = ?').get(ids.nv1)!.department_id, null);
+    assert.equal((await admin.del(`/api/departments/${kt}`)).status, 404);
   } finally {
     await app.close();
   }

@@ -87,7 +87,7 @@ Sau đó đăng nhập `ADMIN` / `Admin@123`, đổi mật khẩu, rồi tạo l
 
 ## Sao lưu
 
-- Tự động lúc 02:00 hằng ngày vào `data/backups/attendance-YYYY-MM-DD.db`, giữ 30 bản. Có bản sao lưu riêng trước mỗi lần xóa dữ liệu.
+- Tự động lúc 02:00 hằng ngày vào `data/backups/attendance-YYYY-MM-DD.db`, giữ 30 bản. Có bản sao lưu riêng trước mỗi lần xóa dữ liệu, xóa nhân sự hoặc xóa phòng ban (chỉ tài khoản `ADMIN` được xóa nhân sự, phòng ban).
 - Nên chép định kỳ ra ngoài VPS, ví dụ thêm vào crontab:
 
 ```bash

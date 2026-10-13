@@ -30,3 +30,6 @@ export const ROLE_LABEL: Record<UserRole, string> = {
   dept_manager: 'Trưởng phòng',
   employee: 'Nhân viên',
 };
+
+/** Tài khoản quản trị hệ thống; chỉ tài khoản này được xóa nhân sự và phòng ban. */
+export const SYSTEM_ADMIN_CODE = 'ADMIN';

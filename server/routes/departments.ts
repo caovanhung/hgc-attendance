@@ -3,7 +3,8 @@ import type { AppContext } from '../context';
 import type { Db } from '../db';
 import { newId } from '../db';
 import { HttpError } from '../errors';
-import { requireRole } from '../middleware';
+import { currentUser, requireRole, requireSystemAdmin } from '../middleware';
+import { backupNow } from '../backup';
 import type { Row } from '../repo';
 import { CODE_RE } from './users';
 import { toVnDate } from '../vntime';
@@ -84,6 +85,17 @@ export function departmentRoutes(ctx: AppContext): Router {
       db.prepare('UPDATE departments SET manager_id = ? WHERE id = ?').run(resolveManager(db, b.managerId), dept.id);
     }
     res.json({ department: getDept(db, dept.id) });
+  });
+
+  r.delete('/departments/:id', requireSystemAdmin, (req, res) => {
+    const actor = currentUser(req);
+    const dept = getDept(db, req.params.id);
+    if (!dept) throw new HttpError(404, 'Không tìm thấy phòng ban');
+    const backup = backupNow(db, ctx.config.backupDir, 'pre-delete', ctx.now());
+    // Khóa ngoại tự chuyển thành viên về "chưa có phòng ban".
+    db.prepare('DELETE FROM departments WHERE id = ?').run(dept.id);
+    console.warn(`[SECURITY] department_deleted by=${actor.code} target=${dept.code} backup=${backup} ip=${req.ip}`);
+    res.json({ success: true, backup });
   });
 
   return r;

@@ -306,6 +306,62 @@ function scopeWhere(scope, userIdCol, deptCol) {
   }
 }
 
+// server/vntime.ts
+var VN_OFFSET_MS = 7 * 60 * 60 * 1e3;
+var DAY_MS = 24 * 60 * 60 * 1e3;
+function toVnDate(ts) {
+  return new Date(ts + VN_OFFSET_MS).toISOString().slice(0, 10);
+}
+function vnMinutesOfDay(ts) {
+  const d = new Date(ts + VN_OFFSET_MS);
+  return d.getUTCHours() * 60 + d.getUTCMinutes();
+}
+function parseHHmm(s) {
+  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(s);
+  if (!m) throw new Error(`Gi\u1EDD kh\xF4ng h\u1EE3p l\u1EC7: ${s}`);
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+function isValidDate(s) {
+  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const t = Date.parse(`${s}T00:00:00Z`);
+  return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === s;
+}
+function vnDateTimeToTs(date, hhmm2) {
+  const [y, mo, d] = date.split("-").map(Number);
+  return Date.UTC(y, mo - 1, d, 0, parseHHmm(hhmm2)) - VN_OFFSET_MS;
+}
+function vnDayStart(date) {
+  return vnDateTimeToTs(date, "00:00");
+}
+function addDays(date, n) {
+  return new Date(Date.parse(`${date}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
+}
+function daysBetween(from, to) {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS);
+}
+
+// server/bootstrap.ts
+var DEFAULT_ADMIN_PASSWORD = "Admin@123";
+var SYSTEM_ADMIN_CODE = "ADMIN";
+var NOT_SYSTEM_ADMIN = `u.code != '${SYSTEM_ADMIN_CODE}'`;
+function ensureAdminAccess(db, envPassword) {
+  const usable = db.prepare("SELECT 1 FROM users WHERE role = 'hr' AND status = 'active' AND password_hash IS NOT NULL LIMIT 1").get();
+  if (usable) return null;
+  const fromEnv = typeof envPassword === "string" && envPassword.length >= 8;
+  const password = fromEnv ? envPassword : DEFAULT_ADMIN_PASSWORD;
+  let hr = db.prepare("SELECT id, code FROM users WHERE role = 'hr' ORDER BY created_at, id LIMIT 1").get();
+  if (!hr) {
+    db.prepare(
+      `INSERT INTO users(id, code, name, role, status, must_change_password, created_at)
+       VALUES (?, ?, 'Qu\u1EA3n tr\u1ECB vi\xEAn H\u1EC7 th\u1ED1ng (HR)', 'hr', 'active', 1, ?)
+       ON CONFLICT(code) DO UPDATE SET role = 'hr', status = 'active'`
+    ).run(newId("usr"), SYSTEM_ADMIN_CODE, toVnDate(Date.now()));
+    hr = db.prepare("SELECT id, code FROM users WHERE code = ?").get(SYSTEM_ADMIN_CODE);
+  }
+  db.prepare("UPDATE users SET password_hash = ?, must_change_password = 1, status = 'active' WHERE id = ?").run(hashPassword(password), hr.id);
+  return { code: hr.code, password, fromEnv };
+}
+
 // server/middleware.ts
 var SESSION_COOKIE = "sid";
 function readCookie(req, name) {
@@ -355,6 +411,12 @@ function requireRole(...roles) {
     next();
   };
 }
+var requireSystemAdmin = (req, _res, next) => {
+  if (!req.user || req.user.code !== SYSTEM_ADMIN_CODE) {
+    return next(new HttpError(403, "Ch\u1EC9 t\xE0i kho\u1EA3n ADMIN \u0111\u01B0\u1EE3c th\u1EF1c hi\u1EC7n thao t\xE1c n\xE0y"));
+  }
+  next();
+};
 var WRITE_METHODS = /* @__PURE__ */ new Set(["POST", "PUT", "PATCH", "DELETE"]);
 var jsonOnly = (req, _res, next) => {
   if (WRITE_METHODS.has(req.method)) {
@@ -470,60 +532,48 @@ function authRoutes(ctx) {
 // server/routes/users.ts
 import { Router as Router2 } from "express";
 
-// server/vntime.ts
-var VN_OFFSET_MS = 7 * 60 * 60 * 1e3;
-var DAY_MS = 24 * 60 * 60 * 1e3;
-function toVnDate(ts) {
-  return new Date(ts + VN_OFFSET_MS).toISOString().slice(0, 10);
+// server/backup.ts
+import fs2 from "node:fs";
+import path2 from "node:path";
+var BACKUP_KEEP = 30;
+var BACKUP_RE = /^attendance-.*\.db$/;
+var DAILY_RE = /^attendance-\d{4}-\d{2}-\d{2}\.db$/;
+function stamp(now) {
+  const iso = new Date(now + VN_OFFSET_MS).toISOString();
+  return { date: iso.slice(0, 10), time: iso.slice(11, 19).replace(/:/g, "") };
 }
-function vnMinutesOfDay(ts) {
-  const d = new Date(ts + VN_OFFSET_MS);
-  return d.getUTCHours() * 60 + d.getUTCMinutes();
-}
-function parseHHmm(s) {
-  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(s);
-  if (!m) throw new Error(`Gi\u1EDD kh\xF4ng h\u1EE3p l\u1EC7: ${s}`);
-  return Number(m[1]) * 60 + Number(m[2]);
-}
-function isValidDate(s) {
-  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
-  const t = Date.parse(`${s}T00:00:00Z`);
-  return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === s;
-}
-function vnDateTimeToTs(date, hhmm2) {
-  const [y, mo, d] = date.split("-").map(Number);
-  return Date.UTC(y, mo - 1, d, 0, parseHHmm(hhmm2)) - VN_OFFSET_MS;
-}
-function vnDayStart(date) {
-  return vnDateTimeToTs(date, "00:00");
-}
-function addDays(date, n) {
-  return new Date(Date.parse(`${date}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
-}
-function daysBetween(from, to) {
-  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS);
-}
-
-// server/bootstrap.ts
-var DEFAULT_ADMIN_PASSWORD = "Admin@123";
-var SYSTEM_ADMIN_CODE = "ADMIN";
-var NOT_SYSTEM_ADMIN = `u.code != '${SYSTEM_ADMIN_CODE}'`;
-function ensureAdminAccess(db, envPassword) {
-  const usable = db.prepare("SELECT 1 FROM users WHERE role = 'hr' AND status = 'active' AND password_hash IS NOT NULL LIMIT 1").get();
-  if (usable) return null;
-  const fromEnv = typeof envPassword === "string" && envPassword.length >= 8;
-  const password = fromEnv ? envPassword : DEFAULT_ADMIN_PASSWORD;
-  let hr = db.prepare("SELECT id, code FROM users WHERE role = 'hr' ORDER BY created_at, id LIMIT 1").get();
-  if (!hr) {
-    db.prepare(
-      `INSERT INTO users(id, code, name, role, status, must_change_password, created_at)
-       VALUES (?, ?, 'Qu\u1EA3n tr\u1ECB vi\xEAn H\u1EC7 th\u1ED1ng (HR)', 'hr', 'active', 1, ?)
-       ON CONFLICT(code) DO UPDATE SET role = 'hr', status = 'active'`
-    ).run(newId("usr"), SYSTEM_ADMIN_CODE, toVnDate(Date.now()));
-    hr = db.prepare("SELECT id, code FROM users WHERE code = ?").get(SYSTEM_ADMIN_CODE);
+function backupNow(db, dir, reason, now) {
+  fs2.mkdirSync(dir, { recursive: true });
+  const { date, time } = stamp(now);
+  let name;
+  if (reason === "daily") {
+    name = `attendance-${date}.db`;
+    if (fs2.existsSync(path2.join(dir, name))) return null;
+  } else {
+    name = `attendance-${date}-${time}-${reason}.db`;
+    for (let i = 2; fs2.existsSync(path2.join(dir, name)); i++) name = `attendance-${date}-${time}-${reason}-${i}.db`;
   }
-  db.prepare("UPDATE users SET password_hash = ?, must_change_password = 1, status = 'active' WHERE id = ?").run(hashPassword(password), hr.id);
-  return { code: hr.code, password, fromEnv };
+  db.prepare("VACUUM INTO ?").run(path2.join(dir, name));
+  pruneBackups(dir);
+  return name;
+}
+function listBackups(dir) {
+  if (!fs2.existsSync(dir)) return [];
+  return fs2.readdirSync(dir).filter((n) => BACKUP_RE.test(n)).map((name) => {
+    const st = fs2.statSync(path2.join(dir, name));
+    return { name, size: st.size, createdAt: st.mtime.toISOString() };
+  }).sort((a, b) => a.createdAt === b.createdAt ? b.name.localeCompare(a.name) : b.createdAt.localeCompare(a.createdAt));
+}
+function pruneBackups(dir) {
+  if (!fs2.existsSync(dir)) return;
+  const names = fs2.readdirSync(dir).filter((n) => BACKUP_RE.test(n)).sort().reverse();
+  const daily = names.filter((n) => DAILY_RE.test(n));
+  const others = names.filter((n) => !DAILY_RE.test(n));
+  for (const n of [...daily.slice(BACKUP_KEEP), ...others.slice(BACKUP_KEEP)]) fs2.rmSync(path2.join(dir, n), { force: true });
+}
+function latestBackup(dir) {
+  const [first] = listBackups(dir);
+  return first ? path2.join(dir, first.name) : null;
 }
 
 // server/routes/users.ts
@@ -627,6 +677,16 @@ function userRoutes(ctx) {
     console.warn(`[SECURITY] password_reset by=${actor.code} target=${target.code} ip=${req.ip}`);
     res.json({ tempPassword });
   });
+  r.delete("/users/:id", requireSystemAdmin, (req, res) => {
+    const actor = currentUser(req);
+    const target = getUser(db, req.params.id);
+    if (!target) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y nh\xE2n s\u1EF1");
+    if (target.id === actor.id) throw new HttpError(400, "Kh\xF4ng th\u1EC3 t\u1EF1 x\xF3a t\xE0i kho\u1EA3n \u0111ang \u0111\u0103ng nh\u1EADp");
+    const backup = backupNow(db, ctx.config.backupDir, "pre-delete", ctx.now());
+    db.prepare("DELETE FROM users WHERE id = ?").run(target.id);
+    console.warn(`[SECURITY] user_deleted by=${actor.code} target=${target.code} backup=${backup} ip=${req.ip}`);
+    res.json({ success: true, backup });
+  });
   return r;
 }
 
@@ -700,6 +760,15 @@ function departmentRoutes(ctx) {
       db.prepare("UPDATE departments SET manager_id = ? WHERE id = ?").run(resolveManager(db, b.managerId), dept.id);
     }
     res.json({ department: getDept(db, dept.id) });
+  });
+  r.delete("/departments/:id", requireSystemAdmin, (req, res) => {
+    const actor = currentUser(req);
+    const dept = getDept(db, req.params.id);
+    if (!dept) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y ph\xF2ng ban");
+    const backup = backupNow(db, ctx.config.backupDir, "pre-delete", ctx.now());
+    db.prepare("DELETE FROM departments WHERE id = ?").run(dept.id);
+    console.warn(`[SECURITY] department_deleted by=${actor.code} target=${dept.code} backup=${backup} ip=${req.ip}`);
+    res.json({ success: true, backup });
   });
   return r;
 }
@@ -1524,52 +1593,6 @@ function hanetRoutes(ctx) {
 
 // server/routes/admin.ts
 import { Router as Router9 } from "express";
-
-// server/backup.ts
-import fs2 from "node:fs";
-import path2 from "node:path";
-var BACKUP_KEEP = 30;
-var BACKUP_RE = /^attendance-.*\.db$/;
-var DAILY_RE = /^attendance-\d{4}-\d{2}-\d{2}\.db$/;
-function stamp(now) {
-  const iso = new Date(now + VN_OFFSET_MS).toISOString();
-  return { date: iso.slice(0, 10), time: iso.slice(11, 19).replace(/:/g, "") };
-}
-function backupNow(db, dir, reason, now) {
-  fs2.mkdirSync(dir, { recursive: true });
-  const { date, time } = stamp(now);
-  let name;
-  if (reason === "daily") {
-    name = `attendance-${date}.db`;
-    if (fs2.existsSync(path2.join(dir, name))) return null;
-  } else {
-    name = `attendance-${date}-${time}-${reason}.db`;
-    for (let i = 2; fs2.existsSync(path2.join(dir, name)); i++) name = `attendance-${date}-${time}-${reason}-${i}.db`;
-  }
-  db.prepare("VACUUM INTO ?").run(path2.join(dir, name));
-  pruneBackups(dir);
-  return name;
-}
-function listBackups(dir) {
-  if (!fs2.existsSync(dir)) return [];
-  return fs2.readdirSync(dir).filter((n) => BACKUP_RE.test(n)).map((name) => {
-    const st = fs2.statSync(path2.join(dir, name));
-    return { name, size: st.size, createdAt: st.mtime.toISOString() };
-  }).sort((a, b) => a.createdAt === b.createdAt ? b.name.localeCompare(a.name) : b.createdAt.localeCompare(a.createdAt));
-}
-function pruneBackups(dir) {
-  if (!fs2.existsSync(dir)) return;
-  const names = fs2.readdirSync(dir).filter((n) => BACKUP_RE.test(n)).sort().reverse();
-  const daily = names.filter((n) => DAILY_RE.test(n));
-  const others = names.filter((n) => !DAILY_RE.test(n));
-  for (const n of [...daily.slice(BACKUP_KEEP), ...others.slice(BACKUP_KEEP)]) fs2.rmSync(path2.join(dir, n), { force: true });
-}
-function latestBackup(dir) {
-  const [first] = listBackups(dir);
-  return first ? path2.join(dir, first.name) : null;
-}
-
-// server/routes/admin.ts
 function adminRoutes(ctx) {
   const { db } = ctx;
   const dir = ctx.config.backupDir;

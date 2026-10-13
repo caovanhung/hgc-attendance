@@ -3,6 +3,7 @@ import { findSessionUser, SESSION_TTL_MS, type AuthUser } from './auth';
 import { HttpError } from './errors';
 import type { AppContext } from './context';
 import type { UserRole } from '../shared/types';
+import { SYSTEM_ADMIN_CODE } from './bootstrap';
 
 declare global {
   namespace Express {
@@ -68,6 +69,14 @@ export function requireRole(...roles: UserRole[]): RequestHandler {
     next();
   };
 }
+
+/** Thao tác không hoàn tác được (xóa nhân sự, phòng ban): chỉ tài khoản quản trị hệ thống ADMIN. */
+export const requireSystemAdmin: RequestHandler = (req, _res, next) => {
+  if (!req.user || req.user.code !== SYSTEM_ADMIN_CODE) {
+    return next(new HttpError(403, 'Chỉ tài khoản ADMIN được thực hiện thao tác này'));
+  }
+  next();
+};
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
