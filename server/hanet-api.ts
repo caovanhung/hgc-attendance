@@ -72,27 +72,46 @@ async function postForm(deps: HanetDeps, url: string, params: Record<string, str
   }
 }
 
-export async function refreshAccessToken(deps: HanetDeps): Promise<string> {
+/** Thông báo khi làm mới token hỏng (spec §9): lỗi tạm, việc đồng bộ vẫn thử lại. */
+export const REFRESH_FAILED = 'Kết nối Hanet hỏng, kiểm tra Client ID/Secret/Refresh Token';
+
+const refreshFailed = (detail: string, code = 0) => new HanetApiError(code, `${REFRESH_FAILED} (${detail})`, true);
+
+async function doRefresh(deps: HanetDeps): Promise<string> {
   const { db } = deps;
   const refreshToken = getSetting(db, 'hanet.refresh_token');
   const clientId = getSetting(db, 'hanet.client_id');
   const clientSecret = getSetting(db, 'hanet.client_secret');
-  if (!refreshToken || !clientId || !clientSecret) {
-    throw new HanetApiError(0, 'Làm mới token thất bại: thiếu Client ID, Client Secret hoặc Refresh Token');
+  if (!refreshToken || !clientId || !clientSecret) throw refreshFailed('thiếu Client ID, Client Secret hoặc Refresh Token');
+  let body: any;
+  try {
+    body = await postForm(deps, OAUTH_TOKEN_URL, {
+      grant_type: 'refresh_token',
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+    });
+  } catch (err) {
+    throw refreshFailed(`làm mới token thất bại: ${(err as Error).message}`, err instanceof HanetApiError ? err.returnCode : 0);
   }
-  const body = await postForm(deps, OAUTH_TOKEN_URL, {
-    grant_type: 'refresh_token',
-    client_id: clientId,
-    client_secret: clientSecret,
-    refresh_token: refreshToken,
-  });
   const token = body?.access_token;
   if (typeof token !== 'string' || !token) {
-    throw new HanetApiError(Number(body?.returnCode ?? 0), `Làm mới token thất bại: ${body?.returnMessage ?? body?.error ?? 'không rõ lý do'}`);
+    throw refreshFailed(`làm mới token thất bại: ${body?.returnMessage ?? body?.error ?? 'không rõ lý do'}`, Number(body?.returnCode ?? 0));
   }
   setSetting(db, 'hanet.access_token', token);
   if (typeof body.refresh_token === 'string' && body.refresh_token) setSetting(db, 'hanet.refresh_token', body.refresh_token);
   return token;
+}
+
+/** Lượt làm mới token đang chạy của mỗi database: nhiều lời gọi cùng gặp -103 dùng chung một lượt. */
+const refreshing = new WeakMap<Db, Promise<string>>();
+
+export function refreshAccessToken(deps: HanetDeps): Promise<string> {
+  const pending = refreshing.get(deps.db);
+  if (pending) return pending;
+  const p = doRefresh(deps).finally(() => refreshing.delete(deps.db));
+  refreshing.set(deps.db, p);
+  return p;
 }
 
 export async function callApi(deps: HanetDeps, apiPath: string, params: Record<string, string>, retried = false): Promise<any> {

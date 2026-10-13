@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { freshDb, seedUser, startTestApp, loginAs, Client } from './helpers';
-import { reconcileDate, PAGE_SIZE, OAUTH_TOKEN_URL, type HanetDeps } from '../server/hanet-api';
+import { reconcileDate, callApi, refreshAccessToken, HanetApiError, PAGE_SIZE, OAUTH_TOKEN_URL, type HanetDeps } from '../server/hanet-api';
 import { getSetting, setSetting } from '../server/settings';
 import { getWebhookToken } from '../server/hanet';
 import { vnDateTimeToTs } from '../server/vntime';
@@ -97,7 +97,7 @@ test('refresh thất bại → ném lỗi và lưu last_reconcile_error', async 
   configure(db);
   const fake = fakeHanet({ pages: [], expireFirst: true, refreshFails: true });
   await assert.rejects(reconcileDate({ db, fetch: fake.fetchImpl, now: () => NOW }, D));
-  assert.match(getSetting(db, 'hanet.last_reconcile_error')!, /Làm mới token thất bại/);
+  assert.match(getSetting(db, 'hanet.last_reconcile_error')!, /Kết nối Hanet hỏng/);
 });
 
 test('lượt đã có từ webhook không bị ghi trùng khi đối soát', async () => {
@@ -135,5 +135,49 @@ test('route đối soát: nhân viên 403, chưa cấu hình 400, Hanet lỗi 50
     assert.match(r.body.error, /^Đối soát thất bại/);
   } finally {
     await app.close();
+  }
+});
+
+test('nhiều lời gọi cùng gặp -103 → chỉ một lần làm mới token', async () => {
+  const db = freshDb();
+  configure(db);
+  let oauth = 0;
+  const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+    const params = new URLSearchParams(String(init?.body ?? ''));
+    if (String(url) === OAUTH_TOKEN_URL) {
+      oauth++;
+      await new Promise((r) => setTimeout(r, 20));
+      return json({ access_token: 'new-token' });
+    }
+    if (params.get('token') !== 'new-token') return json({ returnCode: -103, returnMessage: 'ACCESS_TOKEN_EXPIRE' });
+    return json({ returnCode: 1, returnMessage: 'SUCCESS', data: [] });
+  }) as typeof fetch;
+  const deps: HanetDeps = { db, fetch: fetchImpl, now: () => NOW };
+  await Promise.all([callApi(deps, '/place/getPlaces', {}), callApi(deps, '/place/getPlaces', {}), callApi(deps, '/place/getPlaces', {})]);
+  assert.equal(oauth, 1);
+  // xong rồi thì lần -103 sau làm mới lại được
+  setSetting(db, 'hanet.access_token', 'old-token');
+  await callApi(deps, '/place/getPlaces', {});
+  assert.equal(oauth, 2);
+});
+
+test('làm mới token hỏng (HTTP 4xx, thiếu access_token, thiếu cấu hình) → lỗi tạm, thông báo theo §9', async () => {
+  const cases: [string, (db: Db) => void, Response | null][] = [
+    ['HTTP 400', () => {}, new Response('{"error":"invalid_grant"}', { status: 400 })],
+    ['thiếu access_token', () => {}, new Response('{"error":"invalid_grant"}', { status: 200 })],
+    ['thiếu cấu hình', (db) => setSetting(db, 'hanet.client_secret', ''), null],
+  ];
+  for (const [name, prep, reply] of cases) {
+    const db = freshDb();
+    configure(db);
+    prep(db);
+    const fetchImpl = (async () => reply!.clone()) as typeof fetch;
+    await assert.rejects(refreshAccessToken({ db, fetch: fetchImpl, now: () => NOW }), (err: unknown) => {
+      assert.ok(err instanceof HanetApiError, name);
+      assert.equal(err.transient, true, name);
+      assert.match(err.message, /^Kết nối Hanet hỏng, kiểm tra Client ID\/Secret\/Refresh Token/, name);
+      return true;
+    });
   }
 });
