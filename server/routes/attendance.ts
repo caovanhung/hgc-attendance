@@ -5,6 +5,7 @@ import { currentUser, requireRole } from '../middleware';
 import { canSeeUser, getUser, type Row } from '../repo';
 import { scopeFor, scopeWhere } from '../auth';
 import { recomputeRange } from '../attendance';
+import { NOT_SYSTEM_ADMIN } from '../bootstrap';
 import { daysBetween, isValidDate, toVnDate } from '../vntime';
 import type { AttendanceDay, Detection, StatsData } from '../../shared/types';
 
@@ -93,7 +94,7 @@ export function attendanceRoutes(ctx: AppContext): Router {
   r.get('/stats', (req, res) => {
     const w = scopeWhere(scopeFor(currentUser(req)), 'u.id', 'u.department_id');
     const date = toVnDate(ctx.now());
-    const total = db.prepare(`SELECT COUNT(*) AS c FROM users u WHERE u.status = 'active' AND ${w.sql}`).get(...w.params) as { c: number };
+    const total = db.prepare(`SELECT COUNT(*) AS c FROM users u WHERE u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${w.sql}`).get(...w.params) as { c: number };
     const day = db
       .prepare(
         `SELECT COUNT(*) AS present,
@@ -101,7 +102,7 @@ export function attendanceRoutes(ctx: AppContext): Router {
            SUM(CASE WHEN a.late_minutes > 0 THEN 1 ELSE 0 END) AS late,
            SUM(CASE WHEN a.status = 'missing_out' THEN 1 ELSE 0 END) AS missing_out
          FROM attendance_days a JOIN users u ON u.id = a.user_id
-         WHERE a.work_date = ? AND u.status = 'active' AND ${w.sql}`,
+         WHERE a.work_date = ? AND u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${w.sql}`,
       )
       .get(date, ...w.params) as { present: number; on_time: number | null; late: number | null; missing_out: number | null };
     const pending = db

@@ -152,3 +152,14 @@ test('phòng ban: mọi vai trò xem, chỉ HR tạo/sửa', async () => {
     await app.close();
   }
 });
+
+test('danh sách nhân sự không gồm tài khoản hệ thống ADMIN', async () => {
+  const { app } = await setup();
+  try {
+    seedUser(app.db, { code: 'ADMIN', role: 'hr' });
+    const users = (await (await loginAs(app, 'ADMIN')).get('/api/users')).body.users as { code: string }[];
+    assert.deepEqual(users.map((u) => u.code).sort(), ['HR01', 'NV01', 'NV02', 'TP01']);
+  } finally {
+    await app.close();
+  }
+});

@@ -147,3 +147,15 @@ test('camera: mọi vai trò xem, HR thêm, trùng mã thiết bị 409', async 
 test('toVnDate dùng cho mặc định ngày khớp với NOW', () => {
   assert.equal(toVnDate(NOW), D);
 });
+
+test('tài khoản hệ thống ADMIN không tính vào số nhân sự', async () => {
+  const { app } = await setup();
+  try {
+    seedUser(app.db, { code: 'ADMIN', role: 'hr' });
+    const s = (await (await loginAs(app, 'ADMIN')).get('/api/stats')).body;
+    assert.equal(s.totalEmployees, 5);
+    assert.equal(s.notCheckedInCount, 3);
+  } finally {
+    await app.close();
+  }
+});

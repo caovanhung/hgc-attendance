@@ -7,6 +7,7 @@ import { currentUser, requireRole } from '../middleware';
 import { USER_SELECT, getUser, mapUser, type Row } from '../repo';
 import { deleteUserSessions, generateTempPassword, hashPassword, scopeFor, scopeWhere } from '../auth';
 import { toVnDate } from '../vntime';
+import { NOT_SYSTEM_ADMIN } from '../bootstrap';
 import type { UserRole } from '../../shared/types';
 
 const ROLES: UserRole[] = ['hr', 'dept_manager', 'employee'];
@@ -29,7 +30,7 @@ export function userRoutes(ctx: AppContext): Router {
 
   r.get('/users', (req, res) => {
     const w = scopeWhere(scopeFor(currentUser(req)), 'u.id', 'u.department_id');
-    const rows = db.prepare(`${USER_SELECT} WHERE ${w.sql} ORDER BY u.code`).all(...w.params) as Row[];
+    const rows = db.prepare(`${USER_SELECT} WHERE ${NOT_SYSTEM_ADMIN} AND ${w.sql} ORDER BY u.code`).all(...w.params) as Row[];
     res.json({ users: rows.map(mapUser) });
   });
 

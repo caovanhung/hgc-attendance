@@ -504,6 +504,28 @@ function daysBetween(from, to) {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS);
 }
 
+// server/bootstrap.ts
+var DEFAULT_ADMIN_PASSWORD = "Admin@123";
+var SYSTEM_ADMIN_CODE = "ADMIN";
+var NOT_SYSTEM_ADMIN = `u.code != '${SYSTEM_ADMIN_CODE}'`;
+function ensureAdminAccess(db, envPassword) {
+  const usable = db.prepare("SELECT 1 FROM users WHERE role = 'hr' AND status = 'active' AND password_hash IS NOT NULL LIMIT 1").get();
+  if (usable) return null;
+  const fromEnv = typeof envPassword === "string" && envPassword.length >= 8;
+  const password = fromEnv ? envPassword : DEFAULT_ADMIN_PASSWORD;
+  let hr = db.prepare("SELECT id, code FROM users WHERE role = 'hr' ORDER BY created_at, id LIMIT 1").get();
+  if (!hr) {
+    db.prepare(
+      `INSERT INTO users(id, code, name, role, status, must_change_password, created_at)
+       VALUES (?, ?, 'Qu\u1EA3n tr\u1ECB vi\xEAn H\u1EC7 th\u1ED1ng (HR)', 'hr', 'active', 1, ?)
+       ON CONFLICT(code) DO UPDATE SET role = 'hr', status = 'active'`
+    ).run(newId("usr"), SYSTEM_ADMIN_CODE, toVnDate(Date.now()));
+    hr = db.prepare("SELECT id, code FROM users WHERE code = ?").get(SYSTEM_ADMIN_CODE);
+  }
+  db.prepare("UPDATE users SET password_hash = ?, must_change_password = 1, status = 'active' WHERE id = ?").run(hashPassword(password), hr.id);
+  return { code: hr.code, password, fromEnv };
+}
+
 // server/routes/users.ts
 var ROLES = ["hr", "dept_manager", "employee"];
 var CODE_RE = /^[A-Z0-9._-]{1,32}$/;
@@ -521,7 +543,7 @@ function userRoutes(ctx) {
   const r = Router2();
   r.get("/users", (req, res) => {
     const w = scopeWhere(scopeFor(currentUser(req)), "u.id", "u.department_id");
-    const rows = db.prepare(`${USER_SELECT} WHERE ${w.sql} ORDER BY u.code`).all(...w.params);
+    const rows = db.prepare(`${USER_SELECT} WHERE ${NOT_SYSTEM_ADMIN} AND ${w.sql} ORDER BY u.code`).all(...w.params);
     res.json({ users: rows.map(mapUser) });
   });
   r.post("/users", requireRole("hr"), (req, res) => {
@@ -958,14 +980,14 @@ function attendanceRoutes(ctx) {
   r.get("/stats", (req, res) => {
     const w = scopeWhere(scopeFor(currentUser(req)), "u.id", "u.department_id");
     const date = toVnDate(ctx.now());
-    const total = db.prepare(`SELECT COUNT(*) AS c FROM users u WHERE u.status = 'active' AND ${w.sql}`).get(...w.params);
+    const total = db.prepare(`SELECT COUNT(*) AS c FROM users u WHERE u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${w.sql}`).get(...w.params);
     const day = db.prepare(
       `SELECT COUNT(*) AS present,
            SUM(CASE WHEN a.late_minutes = 0 THEN 1 ELSE 0 END) AS on_time,
            SUM(CASE WHEN a.late_minutes > 0 THEN 1 ELSE 0 END) AS late,
            SUM(CASE WHEN a.status = 'missing_out' THEN 1 ELSE 0 END) AS missing_out
          FROM attendance_days a JOIN users u ON u.id = a.user_id
-         WHERE a.work_date = ? AND u.status = 'active' AND ${w.sql}`
+         WHERE a.work_date = ? AND u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${w.sql}`
     ).get(date, ...w.params);
     const pending = db.prepare(`SELECT COUNT(*) AS c FROM requests r JOIN users u ON u.id = r.user_id WHERE r.status = 'pending' AND ${w.sql}`).get(...w.params);
     const cameras = db.prepare("SELECT COUNT(*) AS c FROM cameras").get();
@@ -1579,26 +1601,6 @@ function createApp(ctx) {
   app.use("/api", (_req, _res, next) => next(new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y")));
   app.use(errorHandler(ctx.config.production));
   return app;
-}
-
-// server/bootstrap.ts
-var DEFAULT_ADMIN_PASSWORD = "Admin@123";
-function ensureAdminAccess(db, envPassword) {
-  const usable = db.prepare("SELECT 1 FROM users WHERE role = 'hr' AND status = 'active' AND password_hash IS NOT NULL LIMIT 1").get();
-  if (usable) return null;
-  const fromEnv = typeof envPassword === "string" && envPassword.length >= 8;
-  const password = fromEnv ? envPassword : DEFAULT_ADMIN_PASSWORD;
-  let hr = db.prepare("SELECT id, code FROM users WHERE role = 'hr' ORDER BY created_at, id LIMIT 1").get();
-  if (!hr) {
-    db.prepare(
-      `INSERT INTO users(id, code, name, role, status, must_change_password, created_at)
-       VALUES (?, 'ADMIN', 'Qu\u1EA3n tr\u1ECB vi\xEAn H\u1EC7 th\u1ED1ng (HR)', 'hr', 'active', 1, ?)
-       ON CONFLICT(code) DO UPDATE SET role = 'hr', status = 'active'`
-    ).run(newId("usr"), toVnDate(Date.now()));
-    hr = db.prepare("SELECT id, code FROM users WHERE code = 'ADMIN'").get();
-  }
-  db.prepare("UPDATE users SET password_hash = ?, must_change_password = 1, status = 'active' WHERE id = ?").run(hashPassword(password), hr.id);
-  return { code: hr.code, password, fromEnv };
 }
 
 // server/jobs.ts
