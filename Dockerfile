@@ -1,39 +1,23 @@
-# Build stage
-FROM node:20-alpine AS builder
-
-WORKDIR /app
-
-# Copy dependency manifests
-COPY package.json ./
-RUN npm install
-
-# Copy source code and build frontend
-COPY . .
-RUN npm run build
-
-# Production stage
-FROM node:20-alpine AS runner
+FROM node:20-alpine
 
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
 
-# Install production dependencies and tsx for running server
+# Install dependencies (without dev audit overhead to save RAM)
 COPY package.json ./
-RUN npm install --omit=dev && npm install -g tsx
+RUN npm install --no-audit --no-fund
 
-# Copy built frontend assets and server code
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/server.ts ./server.ts
-COPY --from=builder /app/data ./data
-COPY --from=builder /app/index.html ./index.html
+# Copy code
+COPY . .
 
-# Expose server port
+# Build frontend
+RUN npm run build
+
+# Expose port
 EXPOSE 3000
 
-# Volume for persistent attendance database
 VOLUME ["/app/data"]
 
-# Run server
-CMD ["tsx", "server.ts"]
+CMD ["npx", "tsx", "server.ts"]
