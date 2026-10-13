@@ -45,7 +45,7 @@ Bảng công tháng / xuất Excel, nghỉ phép đầy đủ (khoảng ngày, s
 ```
 server/
   index.ts          khởi động: kiểm tra Node ≥ 22.13, mở DB, gắn middleware, routes, lịch chạy, Vite/dist
-  db.ts             mở SQLite, PRAGMA, tạo bảng (schema version), chuyển dữ liệu từ JSON
+  db.ts             mở SQLite, PRAGMA, tạo bảng (schema version)
   auth.ts           hashPassword/verifyPassword (scrypt), phiên, requireAuth, requireRole, scopeFor, giới hạn đăng nhập
   attendance.ts     hàm thuần: toVnDate, computeDay; hàm recomputeDay(db, userId, date)
   hanet.ts          parse payload webhook, gọi API Hanet (token, refresh, getCheckinByPlaceIdInTimestamp)
@@ -131,16 +131,10 @@ webhook_logs(
 
 Tên phòng ban, tên trưởng phòng, tên nhân viên lấy bằng JOIN khi trả API; không lưu bản chép lặp.
 
-### Chuyển dữ liệu từ JSON
-Khi khởi động, nếu bảng `users` trống và tồn tại `data/database.json`:
-1. Chép `database.json` sang `data/backups/database.json.pre-migration`.
-2. Trong một transaction: nhập departments, users (mọi tài khoản `must_change_password=1`, `password_hash=NULL` — HR đặt lại mật khẩu cho từng người), cameras, requests, cấu hình Hanet; nhập `attendanceEvents` vào `detections` (`source='webhook'`, `work_date` tính lại theo giờ VN từ `timestamp`), rồi `recomputeDay` cho mọi cặp (user, ngày).
-3. Đổi tên file thành `database.json.migrated`.
-Lỗi ở bất kỳ bước nào → rollback, không đổi tên file, dừng khởi động với thông báo rõ ràng.
+### Dữ liệu cũ
+Không chuyển dữ liệu từ `data/database.json`: toàn bộ dữ liệu trong đó là dữ liệu thử nghiệm. File bị xóa khỏi repo và server mới không đọc nó. Hệ thống khởi động với CSDL trống, chỉ có tài khoản `ADMIN` (xem mục 5).
 
-Nếu `users` trống và không có JSON: tạo tài khoản HR `ADMIN` (xem mục 5).
-
-`data/` được thêm vào `.gitignore` và gỡ khỏi git (`git rm --cached`).
+`data/` được thêm vào `.gitignore`.
 
 ## 5. Đăng nhập và phân quyền
 
@@ -156,8 +150,9 @@ Nếu `users` trống và không có JSON: tạo tài khoản HR `ADMIN` (xem m�
 - Giới hạn đăng nhập: 5 lần sai trong 15 phút theo khóa `code|ip` → trả 429 đến hết cửa sổ. Bộ đếm trong bộ nhớ.
 
 ### Tài khoản HR đầu tiên
-Khi tạo tài khoản `ADMIN`: dùng `ADMIN_INITIAL_PASSWORD` nếu có, nếu không thì sinh mật khẩu tạm và in một lần ra log (`[BOOTSTRAP] Mật khẩu tạm tài khoản ADMIN: ...`). `must_change_password=1`.
-Sau chuyển dữ liệu từ JSON, nếu không có HR nào có mật khẩu: đặt mật khẩu tạm cho tài khoản HR đầu tiên theo cùng cách và in ra log.
+Khi không có HR nào đăng nhập được (CSDL trống), hệ thống tạo tài khoản HR mã `ADMIN` với mật khẩu mặc định **`Admin@123`**, ghi trong DEPLOY.md. Nếu đặt biến `ADMIN_INITIAL_PASSWORD` (≥ 8 ký tự) thì dùng giá trị đó thay cho mật khẩu mặc định. `must_change_password=1`: lần đăng nhập đầu bắt buộc đổi mật khẩu.
+
+Rủi ro đã chấp nhận: trong khoảng từ lúc server chạy đến lúc HR đăng nhập lần đầu, ai biết mật khẩu mặc định cũng vào được. DEPLOY.md hướng dẫn đăng nhập và đổi mật khẩu ngay sau khi khởi động (hoặc đặt `ADMIN_INITIAL_PASSWORD`). Log khởi động in nhắc nhở `[BOOTSTRAP]`.
 
 ### API xác thực
 | API | Mô tả |
@@ -274,7 +269,7 @@ Chỉ duyệt được yêu cầu `pending`; duyệt lại → 409.
 
 ### Sao lưu (`server/backup.ts`)
 - `VACUUM INTO 'data/backups/attendance-YYYY-MM-DD[-HHmm-<lý do>].db'`.
-- Tự động 02:00 giờ VN hằng ngày; trước khi chuyển dữ liệu JSON; trước khi xóa dữ liệu; khi HR bấm "Sao lưu ngay".
+- Tự động 02:00 giờ VN hằng ngày; trước khi xóa dữ liệu; khi HR bấm "Sao lưu ngay".
 - Giữ 30 bản sao lưu hằng ngày mới nhất; bản theo lý do (pre-reset, manual) giữ 30 bản riêng.
 - `GET /api/admin/backups` (danh sách), `POST /api/admin/backups` (tạo), `GET /api/admin/backups/latest` (tải về). Chỉ HR.
 
@@ -286,7 +281,7 @@ Một `setInterval` mỗi phút kiểm tra giờ VN và chạy: sao lưu (02:00)
 - Cổng 3001 thống nhất ở `ecosystem.config.cjs`, `Dockerfile` (`node:22-alpine`), `docker-compose.yml`.
 - `app.set('trust proxy', 1)` khi `TRUST_PROXY=1` (mặc định bật trong cấu hình PM2/Docker vì chạy sau nginx).
 - `GET /api/health` → `{ok:true}` sau khi chạy `SELECT 1`; 503 nếu lỗi.
-- DEPLOY.md: bỏ hướng dẫn Render Free; yêu cầu Node 22.13+; cấu hình nginx HTTPS; URL webhook có token; lấy mật khẩu ADMIN từ `pm2 logs`; chép `data/backups` ra ngoài (ví dụ rsync/rclone); quy trình nâng cấp từ bản JSON.
+- DEPLOY.md: bỏ hướng dẫn Render Free; yêu cầu Node 22.13+; cấu hình nginx HTTPS; URL webhook có token; tài khoản mặc định `ADMIN` / `Admin@123` và việc đổi mật khẩu ngay; chép `data/backups` ra ngoài (ví dụ rsync/rclone); quy trình nâng cấp từ bản cũ (bỏ dữ liệu thử nghiệm).
 - Giữ cách commit sẵn `dist/` và `server.js`.
 
 ### Xử lý lỗi và log
@@ -309,7 +304,7 @@ Công cụ: `node:test` + `node:assert`, chạy bằng `tsx --test`. Script `npm
 - Config Hanet trả secret đã che.
 - Webhook: sai token 401; đúng token tạo detection + attendance_day; gửi trùng không tạo thêm; người lạ bị bỏ qua; aliasID khớp không phân biệt hoa thường.
 - Duyệt `late_explanation`, `missed_punch` thay đổi đúng dòng ngày; duyệt lại 409.
-- Chuyển dữ liệu: file JSON mẫu (định dạng hiện tại) → đúng số bản ghi, file đổi tên, `attendance_days` được tính; JSON hỏng → khởi động thất bại, file không bị đổi tên/ghi đè.
+- Khởi tạo: CSDL trống → có đúng một tài khoản `ADMIN`, đăng nhập bằng `Admin@123` bị buộc đổi mật khẩu; khởi động lần hai không tạo thêm hay đặt lại mật khẩu.
 - Reset: sai mật khẩu 403; đúng → có bản sao lưu, HR thao tác vẫn đăng nhập được.
 
 **Đối soát Hanet**: hàm gọi API nhận `fetch` được tiêm vào để test với dữ liệu giả: phân trang, refresh khi `-103`, trùng với webhook không tạo bản ghi mới.
@@ -319,4 +314,4 @@ Công cụ: `node:test` + `node:assert`, chạy bằng `tsx --test`. Script `npm
 - Không còn `switch-user`, `currentUserId`, khớp theo tên, `toISOString().split('T')[0]` cho ngày công, giờ làm viết cứng.
 - `data/` không còn trong git.
 - Chạy thử với `TZ=UTC`: lượt nhận diện 08:30 giờ VN hiển thị muộn 30 phút, đúng ngày.
-- Nâng cấp từ `data/database.json` hiện tại chạy được và HR đăng nhập được bằng mật khẩu tạm trong log.
+- Khởi động trên CSDL trống chỉ tạo tài khoản `ADMIN`; đăng nhập được bằng `Admin@123` và bị buộc đổi mật khẩu. `data/database.json` không còn trong repo.

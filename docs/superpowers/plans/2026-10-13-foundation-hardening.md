@@ -23,6 +23,7 @@
 - Giờ làm mặc định: vào 08:00, cho muộn 15 phút, ra 17:00, ngưỡng giờ ra 30 phút.
 - `webhook_logs` giữ 500 dòng; sao lưu giữ 30 bản hằng ngày + 30 bản khác.
 - Sai mật khẩu khi xác nhận thao tác (đổi mật khẩu, xóa dữ liệu) trả **400**, để **403** chỉ mang nghĩa "không có quyền".
+- Không chuyển dữ liệu từ `data/database.json` (toàn dữ liệu thử nghiệm). CSDL mới khởi động trống, chỉ có tài khoản HR mã `ADMIN`, mật khẩu mặc định `Admin@123` (hoặc `ADMIN_INITIAL_PASSWORD` nếu đặt, ≥ 8 ký tự), bắt buộc đổi ở lần đăng nhập đầu.
 - Sau mỗi task server: `npm test` và `npm run lint` phải pass.
 
 ## Review Focus
@@ -38,7 +39,7 @@
 ```
 server/
   check-node.ts      dừng nếu Node < 22.13 (import đầu tiên của index.ts)
-  index.ts           entry: mở DB, chuyển dữ liệu JSON, tạo ADMIN, Vite/dist, lịch chạy, listen
+  index.ts           entry: mở DB, tạo ADMIN mặc định, Vite/dist, lịch chạy, listen
   app.ts             createApp(ctx): middleware + routes, không listen
   context.ts         AppConfig, AppContext
   db.ts              openDb, tx, newId, schema
@@ -53,11 +54,10 @@ server/
   hanet.ts           parseCheckin, ingestCheckin, logWebhook, token webhook, cấu hình Hanet
   hanet-api.ts       gọi API Hanet, refresh token, đối soát
   backup.ts          VACUUM INTO, xoay vòng
-  migrate.ts         chuyển dữ liệu từ database.json
   jobs.ts            dueJobs, startJobs
   routes/            auth, users, departments, cameras, attendance, settings, requests, hanet, admin
 shared/types.ts      types dùng chung server + React
-tests/               *.test.ts, helpers.ts, fixtures/legacy-database.json
+tests/               *.test.ts, helpers.ts
 src/                 React: api.ts, format.ts, components/...
 ```
 
@@ -99,7 +99,7 @@ Thay khối `"scripts"` bằng:
   },
 ```
 
-(`server/index.ts` được tạo ở Task 13; trước đó vẫn chạy được server cũ bằng `npx tsx server.ts`.)
+(`server/index.ts` được tạo ở Task 12; trước đó vẫn chạy được server cũ bằng `npx tsx server.ts`.)
 
 - [ ] **Step 3: Cập nhật `tsconfig.json`**
 
@@ -117,7 +117,7 @@ Thêm cuối file `.gitignore`:
 data/
 ```
 
-(Gỡ `data/database.json` khỏi git làm ở Task 16, cùng hướng dẫn nâng cấp.)
+(Xóa hẳn `data/database.json` khỏi repo làm ở Task 15, cùng hướng dẫn nâng cấp.)
 
 - [ ] **Step 5: Tạo `shared/types.ts`**
 
@@ -1631,7 +1631,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `server/middleware.ts`: `SESSION_COOKIE = 'sid'`, `readCookie(req, name)`, `setSessionCookie(res, token, ctx)`, `clearSessionCookie(res, ctx)`, `requireAuth(ctx)`, `mustChangeGate`, `requireRole(...roles)`, `jsonOnly`, `currentUser(req): AuthUser`; mở rộng `Express.Request` với `user?: AuthUser`, `sessionToken?: string`
   - `server/repo.ts`: `USER_SELECT`, `mapUser(row): User`, `getUser(db, id): User | null`, `canSeeUser(viewer: AuthUser, target: { id: string; departmentId: string | null }): boolean`
   - `server/routes/auth.ts`: `authPublicRoutes(ctx): Router` (POST `/auth/login`), `authRoutes(ctx): Router` (GET `/auth/me`, POST `/auth/logout`, POST `/auth/change-password`)
-  - `server/bootstrap.ts`: `ensureAdminAccess(db, envPassword?: string): { code: string; password: string; fromEnv: boolean } | null`
+  - `server/bootstrap.ts`: `DEFAULT_ADMIN_PASSWORD = 'Admin@123'`; `ensureAdminAccess(db, envPassword?: string): { code: string; password: string; fromEnv: boolean } | null`
   - `server/app.ts`: `createApp(ctx: AppContext): express.Express`. Router `api` (cần đăng nhập) là nơi các task sau thêm `api.use(xxxRoutes(ctx))`.
   - `tests/helpers.ts`: `startTestApp(overrides?)`, `TestApp { baseUrl, ctx, db, close }`, `Client` (`get/post/put/del/req`, tự giữ cookie), `loginAs(app, code, password?)`
 
@@ -1930,16 +1930,18 @@ test('JSON hỏng → 400', async () => {
 ```ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ensureAdminAccess } from '../server/bootstrap';
-import { verifyPassword } from '../server/auth';
+import { ensureAdminAccess, DEFAULT_ADMIN_PASSWORD } from '../server/bootstrap';
+import { hashPassword, verifyPassword } from '../server/auth';
 import { freshDb, seedUser } from './helpers';
 
-test('DB trống → tạo ADMIN với mật khẩu tạm, bắt đổi', () => {
+test('DB trống → tạo đúng một tài khoản ADMIN / Admin@123, bắt đổi', () => {
   const db = freshDb();
   const r = ensureAdminAccess(db, undefined)!;
   assert.equal(r.code, 'ADMIN');
   assert.equal(r.fromEnv, false);
-  assert.equal(r.password.length, 10);
+  assert.equal(r.password, DEFAULT_ADMIN_PASSWORD);
+  assert.equal(DEFAULT_ADMIN_PASSWORD, 'Admin@123');
+  assert.equal((db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number }).c, 1);
   const row = db.prepare("SELECT role, status, password_hash, must_change_password FROM users WHERE code = 'ADMIN'").get() as Record<string, any>;
   assert.equal(row.role, 'hr');
   assert.equal(row.status, 'active');
@@ -1955,9 +1957,19 @@ test('dùng ADMIN_INITIAL_PASSWORD nếu đủ 8 ký tự', () => {
   assert.equal(r.password, 'BatDau@2026');
   const short = ensureAdminAccess(freshDb(), 'ngan')!;
   assert.equal(short.fromEnv, false);
+  assert.equal(short.password, DEFAULT_ADMIN_PASSWORD, 'ngắn hơn 8 ký tự thì dùng mật khẩu mặc định');
 });
 
-test('HR có sẵn nhưng chưa có mật khẩu → cấp mật khẩu tạm cho HR đó', () => {
+test('đã đổi mật khẩu thì khởi động lại không đặt lại', () => {
+  const db = freshDb();
+  ensureAdminAccess(db, undefined);
+  db.prepare("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE code = 'ADMIN'").run(hashPassword('MatKhauMoi@1'));
+  assert.equal(ensureAdminAccess(db, undefined), null);
+  const row = db.prepare("SELECT password_hash FROM users WHERE code = 'ADMIN'").get() as { password_hash: string };
+  assert.ok(verifyPassword('MatKhauMoi@1', row.password_hash));
+});
+
+test('HR có sẵn nhưng chưa có mật khẩu → đặt mật khẩu mặc định cho HR đó', () => {
   const db = freshDb();
   seedUser(db, { code: 'HR01', role: 'hr', password: null });
   seedUser(db, { code: 'NV01' });
@@ -2188,8 +2200,11 @@ export function authRoutes(ctx: AppContext): Router {
 ```ts
 import type { Db } from './db';
 import { newId } from './db';
-import { generateTempPassword, hashPassword } from './auth';
+import { hashPassword } from './auth';
 import { toVnDate } from './vntime';
+
+/** Mật khẩu mặc định của tài khoản ADMIN, ghi trong DEPLOY.md. Bắt buộc đổi ở lần đăng nhập đầu. */
+export const DEFAULT_ADMIN_PASSWORD = 'Admin@123';
 
 /**
  * Đảm bảo luôn có ít nhất một HR đăng nhập được.
@@ -2200,7 +2215,7 @@ export function ensureAdminAccess(db: Db, envPassword?: string): { code: string;
   if (usable) return null;
 
   const fromEnv = typeof envPassword === 'string' && envPassword.length >= 8;
-  const password = fromEnv ? (envPassword as string) : generateTempPassword();
+  const password = fromEnv ? (envPassword as string) : DEFAULT_ADMIN_PASSWORD;
 
   let hr = db.prepare("SELECT id, code FROM users WHERE role = 'hr' ORDER BY created_at, id LIMIT 1").get() as
     | { id: string; code: string }
@@ -4445,12 +4460,12 @@ test('pruneBackups giữ 30 bản hằng ngày và 30 bản khác', () => {
     fs.writeFileSync(path.join(dir, `attendance-${day}.db`), '');
     fs.writeFileSync(path.join(dir, `attendance-${day}-120000-manual.db`), '');
   }
-  fs.writeFileSync(path.join(dir, 'database.json.pre-migration'), '{}');
+  fs.writeFileSync(path.join(dir, 'ghi-chu.txt'), 'x');
   pruneBackups(dir);
   const names = fs.readdirSync(dir);
   assert.equal(names.filter((n) => /^attendance-\d{4}-\d{2}-\d{2}\.db$/.test(n)).length, BACKUP_KEEP);
   assert.equal(names.filter((n) => n.endsWith('-manual.db')).length, BACKUP_KEEP);
-  assert.ok(names.includes('database.json.pre-migration'), 'không đụng tới file khác');
+  assert.ok(names.includes('ghi-chu.txt'), 'không đụng tới file khác');
   assert.ok(!names.includes('attendance-2026-08-01.db'), 'xóa bản cũ nhất');
   assert.ok(names.includes('attendance-2026-09-04.db'));
 });
@@ -4659,365 +4674,14 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 12: Chuyển dữ liệu từ `data/database.json`
-
-**Files:**
-- Create: `server/migrate.ts`, `tests/fixtures/legacy-database.json`, `tests/migrate.test.ts`
-
-**Interfaces:**
-- Consumes: `tx`, `newId` (Task 1); `recomputeDay` (Task 4); `setSetting` (Task 4); `toVnDate` (Task 2); `ensureAdminAccess` (Task 5, chỉ trong test)
-- Produces (`server/migrate.ts`):
-  - `interface MigrationCounts { departments: number; users: number; cameras: number; detections: number; requests: number }`
-  - `migrateFromJson(db, jsonPath, backupDir): MigrationCounts | null` — `null` nếu DB đã có người dùng hoặc không có file JSON. Ném `Error` nếu JSON hỏng hoặc dữ liệu vi phạm ràng buộc; khi đó DB không đổi và file JSON giữ nguyên tên.
-
-**Quy tắc chuyển:**
-- Mã nhân viên/phòng ban: trim + viết hoa. `departmentId: ''` → `NULL`.
-- `hanetPersonId` dạng giả `HANET_P_<số>` (do server cũ sinh ngẫu nhiên) → `NULL`.
-- Mọi người dùng: `password_hash = NULL`, `must_change_password = 1`. HR đặt lại mật khẩu cho từng người. HR đầu tiên được `ensureAdminAccess` cấp mật khẩu tạm lúc khởi động.
-- `attendanceEvents` → `detections`: `device_id = cameraId` (rỗng thì `'UNKNOWN'`), `work_date` tính lại theo giờ VN từ `timestamp`, `source = 'simulator'` nếu id bắt đầu `att-sim`, còn lại `'webhook'`. Bỏ qua lượt của người dùng không tồn tại.
-- `requests`: `suggestedTime` → `suggested_in`; `reviewedBy` (tên) → id người dùng trùng tên, không có thì `NULL`.
-- `config`: `clientId`, `clientSecret`, `accessToken` (nếu có) → `settings`; `masterPlaceId > 0` → `hanet.place_ids = [masterPlaceId]`.
-- Tính lại `attendance_days` cho mọi (nhân viên, ngày) có lượt. Không áp lại các điều chỉnh của server cũ.
-- Trước khi ghi: chép file sang `<backupDir>/database.json.pre-migration`. Thành công: đổi tên thành `database.json.migrated`.
-
-- [ ] **Step 1: Tạo fixture `tests/fixtures/legacy-database.json`**
-
-```json
-{
-  "config": {
-    "clientId": "cid",
-    "clientSecret": "csecret",
-    "accessToken": "tok",
-    "tokenExpiresAt": "",
-    "webhookSecret": "",
-    "masterPlaceId": 1042,
-    "masterPlaceName": "Trụ sở",
-    "autoSync": true
-  },
-  "departments": [
-    { "id": "dep-kt", "code": "kt", "name": "Kế toán", "description": "", "managerId": "usr-m1", "managerName": "Trần Thị B", "createdAt": "2026-10-01" },
-    { "id": "dep-kd", "code": "KD", "name": "Kinh doanh", "description": "", "managerId": "", "managerName": "Chưa chỉ định", "createdAt": "2026-10-01" }
-  ],
-  "users": [
-    { "id": "usr-admin", "code": "ADMIN", "name": "Quản trị viên Hệ thống (HR)", "email": "admin@company.com", "phone": "", "role": "hr", "departmentId": "", "departmentName": "Ban Quản trị", "position": "Quản trị viên", "avatarUrl": "", "hanetPersonId": "", "faceRegistered": false, "status": "active", "createdAt": "2026-10-01" },
-    { "id": "usr-m1", "code": "PLX-TP01", "name": "Trần Thị B", "email": "", "phone": "", "role": "dept_manager", "departmentId": "dep-kt", "departmentName": "Kế toán", "position": "Trưởng phòng", "avatarUrl": "", "hanetPersonId": "2134589559210508288", "faceRegistered": true, "status": "active", "createdAt": "2026-10-01" },
-    { "id": "usr-e1", "code": "plx-nv01", "name": "Nguyễn Văn A", "email": "", "phone": "", "role": "employee", "departmentId": "dep-kt", "departmentName": "Kế toán", "position": "Nhân viên", "avatarUrl": "", "hanetPersonId": "HANET_P_1234", "faceRegistered": true, "status": "active", "createdAt": "2026-10-01" }
-  ],
-  "cameras": [
-    { "id": "cam-01", "name": "Cửa chính", "deviceKey": "C2037", "placeId": 1042, "placeName": "Trụ sở", "location": "Tầng 1", "status": "online", "lastPing": "2026-10-12T00:00:00.000Z", "ipAddress": "192.168.1.50" }
-  ],
-  "attendanceEvents": [
-    { "id": "att-evt-1", "employeeId": "usr-e1", "cameraId": "C2037", "cameraName": "Cửa chính", "placeId": 1042, "timestamp": 1791768600000, "detectedImageUrl": "https://img/1.jpg", "type": "check_in", "status": "late" },
-    { "id": "att-evt-2", "employeeId": "usr-e1", "cameraId": "C2037", "cameraName": "Cửa chính", "placeId": 1042, "timestamp": 1791801000000, "detectedImageUrl": "", "type": "check_in", "status": "on_time" },
-    { "id": "att-sim-3", "employeeId": "usr-e1", "cameraId": "", "cameraName": "Mô phỏng", "placeId": 1042, "timestamp": 1791826200000, "detectedImageUrl": "", "type": "check_in", "status": "on_time" },
-    { "id": "att-evt-4", "employeeId": "usr-deleted", "cameraId": "C2037", "cameraName": "Cửa chính", "placeId": 1042, "timestamp": 1791768600000, "detectedImageUrl": "", "type": "check_in", "status": "on_time" }
-  ],
-  "requests": [
-    { "id": "req-1", "employeeId": "usr-e1", "employeeName": "Nguyễn Văn A", "departmentId": "dep-kt", "date": "2026-10-12", "type": "late_explanation", "reason": "Tắc đường", "suggestedTime": "08:10", "status": "approved", "reviewedBy": "Trần Thị B", "reviewedAt": "2026-10-12T05:00:00.000Z", "comment": "ok", "createdAt": "2026-10-12T04:00:00.000Z" }
-  ],
-  "webhookLogs": [],
-  "currentUserId": "usr-admin"
-}
-```
-
-(Các timestamp: 1791768600000 = 12/10/2026 08:30 VN; 1791801000000 = 12/10 17:30 VN; 1791826200000 = 13/10 00:30 VN.)
-
-- [ ] **Step 2: Viết test thất bại `tests/migrate.test.ts`**
-
-```ts
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { migrateFromJson } from '../server/migrate';
-import { ensureAdminAccess } from '../server/bootstrap';
-import { getSetting } from '../server/settings';
-import { freshDb, seedUser, startTestApp, loginAs } from './helpers';
-
-const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'legacy-database.json');
-
-function workspace(content = fs.readFileSync(FIXTURE, 'utf-8')) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hgc-mig-'));
-  const jsonPath = path.join(dir, 'database.json');
-  fs.writeFileSync(jsonPath, content);
-  return { dir, jsonPath, backupDir: path.join(dir, 'backups') };
-}
-
-test('chuyển đủ dữ liệu, đổi tên file, có bản sao trước khi chuyển', () => {
-  const db = freshDb();
-  const ws = workspace();
-  const counts = migrateFromJson(db, ws.jsonPath, ws.backupDir)!;
-  assert.deepEqual(counts, { departments: 2, users: 3, cameras: 1, detections: 3, requests: 1 });
-  assert.equal(fs.existsSync(ws.jsonPath), false);
-  assert.ok(fs.existsSync(`${ws.jsonPath}.migrated`));
-  assert.ok(fs.existsSync(path.join(ws.backupDir, 'database.json.pre-migration')));
-
-  const e1 = db.prepare("SELECT code, department_id, hanet_person_id, password_hash, must_change_password FROM users WHERE id = 'usr-e1'").get() as Record<string, any>;
-  assert.deepEqual({ ...e1 }, { code: 'PLX-NV01', department_id: 'dep-kt', hanet_person_id: null, password_hash: null, must_change_password: 1 });
-  const m1 = db.prepare("SELECT hanet_person_id FROM users WHERE id = 'usr-m1'").get() as { hanet_person_id: string };
-  assert.equal(m1.hanet_person_id, '2134589559210508288', 'personID thật được giữ');
-  const admin = db.prepare("SELECT department_id FROM users WHERE id = 'usr-admin'").get() as { department_id: string | null };
-  assert.equal(admin.department_id, null);
-  const kt = db.prepare("SELECT code, manager_id FROM departments WHERE id = 'dep-kt'").get() as { code: string; manager_id: string };
-  assert.deepEqual({ ...kt }, { code: 'KT', manager_id: 'usr-m1' });
-
-  const days = db.prepare("SELECT work_date, status, late_minutes, detection_count FROM attendance_days WHERE user_id = 'usr-e1' ORDER BY work_date").all() as Record<string, any>[];
-  assert.deepEqual(days.map((d) => ({ ...d })), [
-    { work_date: '2026-10-12', status: 'late', late_minutes: 30, detection_count: 2 },
-    { work_date: '2026-10-13', status: 'missing_out', late_minutes: 0, detection_count: 1 },
-  ]);
-  const sim = db.prepare("SELECT source, device_id FROM detections WHERE work_date = '2026-10-13'").get() as { source: string; device_id: string };
-  assert.deepEqual({ ...sim }, { source: 'simulator', device_id: 'UNKNOWN' });
-
-  const req = db.prepare("SELECT work_date, suggested_in, reviewed_by, status FROM requests WHERE id = 'req-1'").get() as Record<string, any>;
-  assert.deepEqual({ ...req }, { work_date: '2026-10-12', suggested_in: '08:10', reviewed_by: 'usr-m1', status: 'approved' });
-
-  assert.equal(getSetting(db, 'hanet.client_id'), 'cid');
-  assert.equal(getSetting(db, 'hanet.client_secret'), 'csecret');
-  assert.equal(getSetting(db, 'hanet.place_ids'), '[1042]');
-});
-
-test('sau khi chuyển, HR đầu tiên đăng nhập được bằng mật khẩu tạm', async () => {
-  const db = freshDb();
-  const ws = workspace();
-  migrateFromJson(db, ws.jsonPath, ws.backupDir);
-  const admin = ensureAdminAccess(db, undefined)!;
-  assert.equal(admin.code, 'ADMIN');
-  const app = await startTestApp({ db });
-  try {
-    const c = await loginAs(app, 'ADMIN', admin.password);
-    assert.equal((await c.get('/api/auth/me')).body.mustChangePassword, true);
-  } finally {
-    await app.close();
-  }
-});
-
-test('không làm gì khi DB đã có người dùng hoặc không có file', () => {
-  const db = freshDb();
-  seedUser(db, { code: 'X' });
-  const ws = workspace();
-  assert.equal(migrateFromJson(db, ws.jsonPath, ws.backupDir), null);
-  assert.ok(fs.existsSync(ws.jsonPath), 'file giữ nguyên');
-  assert.equal(migrateFromJson(freshDb(), path.join(ws.dir, 'khong-co.json'), ws.backupDir), null);
-});
-
-test('JSON hỏng → ném lỗi, DB trống, file không bị đổi tên', () => {
-  const db = freshDb();
-  const ws = workspace('{ "users": [ ');
-  assert.throws(() => migrateFromJson(db, ws.jsonPath, ws.backupDir), /Không đọc được/);
-  assert.ok(fs.existsSync(ws.jsonPath));
-  assert.equal((db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number }).c, 0);
-});
-
-test('trùng mã nhân viên → rollback toàn bộ, file giữ nguyên', () => {
-  const legacy = JSON.parse(fs.readFileSync(FIXTURE, 'utf-8'));
-  legacy.users.push({ ...legacy.users[2], id: 'usr-e2', code: 'PLX-NV01' });
-  const db = freshDb();
-  const ws = workspace(JSON.stringify(legacy));
-  assert.throws(() => migrateFromJson(db, ws.jsonPath, ws.backupDir));
-  assert.ok(fs.existsSync(ws.jsonPath));
-  for (const t of ['users', 'departments', 'detections']) {
-    assert.equal((db.prepare(`SELECT COUNT(*) AS c FROM ${t}`).get() as { c: number }).c, 0, t);
-  }
-});
-```
-
-- [ ] **Step 3: Chạy test, xác nhận thất bại**
-
-Run: `npm test`
-Expected: FAIL, không tìm thấy `../server/migrate`.
-
-- [ ] **Step 4: Tạo `server/migrate.ts`**
-
-```ts
-import fs from 'node:fs';
-import path from 'node:path';
-import type { Db } from './db';
-import { tx } from './db';
-import { recomputeDay } from './attendance';
-import { setSetting } from './settings';
-import { toVnDate } from './vntime';
-
-export interface MigrationCounts {
-  departments: number;
-  users: number;
-  cameras: number;
-  detections: number;
-  requests: number;
-}
-
-type Legacy = Record<string, any>;
-
-const ROLES = new Set(['hr', 'dept_manager', 'employee']);
-const REQUEST_TYPES = new Set(['missed_punch', 'late_explanation', 'leave_request']);
-const REQUEST_STATUSES = new Set(['pending', 'approved', 'rejected']);
-const FAKE_PERSON_ID = /^HANET_P_\d+$/;
-
-const text = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v.trim() : fallback);
-const orNull = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
-const list = (v: unknown): Legacy[] => (Array.isArray(v) ? v : []);
-
-export function migrateFromJson(db: Db, jsonPath: string, backupDir: string): MigrationCounts | null {
-  if (db.prepare('SELECT 1 FROM users LIMIT 1').get() || !fs.existsSync(jsonPath)) return null;
-
-  let legacy: Legacy;
-  try {
-    legacy = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
-  } catch (err) {
-    throw new Error(`Không đọc được ${jsonPath}: ${(err as Error).message}. Dữ liệu cũ được giữ nguyên.`);
-  }
-
-  fs.mkdirSync(backupDir, { recursive: true });
-  fs.copyFileSync(jsonPath, path.join(backupDir, 'database.json.pre-migration'));
-  const today = toVnDate(Date.now());
-
-  const counts = tx(db, () => {
-    const c: MigrationCounts = { departments: 0, users: 0, cameras: 0, detections: 0, requests: 0 };
-
-    const deptIds = new Set<string>();
-    for (const d of list(legacy.departments)) {
-      db.prepare('INSERT INTO departments(id, code, name, description, manager_id, created_at) VALUES (?, ?, ?, ?, NULL, ?)').run(
-        d.id,
-        text(d.code).toUpperCase(),
-        text(d.name),
-        text(d.description),
-        text(d.createdAt, today) || today,
-      );
-      deptIds.add(d.id);
-      c.departments++;
-    }
-
-    const userIds = new Set<string>();
-    const userIdByName = new Map<string, string>();
-    for (const u of list(legacy.users)) {
-      const personId = orNull(u.hanetPersonId);
-      db.prepare(
-        `INSERT INTO users(id, code, name, email, phone, role, department_id, position, avatar_url, hanet_person_id,
-           face_registered, status, password_hash, must_change_password, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, ?)`,
-      ).run(
-        u.id,
-        text(u.code).toUpperCase(),
-        text(u.name),
-        text(u.email),
-        text(u.phone),
-        ROLES.has(u.role) ? u.role : 'employee',
-        deptIds.has(u.departmentId) ? u.departmentId : null,
-        text(u.position),
-        text(u.avatarUrl),
-        personId && !FAKE_PERSON_ID.test(personId) ? personId : null,
-        u.faceRegistered ? 1 : 0,
-        u.status === 'inactive' ? 'inactive' : 'active',
-        text(u.createdAt, today) || today,
-      );
-      userIds.add(u.id);
-      if (!userIdByName.has(text(u.name))) userIdByName.set(text(u.name), u.id);
-      c.users++;
-    }
-
-    for (const d of list(legacy.departments)) {
-      if (userIds.has(d.managerId)) db.prepare('UPDATE departments SET manager_id = ? WHERE id = ?').run(d.managerId, d.id);
-    }
-
-    for (const cam of list(legacy.cameras)) {
-      const r = db
-        .prepare(
-          `INSERT INTO cameras(id, name, device_key, place_id, place_name, location, ip_address, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(device_key) DO NOTHING`,
-        )
-        .run(cam.id, text(cam.name), text(cam.deviceKey), Number.isInteger(cam.placeId) ? cam.placeId : null, text(cam.placeName), text(cam.location), text(cam.ipAddress), text(cam.lastPing, today) || today);
-      c.cameras += Number(r.changes);
-    }
-
-    const pairs = new Set<string>();
-    for (const e of list(legacy.attendanceEvents)) {
-      if (!userIds.has(e.employeeId) || typeof e.timestamp !== 'number') continue;
-      const workDate = toVnDate(e.timestamp);
-      const r = db
-        .prepare(
-          `INSERT INTO detections(user_id, hanet_person_id, device_id, device_name, place_id, ts, work_date, image_url, source)
-           VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, device_id, ts) DO NOTHING`,
-        )
-        .run(
-          e.employeeId,
-          orNull(e.cameraId) ?? 'UNKNOWN',
-          orNull(e.cameraName),
-          Number.isInteger(e.placeId) ? e.placeId : null,
-          e.timestamp,
-          workDate,
-          orNull(e.detectedImageUrl),
-          String(e.id ?? '').startsWith('att-sim') ? 'simulator' : 'webhook',
-        );
-      c.detections += Number(r.changes);
-      pairs.add(`${e.employeeId}|${workDate}`);
-    }
-
-    for (const q of list(legacy.requests)) {
-      if (!userIds.has(q.employeeId) || !REQUEST_TYPES.has(q.type)) continue;
-      db.prepare(
-        `INSERT INTO requests(id, user_id, work_date, type, reason, suggested_in, suggested_out, status, reviewed_by, reviewed_at, comment, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
-      ).run(
-        q.id,
-        q.employeeId,
-        text(q.date),
-        q.type,
-        text(q.reason),
-        orNull(q.suggestedTime),
-        REQUEST_STATUSES.has(q.status) ? q.status : 'pending',
-        userIdByName.get(text(q.reviewedBy)) ?? null,
-        orNull(q.reviewedAt),
-        orNull(q.comment),
-        text(q.createdAt, today) || today,
-      );
-      c.requests++;
-    }
-
-    const cfg = (legacy.config ?? {}) as Legacy;
-    for (const [field, key] of [['clientId', 'hanet.client_id'], ['clientSecret', 'hanet.client_secret'], ['accessToken', 'hanet.access_token']] as const) {
-      const v = orNull(cfg[field]);
-      if (v) setSetting(db, key, v);
-    }
-    if (Number.isInteger(cfg.masterPlaceId) && cfg.masterPlaceId > 0) setSetting(db, 'hanet.place_ids', JSON.stringify([cfg.masterPlaceId]));
-
-    for (const p of pairs) {
-      const [userId, workDate] = p.split('|');
-      recomputeDay(db, userId, workDate);
-    }
-    return c;
-  });
-
-  fs.renameSync(jsonPath, `${jsonPath}.migrated`);
-  return counts;
-}
-```
-
-- [ ] **Step 5: Chạy test và lint**
-
-Run: `npm test && npm run lint`
-Expected: PASS.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add server/migrate.ts tests/migrate.test.ts tests/fixtures/legacy-database.json
-git commit -m "feat(migrate): one-time import from legacy database.json into SQLite
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
-```
-
----
-
-### Task 13: Lịch chạy, entry server mới, bỏ `server.ts`, ma trận phân quyền
+### Task 12: Lịch chạy, entry server mới, bỏ `server.ts`, ma trận phân quyền
 
 **Files:**
 - Create: `server/jobs.ts`, `server/check-node.ts`, `server/index.ts`, `tests/jobs.test.ts`, `tests/permissions.test.ts`
 - Delete: `server.ts`
 
 **Interfaces:**
-- Consumes: mọi module server từ Task 1–12
+- Consumes: mọi module server từ Task 1–11
 - Produces:
   - `server/jobs.ts`: `interface DueJobs { backup: boolean; reconcileToday: boolean; reconcileYesterday: boolean; purgeSessions: boolean }`; `dueJobs(now: number): DueJobs`; `startJobs(ctx: AppContext): () => void` (trả hàm dừng)
   - `server/index.ts`: entry cho `npm run dev` và bản build `server.js`
@@ -5238,8 +4902,7 @@ import express from 'express';
 import { openDb } from './db';
 import { createApp } from './app';
 import { LoginLimiter } from './auth';
-import { migrateFromJson } from './migrate';
-import { ensureAdminAccess } from './bootstrap';
+import { DEFAULT_ADMIN_PASSWORD, ensureAdminAccess } from './bootstrap';
 import { startJobs } from './jobs';
 import type { AppContext } from './context';
 
@@ -5251,15 +4914,12 @@ const backupDir = path.join(dataDir, 'backups');
 async function main() {
   const db = openDb(path.join(dataDir, 'attendance.db'));
 
-  const migrated = migrateFromJson(db, path.join(dataDir, 'database.json'), backupDir);
-  if (migrated) console.log('[MIGRATE] Đã chuyển dữ liệu từ data/database.json:', migrated);
-
   const admin = ensureAdminAccess(db, process.env.ADMIN_INITIAL_PASSWORD);
   if (admin) {
     console.log(
       admin.fromEnv
-        ? `[BOOTSTRAP] Tài khoản ${admin.code} dùng mật khẩu ADMIN_INITIAL_PASSWORD (bắt buộc đổi ở lần đăng nhập đầu).`
-        : `[BOOTSTRAP] Mật khẩu tạm tài khoản ${admin.code}: ${admin.password} (bắt buộc đổi ở lần đăng nhập đầu).`,
+        ? `[BOOTSTRAP] Đã tạo tài khoản ${admin.code} với mật khẩu ADMIN_INITIAL_PASSWORD. Hãy đăng nhập và đổi mật khẩu ngay.`
+        : `[BOOTSTRAP] Đã tạo tài khoản ${admin.code} với mật khẩu mặc định ${DEFAULT_ADMIN_PASSWORD}. Hãy đăng nhập và đổi mật khẩu ngay.`,
     );
   }
 
@@ -5303,7 +4963,7 @@ main().catch((err) => {
 git rm server.ts
 ```
 
-(`server.js` cũ được build lại ở Task 16; để nguyên đến lúc đó.)
+(`server.js` cũ được build lại ở Task 15; để nguyên đến lúc đó.)
 
 - [ ] **Step 8: Chạy test, lint và thử build server**
 
@@ -5320,7 +4980,7 @@ Run (trong scratch, không đụng `data/` thật của repo):
 SMOKE=$(mktemp -d) && cp -r index.html vite.config.ts tsconfig.json package.json src shared server "$SMOKE"/ && ln -s "$PWD/node_modules" "$SMOKE/node_modules" && cd "$SMOKE" && (PORT=3098 npx tsx server/index.ts > server.log 2>&1 &) && sleep 4 && curl -s localhost:3098/api/health && grep BOOTSTRAP server.log; pkill -f "server/index.ts"
 ```
 
-Expected: `{"ok":true}` và một dòng `[BOOTSTRAP] Mật khẩu tạm tài khoản ADMIN: ...`.
+Expected: `{"ok":true}` và một dòng `[BOOTSTRAP] Đã tạo tài khoản ADMIN với mật khẩu mặc định Admin@123. ...`.
 
 - [ ] **Step 10: Commit**
 
@@ -5333,7 +4993,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 14: Frontend — đăng nhập, đổi mật khẩu, khung App, bảng công theo ngày
+### Task 13: Frontend — đăng nhập, đổi mật khẩu, khung App, bảng công theo ngày
 
 **Files:**
 - Create: `src/api.ts`, `src/format.ts`, `src/components/ui.tsx`, `src/components/LoginScreen.tsx`, `src/components/ChangePasswordScreen.tsx`
@@ -5345,9 +5005,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `src/api.ts`: `class ApiError(status, message, code?)`; `api<T>(path, { method?, body? }?): Promise<T>`; `errorMessage(err): string`; `AUTH_EVENT = 'hgc:auth'`; `type AuthEventDetail = 'logged-out' | 'must-change-password'`
   - `src/format.ts`: `vnToday(): string`; `fmtTime(ts: number | null): string`; `fmtDateTime(v: string | number): string`; `DAY_STATUS_LABEL`; `ROLE_LABEL`
   - `src/components/ui.tsx`: `Modal`, `Field`, `inputCls`, `primaryBtn`, `secondaryBtn`, `dangerBtn`
-  - Các component Task 15 nhận props như trong `App.tsx` ở Step 8 bên dưới
+  - Các component Task 14 nhận props như trong `App.tsx` ở Step 8 bên dưới
 
-**Kiểm chứng:** frontend không có unit test; kiểm bằng `npm run lint`, `npx vite build` và chạy thử trên trình duyệt (Step 11). Sau task này lint còn lỗi ở các file Task 15 viết lại (`RequestsTab`, `EmployeesTab`, `DepartmentsTab`, `CamerasTab`, `HanetConfigTab`, `HanetSimulatorModal`) và ở chỗ `App.tsx` dùng chúng; mọi file khác phải sạch lỗi.
+**Kiểm chứng:** frontend không có unit test; kiểm bằng `npm run lint`, `npx vite build` và chạy thử trên trình duyệt (Step 11). Sau task này lint còn lỗi ở các file Task 14 viết lại (`RequestsTab`, `EmployeesTab`, `DepartmentsTab`, `CamerasTab`, `HanetConfigTab`, `HanetSimulatorModal`) và ở chỗ `App.tsx` dùng chúng; mọi file khác phải sạch lỗi.
 
 - [ ] **Step 1: Viết lại `src/types.ts`**
 
@@ -6205,9 +5865,9 @@ Run: `npx vite build`
 Expected: build thành công (Vite chỉ biên dịch, không kiểm kiểu).
 
 Run: `npm run lint 2>&1 | grep 'error TS' | grep -v -E 'src/components/(RequestsTab|EmployeesTab|DepartmentsTab|CamerasTab|HanetConfigTab|HanetSimulatorModal)\.tsx|src/App\.tsx' || echo "OK"`
-Expected: `OK`. Lỗi kiểu còn lại chỉ nằm trong 6 component Task 15 viết lại và ở chỗ `App.tsx` truyền props mới cho chúng; Task 15 xử lý hết.
+Expected: `OK`. Lỗi kiểu còn lại chỉ nằm trong 6 component Task 14 viết lại và ở chỗ `App.tsx` truyền props mới cho chúng; Task 14 xử lý hết.
 
-(Chạy thử trên trình duyệt làm ở cuối Task 15, khi toàn bộ frontend đã biên dịch sạch.)
+(Chạy thử trên trình duyệt làm ở cuối Task 14, khi toàn bộ frontend đã biên dịch sạch.)
 
 - [ ] **Step 12: Commit**
 
@@ -6220,14 +5880,14 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 15: Frontend — đơn, nhân sự, phòng ban, camera, cấu hình, mô phỏng
+### Task 14: Frontend — đơn, nhân sự, phòng ban, camera, cấu hình, mô phỏng
 
 **Files:**
 - Create: `src/components/TempPasswordDialog.tsx`, `src/components/UserFormModal.tsx`, `src/components/config/WebhookCard.tsx`, `src/components/config/WorkSettingsCard.tsx`, `src/components/config/HanetCredentialsCard.tsx`, `src/components/config/BackupsCard.tsx`, `src/components/config/WebhookLogsCard.tsx`, `src/components/config/DangerZoneCard.tsx`
 - Modify (viết lại toàn bộ): `src/components/RequestsTab.tsx`, `src/components/EmployeesTab.tsx`, `src/components/DepartmentsTab.tsx`, `src/components/CamerasTab.tsx`, `src/components/HanetConfigTab.tsx`, `src/components/HanetSimulatorModal.tsx`
 
 **Interfaces:**
-- Consumes: `api`, `errorMessage` (Task 14); `Modal`, `Field`, `inputCls`, `primaryBtn`, `secondaryBtn`, `dangerBtn` (Task 14); `vnToday`, `fmtDateTime`, `ROLE_LABEL` (Task 14); props đúng như `App.tsx` Task 14 truyền vào
+- Consumes: `api`, `errorMessage` (Task 13); `Modal`, `Field`, `inputCls`, `primaryBtn`, `secondaryBtn`, `dangerBtn` (Task 13); `vnToday`, `fmtDateTime`, `ROLE_LABEL` (Task 13); props đúng như `App.tsx` Task 13 truyền vào
 - Produces: frontend biên dịch sạch (`npm run lint` không lỗi)
 
 - [ ] **Step 1: Viết lại `src/components/RequestsTab.tsx`**
@@ -7594,9 +7254,9 @@ Expected: lint không lỗi; build thành công; test PASS.
 
 - [ ] **Step 16: Chạy thử trên trình duyệt**
 
-Dùng thư mục scratch như Task 13 Step 9 (để không đụng `data/` của repo), chạy `PORT=3098 npx tsx server/index.ts`, lấy mật khẩu tạm từ dòng `[BOOTSTRAP]` rồi kiểm tra bằng tay trên `http://localhost:3098`:
+Dùng thư mục scratch như Task 12 Step 9 (để không đụng `data/` của repo), chạy `PORT=3098 npx tsx server/index.ts` rồi kiểm tra bằng tay trên `http://localhost:3098`:
 
-1. Đăng nhập `ADMIN` bằng mật khẩu tạm → bị chuyển sang màn đổi mật khẩu → đổi xong vào được bảng công.
+1. Đăng nhập `ADMIN` / `Admin@123` → bị chuyển sang màn đổi mật khẩu → đổi xong vào được bảng công.
 2. Tab Phòng ban: tạo phòng `KT`. Tab Nhân sự: tạo `NV01` (vai trò Nhân viên, phòng KT) → hộp thoại hiện mật khẩu tạm.
 3. Nút Mô phỏng: gửi lượt cho `NV01` lúc 08:30 và 17:10 hôm nay → bảng công hiện 1 dòng "Đi muộn · muộn 30'", bấm "2 lượt" xem chi tiết.
 4. Tab Cấu hình: thấy URL webhook dạng `/api/hanet/webhook/<token>`; `curl -X POST <url> -H 'Content-Type: application/json' -d '{"aliasID":"NV01","deviceID":"C1","time":<epoch ms>}'` → `{"returnCode":1,"returnMessage":"success"}` và log hiện trong Nhật ký webhook.
@@ -7618,16 +7278,16 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 16: Triển khai — Docker, PM2, DEPLOY.md, gỡ `data/` khỏi git, build cuối
+### Task 15: Triển khai — Docker, PM2, DEPLOY.md, xóa `data/database.json`, build cuối
 
 **Files:**
 - Modify: `Dockerfile`, `docker-compose.yml`, `ecosystem.config.cjs`, `DEPLOY.md`
 - Create: `.env.example`
-- Remove from git (giữ file trên máy): `data/database.json`
+- Delete: `data/database.json` (dữ liệu thử nghiệm, không chuyển sang)
 - Rebuild: `dist/`, `server.js`
 
 **Interfaces:**
-- Consumes: `server/index.ts` (Task 13), script `build`/`build:server` (Task 1)
+- Consumes: `server/index.ts` (Task 12), script `build`/`build:server` (Task 1)
 - Produces: bản build production chạy bằng `node server.js` trên Node ≥ 22.13, cổng 3001
 
 - [ ] **Step 1: Viết lại `Dockerfile`**
@@ -7739,10 +7399,9 @@ cd hgc-attendance
 npm install --omit=dev          # dist/ và server.js đã build sẵn trong repo
 pm2 start ecosystem.config.cjs
 pm2 save && pm2 startup
-pm2 logs hanet-attendance --lines 50   # tìm dòng [BOOTSTRAP] để lấy mật khẩu tạm của ADMIN
 ```
 
-Đăng nhập bằng mã `ADMIN` và mật khẩu tạm, hệ thống sẽ bắt đổi mật khẩu ngay.
+**Ngay sau khi khởi động**, đăng nhập bằng tài khoản mặc định **`ADMIN` / `Admin@123`**; hệ thống bắt đổi mật khẩu ở lần đăng nhập đầu. Mật khẩu mặc định này ai đọc tài liệu cũng biết, nên đừng để server chạy public mà chưa đổi. Muốn tránh hẳn khoảng hở này thì đặt biến môi trường `ADMIN_INITIAL_PASSWORD` (≥ 8 ký tự) trước lần khởi động đầu tiên.
 
 ### nginx
 
@@ -7773,35 +7432,26 @@ sudo certbot --nginx -d diemdanh.tenmiencuaban.com
 
 ```bash
 docker compose up -d --build
-docker logs hanet-attendance-app | grep BOOTSTRAP
 ```
 
-Dữ liệu nằm trong volume `attendance-data`.
+Dữ liệu nằm trong volume `attendance-data`. Đăng nhập `ADMIN` / `Admin@123` và đổi mật khẩu ngay như trên.
 
 ## Nâng cấp từ bản cũ (lưu `data/database.json`)
 
-Bản mới **gỡ `data/database.json` khỏi git**. Khi `git pull`, git sẽ **xóa file này khỏi thư mục làm việc**, nên phải chép ra ngoài trước:
+Bản mới **không dùng `data/database.json`** và **không chuyển dữ liệu cũ sang**: toàn bộ dữ liệu trong đó là dữ liệu thử nghiệm. Hệ thống mới bắt đầu trắng, chỉ có tài khoản `ADMIN`.
 
 ```bash
 cd /var/www/hgc-attendance
 pm2 stop hanet-attendance
-cp data/database.json ~/database.json.backup-$(date +%F)
-git stash                          # nếu git báo database.json đã bị sửa
-git pull
-mkdir -p data && cp ~/database.json.backup-$(date +%F) data/database.json
-node -v                            # phải >= 22.13; nếu chưa thì cài Node 22 như phần trên
+git checkout -- data/database.json 2>/dev/null   # bỏ thay đổi cục bộ của file thử nghiệm để git pull không bị chặn
+git pull                                          # bản mới xóa data/database.json khỏi repo
+node -v                                           # phải >= 22.13; nếu chưa thì cài Node 22 như phần trên
 npm install --omit=dev
 pm2 delete hanet-attendance && pm2 start ecosystem.config.cjs && pm2 save
-pm2 logs hanet-attendance --lines 50
+pm2 logs hanet-attendance --lines 20              # thấy dòng [BOOTSTRAP] Đã tạo tài khoản ADMIN ...
 ```
 
-Ở lần khởi động đầu, log có:
-- `[MIGRATE] Đã chuyển dữ liệu từ data/database.json: {...}`: dữ liệu cũ đã vào SQLite; file cũ được đổi tên thành `data/database.json.migrated`, bản gốc nằm ở `data/backups/database.json.pre-migration`.
-- `[BOOTSTRAP] Mật khẩu tạm tài khoản ADMIN: ...`: dùng để đăng nhập lần đầu.
-
-Sau khi chuyển, **mọi nhân viên chưa có mật khẩu**. HR vào tab Nhân sự, bấm "Đặt lại mật khẩu" cho từng người để lấy mật khẩu tạm.
-
-Nếu chuyển dữ liệu thất bại (JSON hỏng, trùng mã nhân viên...), server dừng và in lý do; `data/database.json` được giữ nguyên.
+Sau đó đăng nhập `ADMIN` / `Admin@123`, đổi mật khẩu, rồi tạo lại phòng ban, nhân sự (mỗi người nhận mật khẩu tạm từ HR) và camera. Cập nhật URL webhook mới (có token) trên Hanet theo phần dưới.
 
 ## Cấu hình webhook trên Hanet
 
@@ -7828,14 +7478,14 @@ Nếu chuyển dữ liệu thất bại (JSON hỏng, trùng mã nhân viên...)
 `curl https://<tên miền>/api/health` → `{"ok":true}`.
 ````
 
-- [ ] **Step 6: Gỡ `data/database.json` khỏi git (giữ file trên máy)**
+- [ ] **Step 6: Xóa `data/database.json`**
 
 ```bash
-git rm --cached data/database.json
+git rm data/database.json
 git status --short data/
 ```
 
-Expected: `D  data/database.json` trong khu vực staged; file vẫn còn trên đĩa (`ls data/database.json`).
+Expected: `D  data/database.json` trong khu vực staged; file không còn trên đĩa.
 
 - [ ] **Step 7: Build production**
 
@@ -7857,13 +7507,13 @@ SMOKE=$(mktemp -d) && cp -r dist server.js package.json "$SMOKE"/ && ln -s "$PWD
   && curl -s -o /dev/null -w '%{http_code}\n' localhost:3099/ ; pkill -f "PORT=3099" ; pkill -f "$SMOKE/server.js" ; true
 ```
 
-Expected: `{"ok":true}`; một dòng `[BOOTSTRAP] Mật khẩu tạm tài khoản ADMIN: ...`; `401`; `404`; `200`.
+Expected: `{"ok":true}`; một dòng `[BOOTSTRAP] Đã tạo tài khoản ADMIN với mật khẩu mặc định Admin@123. ...`; `401`; `404`; `200`.
 
 Kiểm tiêu chí giờ VN với `TZ=UTC` (spec mục 11): trong cùng thư mục tạm, đăng nhập ADMIN, đổi mật khẩu, tạo nhân viên `NV01`, gửi webhook lúc 08:30 VN và kiểm tra bảng công báo muộn 30 phút, đúng ngày:
 
 ```bash
 cd "$SMOKE" && (NODE_ENV=production PORT=3099 TZ=UTC node server.js > server2.log 2>&1 &) && sleep 2
-PW=$(grep -o 'ADMIN: [^ ]*' server.log | cut -d' ' -f2)
+PW='Admin@123'
 J='Content-Type: application/json'
 curl -s -c c.txt -H "$J" -d "{\"code\":\"ADMIN\",\"password\":\"$PW\"}" localhost:3099/api/auth/login
 curl -s -b c.txt -H "$J" -d "{\"currentPassword\":\"$PW\",\"newPassword\":\"MatKhauMoi@1\"}" localhost:3099/api/auth/change-password
@@ -7895,12 +7545,12 @@ Expected: test và lint PASS ở cả hai lần; năm dòng `OK: ...`. (`DEFAULT
 
 ```bash
 git add Dockerfile docker-compose.yml ecosystem.config.cjs DEPLOY.md .env.example dist server.js
-git commit -m "chore(deploy): Node 22 image, port 3001, upgrade guide; untrack data/
+git commit -m "chore(deploy): Node 22 image, port 3001, upgrade guide; drop test database.json
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-(`git rm --cached` ở Step 6 đã staged việc gỡ `data/database.json`, nên commit này bao gồm luôn.)
+(`git rm` ở Step 6 đã staged việc xóa `data/database.json`, nên commit này bao gồm luôn.)
 
 ---
 
@@ -7908,27 +7558,27 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 | Spec | Task |
 |---|---|
-| §3 Cấu trúc module, `createApp` không listen | 1, 5, 13 |
+| §3 Cấu trúc module, `createApp` không listen | 1, 5, 12 |
 | §4 Schema, PRAGMA, `schema_version`, JOIN thay cột chép | 1, 5, 6, 7 |
-| §4 Chuyển dữ liệu JSON, gỡ `data/` khỏi git | 12, 16 |
+| §4 Không chuyển dữ liệu cũ, xóa `data/database.json` | 1, 15 |
 | §5 scrypt, mật khẩu tạm, phiên, cookie, khóa đăng nhập | 3, 5 |
-| §5 ADMIN đầu tiên, `ADMIN_INITIAL_PASSWORD` | 5, 13 |
+| §5 ADMIN mặc định `Admin@123`, `ADMIN_INITIAL_PASSWORD` | 5, 12, 15 |
 | §5 `requireAuth`, `MUST_CHANGE_PASSWORD`, `requireRole`, `scopeFor`, JSON-only | 3, 5 |
-| §5 Bảng phân quyền | 6–11, kiểm toàn bộ ở 13 |
+| §5 Bảng phân quyền | 6–11, kiểm toàn bộ ở 12 |
 | §5 Che secret, mô phỏng tắt ở production, xóa dữ liệu có mật khẩu + sao lưu | 9, 11 |
 | §6 Webhook token, xoay token, 404 khi thiếu token, form-urlencoded | 9 |
 | §6 Khớp aliasID/personID, không khớp tên, trùng lặp | 9 |
-| §6 Đối soát, phân trang, refresh `-103`, lỗi lưu lại, nút "Đối soát ngay" | 10, 15 |
+| §6 Đối soát, phân trang, refresh `-103`, lỗi lưu lại, nút "Đối soát ngay" | 10, 14 |
 | §7 `computeDay`, giờ VN, `recomputeDay`, duyệt đơn theo loại, tính lại ≤ 92 ngày | 2, 4, 7, 8 |
-| §7 API bảng công, chi tiết lượt, thống kê, CSV | 7, 14 |
-| §8 Giao diện | 14, 15 |
-| §9 Sao lưu, lịch chạy, Node check, cổng 3001, trust proxy, health, DEPLOY, log bảo mật | 5, 9, 11, 13, 16 |
+| §7 API bảng công, chi tiết lượt, thống kê, CSV | 7, 13 |
+| §8 Giao diện | 13, 14 |
+| §9 Sao lưu, lịch chạy, Node check, cổng 3001, trust proxy, health, DEPLOY, log bảo mật | 5, 9, 11, 12, 15 |
 | §10 Test | mọi task server |
-| §11 Tiêu chí hoàn thành | 16 Step 8–9 |
+| §11 Tiêu chí hoàn thành | 15 Step 8–9 |
 
 **Khác biệt có chủ ý so với spec (đã ghi trong task):**
 - `toVnDate` dùng offset +7 cố định thay vì `Intl.DateTimeFormat`: cùng kết quả vì Việt Nam không có giờ mùa hè, đơn giản và nhanh hơn (Task 2).
-- Thêm đối soát lại ngày hôm qua lúc 00:05 để bắt các lượt 23:30–23:59 (Task 13).
+- Thêm đối soát lại ngày hôm qua lúc 00:05 để bắt các lượt 23:30–23:59 (Task 12).
 - Thêm cấu hình `hanet.api_base` vì tài liệu Postman không ghi địa chỉ `CAMERA_BASE_URL`; mặc định `https://partner.hanet.ai`, HR sửa được (Task 9).
 - Sai mật khẩu khi xóa dữ liệu trả 400 (không phải 403) để 403 chỉ mang nghĩa "không có quyền" (Task 11).
 - Xóa dữ liệu giữ lại bảng `settings` để webhook Hanet không bị đứt (Task 11).
