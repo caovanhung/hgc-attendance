@@ -76,6 +76,37 @@ pm2 logs hanet-attendance --lines 20              # thấy dòng [BOOTSTRAP] Đ�
 
 Sau đó đăng nhập `ADMIN` / `Admin@123`, đổi mật khẩu, rồi tạo lại phòng ban, nhân sự (mỗi người nhận mật khẩu tạm từ HR) và camera. Cập nhật URL webhook mới (có token) trên Hanet theo phần dưới.
 
+## Nâng cấp lên bản tích hợp Hanet (database v2)
+
+Bản này đổi cấu trúc database và **không chuyển dữ liệu cũ**. Server sẽ không khởi động trên database cũ mà in: `[STARTUP] Database phiên bản cũ (v1). Sao lưu rồi xóa data/attendance.db để hệ thống tạo mới.`
+
+```bash
+cd /home/ubuntu/hgc-attendance
+pm2 stop hanet-attendance
+mkdir -p ~/hgc-backup && cp data/attendance.db ~/hgc-backup/attendance-v1-$(date +%F).db
+rm -f data/attendance.db data/attendance.db-wal data/attendance.db-shm
+git pull && npm install --omit=dev
+pm2 restart hanet-attendance
+pm2 logs hanet-attendance --lines 20 --nostream    # thấy [BOOTSTRAP] Đã tạo tài khoản ADMIN ...
+```
+
+Sau khi khởi động, vì database mới hoàn toàn:
+
+1. Đăng nhập `ADMIN` / `Admin@123` (hoặc `ADMIN_INITIAL_PASSWORD`), đổi mật khẩu.
+2. Tab **Cấu hình**: nhập lại Client ID, Client Secret, Refresh Token → **Lưu** → **Kiểm tra kết nối** → chọn địa điểm (ví dụ HRINTER) → **Lưu** lần nữa.
+3. **Token webhook đã đổi**: chép URL webhook mới dán lên Hanet.
+4. Tab **Camera** → **Nhập camera từ Hanet**.
+5. Tab **Nhân sự** → **Nhập từ Hanet** để tạo nhân sự từ những người đã có trên Hanet; người mới thì **Thêm nhân sự → Lấy từ camera**.
+
+## Kiểm tra sau khi nâng cấp (trên host)
+
+- [ ] Kiểm tra kết nối báo đúng tài khoản và địa điểm HRINTER.
+- [ ] Nhập camera C21272C952, thấy chấm xanh (online) sau tối đa 5 phút hoặc khi bấm **Làm mới trạng thái**.
+- [ ] Nhập "Dương Đức Văn" từ Hanet; người này quẹt mặt thì bảng công có dòng của họ.
+- [ ] Một người chưa đăng ký đứng trước camera → **Thêm nhân sự → Lấy từ camera** → chọn ảnh người lạ → **Tạo nhân sự** → thông báo "FaceID: Đã đăng ký FaceID trên Hanet". Người đó đứng lại trước camera và được chấm công. Nếu báo lỗi ảnh (ví dụ kích thước), ghi lại thông báo để xử lý ở bản sau.
+- [ ] Tạo phòng ban trên web, thấy phòng ban đó trên app Hanet; xếp người thử vào phòng.
+- [ ] Xóa người thử bằng tài khoản ADMIN; người đó biến mất khỏi Hanet. Tab **Cấu hình › Đồng bộ Hanet** không còn việc lỗi.
+
 ## Cấu hình webhook trên Hanet
 
 1. Đăng nhập bằng tài khoản HR → tab **Cấu hình** → sao chép **URL webhook** (dạng `https://<tên miền>/api/hanet/webhook/<token>`).

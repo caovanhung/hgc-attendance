@@ -1,24 +1,59 @@
-// server/check-node.ts
-var [major, minor] = process.versions.node.split(".").map(Number);
-if (major < 22 || major === 22 && minor < 13) {
-  console.error(`[STARTUP] C\u1EA7n Node.js >= 22.13 (\u0111ang ch\u1EA1y ${process.versions.node}). H\xE3y n\xE2ng c\u1EA5p Node r\u1ED3i ch\u1EA1y l\u1EA1i.`);
-  process.exit(1);
-}
-
-// server/index.ts
-import "dotenv/config";
-import path3 from "node:path";
-import express2 from "express";
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
 
 // server/db.ts
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
-var require2 = createRequire(import.meta.url);
-var { DatabaseSync } = require2("node:sqlite");
-var SCHEMA_VERSION = 1;
-var SCHEMA = `
+function openDb(file) {
+  if (file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true });
+  const db = new DatabaseSync(file);
+  db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
+  const hasVersionTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'").get();
+  const found = hasVersionTable ? db.prepare("SELECT version FROM schema_version").get() : void 0;
+  if (found && found.version !== SCHEMA_VERSION) {
+    db.close();
+    throw new SchemaVersionError(found.version);
+  }
+  db.exec(SCHEMA);
+  if (!found) db.prepare("INSERT INTO schema_version(version) VALUES (?)").run(SCHEMA_VERSION);
+  return db;
+}
+function tx(db, fn) {
+  if (db.isTransaction) return fn();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = fn();
+    db.exec("COMMIT");
+    return result;
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+}
+function newId(prefix) {
+  return `${prefix}-${randomBytes(6).toString("hex")}`;
+}
+var require2, DatabaseSync, SCHEMA_VERSION, SCHEMA, SchemaVersionError;
+var init_db = __esm({
+  "server/db.ts"() {
+    require2 = createRequire(import.meta.url);
+    ({ DatabaseSync } = require2("node:sqlite"));
+    SCHEMA_VERSION = 2;
+    SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
 
 CREATE TABLE IF NOT EXISTS departments (
@@ -27,6 +62,9 @@ CREATE TABLE IF NOT EXISTS departments (
   name TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   manager_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  hanet_department_id TEXT,
+  hanet_sync_status TEXT NOT NULL DEFAULT 'synced' CHECK (hanet_sync_status IN ('synced', 'pending', 'error')),
+  hanet_sync_error TEXT,
   created_at TEXT NOT NULL
 );
 
@@ -45,6 +83,9 @@ CREATE TABLE IF NOT EXISTS users (
   status TEXT NOT NULL CHECK (status IN ('active', 'inactive')),
   password_hash TEXT,
   must_change_password INTEGER NOT NULL DEFAULT 1,
+  hanet_sync_status TEXT NOT NULL DEFAULT 'synced' CHECK (hanet_sync_status IN ('synced', 'pending', 'error')),
+  hanet_sync_error TEXT,
+  face_error TEXT,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_users_department ON users(department_id);
@@ -66,6 +107,8 @@ CREATE TABLE IF NOT EXISTS cameras (
   place_name TEXT NOT NULL DEFAULT '',
   location TEXT NOT NULL DEFAULT '',
   ip_address TEXT NOT NULL DEFAULT '',
+  online INTEGER,
+  status_checked_at INTEGER,
   created_at TEXT NOT NULL
 );
 
@@ -130,44 +173,47 @@ CREATE TABLE IF NOT EXISTS webhook_logs (
   message TEXT,
   raw_payload TEXT
 );
-`;
-function openDb(file) {
-  if (file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true });
-  const db = new DatabaseSync(file);
-  db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
-  db.exec(SCHEMA);
-  if (!db.prepare("SELECT version FROM schema_version").get()) {
-    db.prepare("INSERT INTO schema_version(version) VALUES (?)").run(SCHEMA_VERSION);
-  }
-  return db;
-}
-function tx(db, fn) {
-  if (db.isTransaction) return fn();
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    const result = fn();
-    db.exec("COMMIT");
-    return result;
-  } catch (err) {
-    db.exec("ROLLBACK");
-    throw err;
-  }
-}
-function newId(prefix) {
-  return `${prefix}-${randomBytes(6).toString("hex")}`;
-}
 
-// server/app.ts
-import express from "express";
+CREATE TABLE IF NOT EXISTS sync_jobs (
+  id INTEGER PRIMARY KEY,
+  entity_type TEXT NOT NULL CHECK (entity_type IN ('user', 'department', 'camera')),
+  entity_id TEXT NOT NULL,
+  op TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'error', 'done')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_run_at INTEGER NOT NULL,
+  last_error TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sync_due ON sync_jobs(status, next_run_at);
+CREATE INDEX IF NOT EXISTS idx_sync_entity ON sync_jobs(entity_type, entity_id, id);
+
+CREATE TABLE IF NOT EXISTS face_sightings (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('stranger', 'unlinked')),
+  person_id TEXT,
+  alias_id TEXT,
+  person_name TEXT,
+  device_id TEXT NOT NULL,
+  device_name TEXT,
+  ts INTEGER NOT NULL,
+  image_url TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sightings_created ON face_sightings(created_at);
+`;
+    SchemaVersionError = class extends Error {
+      constructor(found) {
+        super(`[STARTUP] Database phi\xEAn b\u1EA3n c\u0169 (v${found}). Sao l\u01B0u r\u1ED3i x\xF3a data/attendance.db \u0111\u1EC3 h\u1EC7 th\u1ED1ng t\u1EA1o m\u1EDBi.`);
+        this.found = found;
+      }
+    };
+  }
+});
 
 // server/errors.ts
-var HttpError = class extends Error {
-  constructor(status, message, code) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-};
 function errorHandler(production2) {
   return (err, _req, res, _next) => {
     if (err instanceof HttpError) {
@@ -190,6 +236,923 @@ function ah(fn) {
     fn(req, res, next).catch(next);
   };
 }
+var HttpError;
+var init_errors = __esm({
+  "server/errors.ts"() {
+    HttpError = class extends Error {
+      constructor(status, message, code) {
+        super(message);
+        this.status = status;
+        this.code = code;
+      }
+    };
+  }
+});
+
+// server/vntime.ts
+function toVnDate(ts) {
+  return new Date(ts + VN_OFFSET_MS).toISOString().slice(0, 10);
+}
+function vnMinutesOfDay(ts) {
+  const d = new Date(ts + VN_OFFSET_MS);
+  return d.getUTCHours() * 60 + d.getUTCMinutes();
+}
+function parseHHmm(s) {
+  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(s);
+  if (!m) throw new Error(`Gi\u1EDD kh\xF4ng h\u1EE3p l\u1EC7: ${s}`);
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+function isValidDate(s) {
+  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const t = Date.parse(`${s}T00:00:00Z`);
+  return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === s;
+}
+function vnDateTimeToTs(date, hhmm2) {
+  const [y, mo, d] = date.split("-").map(Number);
+  return Date.UTC(y, mo - 1, d, 0, parseHHmm(hhmm2)) - VN_OFFSET_MS;
+}
+function vnDayStart(date) {
+  return vnDateTimeToTs(date, "00:00");
+}
+function addDays(date, n) {
+  return new Date(Date.parse(`${date}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
+}
+function daysBetween(from, to) {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS);
+}
+var VN_OFFSET_MS, DAY_MS;
+var init_vntime = __esm({
+  "server/vntime.ts"() {
+    VN_OFFSET_MS = 7 * 60 * 60 * 1e3;
+    DAY_MS = 24 * 60 * 60 * 1e3;
+  }
+});
+
+// server/settings.ts
+function getSetting(db, key) {
+  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
+  return row?.value;
+}
+function setSetting(db, key, value) {
+  db.prepare("INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value);
+}
+function deleteSetting(db, key) {
+  db.prepare("DELETE FROM settings WHERE key = ?").run(key);
+}
+function getWorkSettings(db) {
+  return {
+    workStart: getSetting(db, "work_start") ?? DEFAULT_WORK_SETTINGS.workStart,
+    lateGraceMinutes: Number(getSetting(db, "late_grace_minutes") ?? DEFAULT_WORK_SETTINGS.lateGraceMinutes),
+    workEnd: getSetting(db, "work_end") ?? DEFAULT_WORK_SETTINGS.workEnd,
+    minOutGapMinutes: Number(getSetting(db, "min_out_gap_minutes") ?? DEFAULT_WORK_SETTINGS.minOutGapMinutes)
+  };
+}
+function intInRange(v, min, max, label) {
+  const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
+  if (typeof n !== "number" || !Number.isInteger(n) || n < min || n > max) {
+    throw new HttpError(400, `${label} ph\u1EA3i l\xE0 s\u1ED1 nguy\xEAn t\u1EEB ${min} \u0111\u1EBFn ${max}`);
+  }
+  return n;
+}
+function hhmm(v, label) {
+  if (typeof v !== "string") throw new HttpError(400, `${label} kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng HH:mm)`);
+  try {
+    parseHHmm(v);
+  } catch {
+    throw new HttpError(400, `${label} kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng HH:mm)`);
+  }
+  return v;
+}
+function validateWorkSettings(input) {
+  if (!input || typeof input !== "object") throw new HttpError(400, "Thi\u1EBFu c\u1EA5u h\xECnh gi\u1EDD l\xE0m vi\u1EC7c");
+  const b = input;
+  const ws = {
+    workStart: hhmm(b.workStart, "Gi\u1EDD v\xE0o"),
+    lateGraceMinutes: intInRange(b.lateGraceMinutes, 0, 120, "S\u1ED1 ph\xFAt cho ph\xE9p mu\u1ED9n"),
+    workEnd: hhmm(b.workEnd, "Gi\u1EDD ra"),
+    minOutGapMinutes: intInRange(b.minOutGapMinutes, 1, 720, "Ng\u01B0\u1EE1ng gi\u1EDD ra")
+  };
+  if (parseHHmm(ws.workEnd) <= parseHHmm(ws.workStart)) throw new HttpError(400, "Gi\u1EDD ra ph\u1EA3i sau gi\u1EDD v\xE0o");
+  return ws;
+}
+function saveWorkSettings(db, ws) {
+  setSetting(db, "work_start", ws.workStart);
+  setSetting(db, "late_grace_minutes", String(ws.lateGraceMinutes));
+  setSetting(db, "work_end", ws.workEnd);
+  setSetting(db, "min_out_gap_minutes", String(ws.minOutGapMinutes));
+}
+var DEFAULT_WORK_SETTINGS;
+var init_settings = __esm({
+  "server/settings.ts"() {
+    init_vntime();
+    init_errors();
+    DEFAULT_WORK_SETTINGS = {
+      workStart: "08:00",
+      lateGraceMinutes: 15,
+      workEnd: "17:00",
+      minOutGapMinutes: 30
+    };
+  }
+});
+
+// server/attendance.ts
+function toDaySettings(ws) {
+  return {
+    workStart: parseHHmm(ws.workStart),
+    graceMinutes: ws.lateGraceMinutes,
+    workEnd: parseHHmm(ws.workEnd),
+    minOutGapMinutes: ws.minOutGapMinutes
+  };
+}
+function computeDay(input) {
+  const { detectionTs, settings, lateExcused, manualIn, manualOut } = input;
+  const minDet = detectionTs.length ? Math.min(...detectionTs) : null;
+  const maxDet = detectionTs.length ? Math.max(...detectionTs) : null;
+  const firstIn = manualIn ?? minDet;
+  if (firstIn === null) return null;
+  let lastOut = null;
+  if (manualOut !== null) lastOut = manualOut;
+  else if (maxDet !== null && maxDet - firstIn >= settings.minOutGapMinutes * 6e4) lastOut = maxDet;
+  const inMin = vnMinutesOfDay(firstIn);
+  const isLate = !lateExcused && inMin > settings.workStart + settings.graceMinutes;
+  const lateMinutes = isLate ? inMin - settings.workStart : 0;
+  const outMin = lastOut === null ? null : vnMinutesOfDay(lastOut);
+  const isEarly = outMin !== null && outMin < settings.workEnd;
+  const earlyMinutes = isEarly ? settings.workEnd - outMin : 0;
+  let status;
+  if (lastOut === null) status = "missing_out";
+  else if (isLate && isEarly) status = "late_and_early";
+  else if (isLate) status = "late";
+  else if (isEarly) status = "early_leave";
+  else status = "on_time";
+  return { firstIn, lastOut, lateMinutes, earlyMinutes, status, detectionCount: detectionTs.length };
+}
+function simulatorFilter() {
+  return process.env.NODE_ENV === "production" ? " AND source != 'simulator'" : "";
+}
+function readAdjustment(db, userId, workDate) {
+  const row = db.prepare("SELECT late_excused, manual_in, manual_out FROM attendance_days WHERE user_id = ? AND work_date = ?").get(userId, workDate);
+  return {
+    lateExcused: row?.late_excused === 1,
+    manualIn: row?.manual_in ?? null,
+    manualOut: row?.manual_out ?? null
+  };
+}
+function writeDay(db, userId, workDate, adj, settings) {
+  const detections = db.prepare(`SELECT ts FROM detections WHERE user_id = ? AND work_date = ?${simulatorFilter()}`).all(userId, workDate);
+  const result = computeDay({
+    detectionTs: detections.map((d) => d.ts),
+    settings,
+    lateExcused: adj.lateExcused,
+    manualIn: adj.manualIn,
+    manualOut: adj.manualOut
+  });
+  if (!result) {
+    db.prepare("DELETE FROM attendance_days WHERE user_id = ? AND work_date = ?").run(userId, workDate);
+    return;
+  }
+  db.prepare(
+    `INSERT INTO attendance_days(user_id, work_date, first_in, last_out, late_minutes, early_minutes, status,
+       late_excused, manual_in, manual_out, detection_count)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(user_id, work_date) DO UPDATE SET
+       first_in = excluded.first_in, last_out = excluded.last_out, late_minutes = excluded.late_minutes,
+       early_minutes = excluded.early_minutes, status = excluded.status, late_excused = excluded.late_excused,
+       manual_in = excluded.manual_in, manual_out = excluded.manual_out, detection_count = excluded.detection_count`
+  ).run(
+    userId,
+    workDate,
+    result.firstIn,
+    result.lastOut,
+    result.lateMinutes,
+    result.earlyMinutes,
+    result.status,
+    adj.lateExcused ? 1 : 0,
+    adj.manualIn,
+    adj.manualOut,
+    result.detectionCount
+  );
+}
+function recomputeDay(db, userId, workDate, settings) {
+  writeDay(db, userId, workDate, readAdjustment(db, userId, workDate), settings ?? toDaySettings(getWorkSettings(db)));
+}
+function applyDayAdjustment(db, userId, workDate, patch) {
+  const adj = { ...readAdjustment(db, userId, workDate), ...patch };
+  writeDay(db, userId, workDate, adj, toDaySettings(getWorkSettings(db)));
+}
+function recomputeRange(db, from, to) {
+  const settings = toDaySettings(getWorkSettings(db));
+  const pairs = db.prepare(
+    `SELECT user_id, work_date FROM detections WHERE work_date BETWEEN ? AND ?
+       UNION
+       SELECT user_id, work_date FROM attendance_days WHERE work_date BETWEEN ? AND ?`
+  ).all(from, to, from, to);
+  tx(db, () => {
+    for (const p of pairs) recomputeDay(db, p.user_id, p.work_date, settings);
+  });
+  return pairs.length;
+}
+var init_attendance = __esm({
+  "server/attendance.ts"() {
+    init_vntime();
+    init_db();
+    init_settings();
+  }
+});
+
+// server/hanet.ts
+import { randomBytes as randomBytes3 } from "node:crypto";
+function normalizeTs(raw, now) {
+  if (raw === null || raw <= 0) return { ts: now, fromServer: true };
+  return { ts: raw < 1e12 ? Math.round(raw * 1e3) : raw, fromServer: false };
+}
+function parseCheckin(body, now) {
+  if (!body || typeof body !== "object") return null;
+  const b = body;
+  const d = b.data && typeof b.data === "object" ? b.data : b;
+  const deviceId = str(d.deviceID);
+  const aliasId = str(d.aliasID);
+  const personId = str(d.personID);
+  if (!deviceId || !aliasId && !personId) return null;
+  const { ts, fromServer } = normalizeTs(num(d.time ?? d.checkinTime), now);
+  return {
+    input: {
+      personId,
+      aliasId,
+      personName: str(d.personName),
+      personType: num(d.personType ?? d.type),
+      deviceId,
+      deviceName: str(d.deviceName),
+      placeId: num(d.placeID),
+      ts,
+      imageUrl: str(d.detected_image_url ?? d.avatar)
+    },
+    note: fromServer ? "Thi\u1EBFu th\u1EDDi gian t\u1EEB Hanet, d\xF9ng gi\u1EDD nh\u1EADn" : null
+  };
+}
+function parseStranger(body, now) {
+  if (!body || typeof body !== "object") return null;
+  const b = body;
+  const d = b.data && typeof b.data === "object" ? b.data : b;
+  const deviceId = str(d.deviceID);
+  const imageUrl = str(d.detected_image_url);
+  if (num(d.personType) !== 2 || !deviceId || !imageUrl) return null;
+  return { deviceId, deviceName: str(d.deviceName), ts: normalizeTs(num(d.time), now).ts, imageUrl };
+}
+function ingestCheckin(db, input, source) {
+  if (input.personType !== null && input.personType !== 0) return { status: "ignored", message: "Kh\xF4ng ph\u1EA3i nh\xE2n vi\xEAn" };
+  let user;
+  if (input.aliasId) user = db.prepare("SELECT id, status FROM users WHERE code = ?").get(input.aliasId.toUpperCase());
+  if (!user && input.personId) user = db.prepare("SELECT id, status FROM users WHERE hanet_person_id = ?").get(input.personId);
+  if (!user) return { status: "ignored", message: UNMATCHED_MESSAGE };
+  if (user.status !== "active") return { status: "ignored", message: "Nh\xE2n vi\xEAn \u0111\xE3 ng\u1EEBng ho\u1EA1t \u0111\u1ED9ng", userId: user.id };
+  const userId = user.id;
+  const workDate = toVnDate(input.ts);
+  return tx(db, () => {
+    const r = db.prepare(
+      `INSERT INTO detections(user_id, hanet_person_id, device_id, device_name, place_id, ts, work_date, image_url, source)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, device_id, ts) DO NOTHING`
+    ).run(userId, input.personId, input.deviceId, input.deviceName, input.placeId, input.ts, workDate, input.imageUrl, source);
+    if (Number(r.changes) === 0) return { status: "duplicate", message: "L\u01B0\u1EE3t nh\u1EADn di\u1EC7n \u0111\xE3 c\xF3", userId };
+    recomputeDay(db, userId, workDate);
+    return { status: "success", message: `\u0110\xE3 ghi nh\u1EADn ng\xE0y ${workDate}`, userId };
+  });
+}
+function logWebhook(db, e, now) {
+  db.prepare("INSERT INTO webhook_logs(received_at, status, person_name, device_name, message, raw_payload) VALUES (?, ?, ?, ?, ?, ?)").run(
+    new Date(now).toISOString(),
+    e.status,
+    e.personName ?? null,
+    e.deviceName ?? null,
+    e.message ?? null,
+    e.rawPayload === void 0 ? null : JSON.stringify(e.rawPayload)
+  );
+  db.prepare("DELETE FROM webhook_logs WHERE id <= (SELECT id FROM webhook_logs ORDER BY id DESC LIMIT 1 OFFSET ?)").run(WEBHOOK_LOG_LIMIT);
+}
+function getWebhookToken(db) {
+  return getSetting(db, WEBHOOK_TOKEN_KEY) ?? rotateWebhookToken(db);
+}
+function rotateWebhookToken(db) {
+  const token = randomBytes3(24).toString("base64url");
+  setSetting(db, WEBHOOK_TOKEN_KEY, token);
+  return token;
+}
+function mask(v) {
+  return v ? `\u2022\u2022\u2022\u2022${v.slice(-4)}` : "";
+}
+function getPlaceIds(db) {
+  try {
+    const v = JSON.parse(getSetting(db, "hanet.place_ids") ?? "[]");
+    return Array.isArray(v) ? v.filter((n) => Number.isInteger(n) && n > 0) : [];
+  } catch {
+    return [];
+  }
+}
+function reconcileEnabled(db) {
+  return Boolean(getSetting(db, "hanet.client_id")) && Boolean(getSetting(db, "hanet.refresh_token") || getSetting(db, "hanet.access_token")) && getPlaceIds(db).length > 0;
+}
+function getHanetConfigView(db) {
+  return {
+    clientId: getSetting(db, "hanet.client_id") ?? "",
+    clientSecret: mask(getSetting(db, "hanet.client_secret")),
+    accessToken: mask(getSetting(db, "hanet.access_token")),
+    refreshToken: mask(getSetting(db, "hanet.refresh_token")),
+    apiBase: getSetting(db, "hanet.api_base") ?? HANET_DEFAULT_API_BASE,
+    placeIds: getPlaceIds(db),
+    webhookPath: `/api/hanet/webhook/${getWebhookToken(db)}`,
+    lastReconcileAt: getSetting(db, "hanet.last_reconcile_at") ?? null,
+    lastReconcileError: getSetting(db, "hanet.last_reconcile_error") ?? null,
+    reconcileEnabled: reconcileEnabled(db)
+  };
+}
+function updateHanetConfig(db, body) {
+  const b = body ?? {};
+  for (const [field, key] of TEXT_FIELDS) {
+    const v = b[field];
+    if (typeof v === "string" && v.trim() !== "" && !v.startsWith("\u2022\u2022\u2022\u2022")) setSetting(db, key, v.trim());
+  }
+  if (Array.isArray(b.placeIds)) {
+    const ids = b.placeIds.map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    setSetting(db, "hanet.place_ids", JSON.stringify(ids));
+  }
+}
+var str, num, STRANGER_MESSAGE, UNMATCHED_MESSAGE, WEBHOOK_LOG_LIMIT, WEBHOOK_TOKEN_KEY, HANET_DEFAULT_API_BASE, TEXT_FIELDS;
+var init_hanet = __esm({
+  "server/hanet.ts"() {
+    init_db();
+    init_attendance();
+    init_settings();
+    init_vntime();
+    str = (v) => v === void 0 || v === null || String(v).trim() === "" ? null : String(v).trim();
+    num = (v) => {
+      const s = str(v);
+      if (s === null) return null;
+      const n = Number(s);
+      return Number.isFinite(n) ? n : null;
+    };
+    STRANGER_MESSAGE = "Ng\u01B0\u1EDDi l\u1EA1";
+    UNMATCHED_MESSAGE = "Kh\xF4ng kh\u1EDBp nh\xE2n vi\xEAn n\xE0o";
+    WEBHOOK_LOG_LIMIT = 500;
+    WEBHOOK_TOKEN_KEY = "hanet.webhook_token";
+    HANET_DEFAULT_API_BASE = "https://partner.hanet.ai";
+    TEXT_FIELDS = [
+      ["clientId", "hanet.client_id"],
+      ["clientSecret", "hanet.client_secret"],
+      ["accessToken", "hanet.access_token"],
+      ["refreshToken", "hanet.refresh_token"],
+      ["apiBase", "hanet.api_base"]
+    ];
+  }
+});
+
+// server/hanet-api.ts
+function describeHanetError(code) {
+  return HANET_ERROR_TEXT[code] ?? null;
+}
+function isTransientError(err) {
+  return err instanceof HanetApiError ? err.transient : true;
+}
+async function postForm(deps, url, params) {
+  const res = await deps.fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(params).toString(),
+    signal: AbortSignal.timeout(HANET_TIMEOUT_MS)
+  });
+  if (!res.ok) throw new HanetApiError(res.status, `HTTP ${res.status} t\u1EEB ${url}`, res.status >= 500 || res.status === 429);
+  try {
+    return await res.json();
+  } catch {
+    throw new HanetApiError(0, `Hanet tr\u1EA3 d\u1EEF li\u1EC7u kh\xF4ng \u0111\u1ECDc \u0111\u01B0\u1EE3c t\u1EEB ${url}`, true);
+  }
+}
+async function refreshAccessToken(deps) {
+  const { db } = deps;
+  const refreshToken = getSetting(db, "hanet.refresh_token");
+  const clientId = getSetting(db, "hanet.client_id");
+  const clientSecret = getSetting(db, "hanet.client_secret");
+  if (!refreshToken || !clientId || !clientSecret) {
+    throw new HanetApiError(0, "L\xE0m m\u1EDBi token th\u1EA5t b\u1EA1i: thi\u1EBFu Client ID, Client Secret ho\u1EB7c Refresh Token");
+  }
+  const body = await postForm(deps, OAUTH_TOKEN_URL, {
+    grant_type: "refresh_token",
+    client_id: clientId,
+    client_secret: clientSecret,
+    refresh_token: refreshToken
+  });
+  const token = body?.access_token;
+  if (typeof token !== "string" || !token) {
+    throw new HanetApiError(Number(body?.returnCode ?? 0), `L\xE0m m\u1EDBi token th\u1EA5t b\u1EA1i: ${body?.returnMessage ?? body?.error ?? "kh\xF4ng r\xF5 l\xFD do"}`);
+  }
+  setSetting(db, "hanet.access_token", token);
+  if (typeof body.refresh_token === "string" && body.refresh_token) setSetting(db, "hanet.refresh_token", body.refresh_token);
+  return token;
+}
+async function callApi(deps, apiPath, params, retried = false) {
+  const token = getSetting(deps.db, "hanet.access_token") ?? await refreshAccessToken(deps);
+  const base = (getSetting(deps.db, "hanet.api_base") ?? HANET_DEFAULT_API_BASE).replace(/\/+$/, "");
+  const body = await postForm(deps, base + apiPath, { token, ...params });
+  const code = Number(body?.returnCode);
+  if (code === TOKEN_EXPIRED && !retried) {
+    await refreshAccessToken(deps);
+    return callApi(deps, apiPath, params, true);
+  }
+  if (code !== 1) {
+    const text = describeHanetError(code);
+    throw new HanetApiError(code, text ? `${text} (m\xE3 ${code})` : `Hanet tr\u1EA3 l\u1ED7i ${code}: ${body?.returnMessage ?? ""}`);
+  }
+  return body;
+}
+async function fetchCheckins(deps, placeId, from, to) {
+  const all = [];
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const body = await callApi(deps, "/person/getCheckinByPlaceIdInTimestamp", {
+      placeID: String(placeId),
+      from: String(from),
+      to: String(to),
+      type: "0",
+      page: String(page),
+      size: String(PAGE_SIZE)
+    });
+    const data = Array.isArray(body.data) ? body.data : [];
+    all.push(...data);
+    if (data.length < PAGE_SIZE) break;
+  }
+  return all;
+}
+async function reconcileRange(deps, from, to) {
+  const { db } = deps;
+  const summary = { inserted: 0, duplicates: 0, ignored: 0 };
+  try {
+    for (const placeId of getPlaceIds(db)) {
+      for (const item of await fetchCheckins(deps, placeId, from, to)) {
+        const parsed = parseCheckin(item, deps.now());
+        if (!parsed) {
+          summary.ignored++;
+          continue;
+        }
+        const r = ingestCheckin(db, parsed.input, "reconcile");
+        if (r.status === "success") summary.inserted++;
+        else if (r.status === "duplicate") summary.duplicates++;
+        else summary.ignored++;
+      }
+    }
+  } catch (err) {
+    setSetting(db, "hanet.last_reconcile_error", err.message);
+    throw err;
+  }
+  setSetting(db, "hanet.last_reconcile_at", new Date(deps.now()).toISOString());
+  deleteSetting(db, "hanet.last_reconcile_error");
+  return summary;
+}
+async function reconcileDate(deps, date) {
+  const from = vnDayStart(date);
+  const to = Math.min(vnDayStart(addDays(date, 1)) - 1, deps.now());
+  return reconcileRange(deps, from, to);
+}
+var HANET_TIMEOUT_MS, PERMANENT_CODES, HANET_ERROR_TEXT, HanetApiError, OAUTH_TOKEN_URL, PAGE_SIZE, TOKEN_EXPIRED, MAX_PAGES, arr, hanetApi;
+var init_hanet_api = __esm({
+  "server/hanet-api.ts"() {
+    init_settings();
+    init_hanet();
+    init_vntime();
+    HANET_TIMEOUT_MS = 15e3;
+    PERMANENT_CODES = /* @__PURE__ */ new Set([-1, -2035, -1005, -101, -5011, -9005, -9006, -9007, -9008, -5010, -909, -9002]);
+    HANET_ERROR_TEXT = {
+      [-1]: "D\u1EEF li\u1EC7u g\u1EEDi Hanet kh\xF4ng h\u1EE3p l\u1EC7",
+      [-103]: "Token Hanet h\u1EBFt h\u1EA1n",
+      [-2035]: "T\xE0i kho\u1EA3n Hanet kh\xF4ng c\xF3 quy\u1EC1n v\u1EDBi \u0111\u1ECBa \u0111i\u1EC3m ho\u1EB7c thi\u1EBFt b\u1ECB n\xE0y",
+      [-503]: "H\u1EC7 th\u1ED1ng Hanet \u0111ang l\u1ED7i",
+      [-101]: "Kh\xF4ng t\xECm th\u1EA5y thi\u1EBFt b\u1ECB tr\xEAn Hanet",
+      [-102]: "Thi\u1EBFt b\u1ECB \u0111ang offline",
+      [-1005]: "Kh\xF4ng t\xECm th\u1EA5y \u0111\u1ECBa \u0111i\u1EC3m tr\xEAn Hanet",
+      [-5011]: "Kh\xF4ng t\xECm th\u1EA5y ng\u01B0\u1EDDi n\xE0y tr\xEAn Hanet",
+      [-9005]: "Ng\u01B0\u1EDDi n\xE0y \u0111\xE3 c\xF3 tr\xEAn Hanet",
+      [-9006]: "\u1EA2nh kh\xF4ng \u0111\u1EA1t: c\u1EA7n r\xF5 m\u1EB7t, m\u1ED9t ng\u01B0\u1EDDi, nh\xECn th\u1EB3ng, kh\xF4ng m\u0169, kh\xF4ng kh\u1EA9u trang",
+      [-9007]: "\u1EA2nh tr\xF9ng v\u1EDBi ng\u01B0\u1EDDi \u0111\xE3 \u0111\u0103ng k\xFD",
+      [-9008]: "\u0110\u1ECBa \u0111i\u1EC3m \u0111\xE3 h\u1EBFt s\u1ED1 khu\xF4n m\u1EB7t mi\u1EC5n ph\xED, c\u1EA7n mua g\xF3i cloud Hanet",
+      [-5010]: "\u1EA2nh kh\xF4ng h\u1EE3p l\u1EC7",
+      [-909]: "T\u1EA3i \u1EA3nh l\xEAn Hanet th\u1EA5t b\u1EA1i",
+      [-9002]: "\u0110\u1ECBnh d\u1EA1ng \u1EA3nh kh\xF4ng \u0111\u01B0\u1EE3c h\u1ED7 tr\u1EE3"
+    };
+    HanetApiError = class extends Error {
+      constructor(returnCode, message, transient = !PERMANENT_CODES.has(returnCode)) {
+        super(message);
+        this.returnCode = returnCode;
+        this.transient = transient;
+      }
+    };
+    OAUTH_TOKEN_URL = "https://oauth.hanet.com/token";
+    PAGE_SIZE = 500;
+    TOKEN_EXPIRED = -103;
+    MAX_PAGES = 200;
+    arr = (v) => Array.isArray(v) ? v : [];
+    hanetApi = {
+      async getProfile(deps) {
+        const d = (await callApi(deps, "/profile/getProfile", {})).data ?? {};
+        return { name: String(d.name ?? ""), email: String(d.email ?? "") };
+      },
+      async getPlaces(deps) {
+        return arr((await callApi(deps, "/place/getPlaces", {})).data).map((p) => ({
+          id: Number(p.id),
+          name: String(p.name ?? ""),
+          address: String(p.address ?? "")
+        }));
+      },
+      async listDevices(deps, placeId) {
+        return arr((await callApi(deps, "/device/getListDeviceByPlace", { placeID: String(placeId) })).data);
+      },
+      async connectionStatus(deps, deviceIds) {
+        if (deviceIds.length === 0) return {};
+        const d = (await callApi(deps, "/device/getConnectionStatus", { deviceIDs: deviceIds.join(",") })).data;
+        return d && typeof d === "object" && !Array.isArray(d) ? d : {};
+      },
+      async updateDevice(deps, deviceId, name) {
+        await callApi(deps, "/device/updateDevice", { deviceID: deviceId, deviceName: name });
+      },
+      async listPersons(deps, placeId, page, size) {
+        return arr(
+          (await callApi(deps, "/person/getListByPlace", { placeID: String(placeId), type: "0", page: String(page), size: String(size) })).data
+        );
+      },
+      async personsByAlias(deps, aliasId) {
+        return arr((await callApi(deps, "/person/getUserInfoByAliasID", { aliasID: aliasId })).data);
+      },
+      async registerByUrl(deps, p) {
+        const d = (await callApi(deps, "/person/registerByUrl", {
+          name: p.name,
+          aliasID: p.aliasId,
+          placeID: String(p.placeId),
+          url: p.url,
+          title: p.title,
+          type: "0"
+        })).data;
+        return d?.personID ? String(d.personID) : null;
+      },
+      async updateFaceByUrl(deps, p) {
+        await callApi(deps, "/person/updateByFaceUrlByAliasID", { aliasID: p.aliasId, placeID: String(p.placeId), url: p.url });
+      },
+      async updateInfo(deps, p) {
+        await callApi(deps, "/person/updateInfo", { aliasID: p.aliasId, placeID: String(p.placeId), name: p.name, title: p.title });
+      },
+      async updateAliasId(deps, personId, aliasId) {
+        await callApi(deps, "/person/updateAliasID", { personID: personId, aliasID: aliasId });
+      },
+      async removeByPlace(deps, aliasId, placeId) {
+        await callApi(deps, "/person/removeByPlace", { aliasID: aliasId, placeID: String(placeId) });
+      },
+      async removeById(deps, personId) {
+        await callApi(deps, "/person/removePersonByID", { personID: personId });
+      },
+      async listDepartments(deps, placeId, keyword) {
+        const d = (await callApi(deps, "/department/list", { placeID: String(placeId), keyword, page: "1", size: "50" })).data;
+        return arr(d?.hits).map((h) => ({ id: Number(h.id), name: String(h.name ?? "") }));
+      },
+      async createDepartment(deps, placeId, name, desc) {
+        const d = (await callApi(deps, "/department/create", { placeID: String(placeId), name, desc })).data;
+        const id = Number(d?.id);
+        if (!Number.isInteger(id) || id <= 0) throw new HanetApiError(0, "Hanet kh\xF4ng tr\u1EA3 ID ph\xF2ng ban v\u1EEBa t\u1EA1o");
+        return id;
+      },
+      async updateDepartment(deps, id, name, desc) {
+        await callApi(deps, "/department/update", { id: String(id), name, desc });
+      },
+      async removeDepartment(deps, id) {
+        await callApi(deps, "/department/remove", { id: String(id) });
+      },
+      async addPersonsToDepartment(deps, deptId, personIds) {
+        await callApi(deps, "/department/add-person", { departmentID: String(deptId), personIDs: personIds.join(",") });
+      },
+      async removePersonFromDepartment(deps, deptId, personId) {
+        await callApi(deps, "/department/remove-person", { departmentID: String(deptId), personID: personId });
+      }
+    };
+  }
+});
+
+// server/sync-handlers.ts
+var sync_handlers_exports = {};
+__export(sync_handlers_exports, {
+  SYNC_HANDLERS: () => SYNC_HANDLERS
+});
+function placeOf(deps) {
+  const id = getPlaceIds(deps.db)[0];
+  if (!id) throw new SyncDeferred("Ch\u01B0a ch\u1ECDn \u0111\u1ECBa \u0111i\u1EC3m Hanet");
+  return id;
+}
+async function ignoreNotFound(fn) {
+  try {
+    await fn();
+  } catch (err) {
+    if (!(err instanceof HanetApiError) || err.returnCode !== -5011) throw err;
+  }
+}
+var userRow, deptRow, norm, SYNC_HANDLERS;
+var init_sync_handlers = __esm({
+  "server/sync-handlers.ts"() {
+    init_hanet_api();
+    init_hanet_sync();
+    init_hanet();
+    userRow = (deps, id) => deps.db.prepare("SELECT code, name, position, hanet_person_id, face_registered FROM users WHERE id = ?").get(id);
+    deptRow = (deps, id) => deps.db.prepare("SELECT name, description, hanet_department_id FROM departments WHERE id = ?").get(id);
+    norm = (s) => s.trim().toLocaleLowerCase("vi");
+    SYNC_HANDLERS = {
+      "camera.rename": async (deps, job) => {
+        await hanetApi.updateDevice(deps, String(job.payload.deviceId), String(job.payload.name));
+      },
+      "user.alias": async (deps, job) => {
+        await hanetApi.updateAliasId(deps, String(job.payload.personId), String(job.payload.code));
+      },
+      "user.info": async (deps, job) => {
+        const u = userRow(deps, job.entityId);
+        if (!u || u.face_registered !== 1) return;
+        await hanetApi.updateInfo(deps, { aliasId: u.code, placeId: placeOf(deps), name: u.name, title: u.position ?? "" });
+      },
+      "user.department": async (deps, job) => {
+        const u = userRow(deps, job.entityId);
+        if (!u) return;
+        const personId = u.hanet_person_id;
+        if (!personId) throw new SyncDeferred("Ch\u1EDD \u0111\u0103ng k\xFD FaceID");
+        let toHanet = null;
+        const toId = job.payload.toDepartmentId;
+        if (toId) {
+          const d = deptRow(deps, toId);
+          if (d) {
+            if (!d.hanet_department_id) throw new SyncDeferred("Ch\u1EDD ph\xF2ng ban \u0111\u1ED3ng b\u1ED9 l\xEAn Hanet");
+            toHanet = Number(d.hanet_department_id);
+          }
+        }
+        const fromHanet = job.payload.fromHanetDeptId ? Number(job.payload.fromHanetDeptId) : null;
+        if (fromHanet && fromHanet !== toHanet) await ignoreNotFound(() => hanetApi.removePersonFromDepartment(deps, fromHanet, personId));
+        if (toHanet) await hanetApi.addPersonsToDepartment(deps, toHanet, [personId]);
+      },
+      "user.remove": async (deps, job) => {
+        const placeId = placeOf(deps);
+        try {
+          await hanetApi.removeByPlace(deps, String(job.payload.code), placeId);
+        } catch (err) {
+          if (!(err instanceof HanetApiError) || err.returnCode !== -5011) throw err;
+          if (job.payload.personId) await ignoreNotFound(() => hanetApi.removeById(deps, String(job.payload.personId)));
+        }
+      },
+      "dept.create": async (deps, job) => {
+        const d = deptRow(deps, job.entityId);
+        if (!d || d.hanet_department_id) return;
+        const placeId = placeOf(deps);
+        const same = (await hanetApi.listDepartments(deps, placeId, d.name.trim())).find((h) => norm(h.name) === norm(d.name));
+        const hanetId = same ? same.id : await hanetApi.createDepartment(deps, placeId, d.name, d.description ?? "");
+        deps.db.prepare("UPDATE departments SET hanet_department_id = ? WHERE id = ?").run(String(hanetId), job.entityId);
+        wakeOp(deps.db, "user.department", deps.now());
+      },
+      "dept.update": async (deps, job) => {
+        const d = deptRow(deps, job.entityId);
+        if (!d) return;
+        if (!d.hanet_department_id) throw new SyncDeferred("Ch\u1EDD t\u1EA1o ph\xF2ng ban tr\xEAn Hanet");
+        await hanetApi.updateDepartment(deps, Number(d.hanet_department_id), d.name, d.description ?? "");
+      },
+      "dept.remove": async (deps, job) => {
+        await ignoreNotFound(() => hanetApi.removeDepartment(deps, Number(job.payload.hanetDepartmentId)));
+      }
+    };
+  }
+});
+
+// server/hanet-sync.ts
+function retryDelayMs(attempts) {
+  return (RETRY_DELAYS_MIN[attempts - 1] ?? RETRY_LATER_MIN) * 6e4;
+}
+function claimSet(db) {
+  let s = claimed.get(db);
+  if (!s) {
+    s = /* @__PURE__ */ new Set();
+    claimed.set(db, s);
+  }
+  return s;
+}
+function refreshEntityStatus(db, entityType, entityId) {
+  const table = STATUS_TABLE[entityType];
+  if (!table) return;
+  const c = db.prepare(
+    `SELECT SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS e, SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS p
+       FROM sync_jobs WHERE entity_type = ? AND entity_id = ?`
+  ).get(entityType, entityId);
+  const status = Number(c.e ?? 0) > 0 ? "error" : Number(c.p ?? 0) > 0 ? "pending" : "synced";
+  const last = db.prepare(
+    `SELECT last_error FROM sync_jobs WHERE entity_type = ? AND entity_id = ? AND status IN ('pending', 'error') AND last_error IS NOT NULL
+       ORDER BY updated_at DESC, id DESC LIMIT 1`
+  ).get(entityType, entityId);
+  db.prepare(`UPDATE ${table} SET hanet_sync_status = ?, hanet_sync_error = ? WHERE id = ?`).run(
+    status,
+    status === "synced" ? null : last?.last_error ?? null,
+    entityId
+  );
+}
+function enqueue(db, entityType, entityId, op, payload, now) {
+  tx(db, () => {
+    if (REMOVE.has(op)) dropEntityJobs(db, entityType, entityId);
+    if (COALESCE.has(op)) {
+      const busy = [...claimSet(db)];
+      const notBusy = busy.length ? ` AND id NOT IN (${busy.map(() => "?").join(", ")})` : "";
+      const r = db.prepare(
+        `UPDATE sync_jobs SET payload = ?, updated_at = ?
+           WHERE entity_type = ? AND entity_id = ? AND op = ? AND status = 'pending' AND attempts = 0${notBusy}`
+      ).run(JSON.stringify(payload), now, entityType, entityId, op, ...busy);
+      if (Number(r.changes) > 0) {
+        refreshEntityStatus(db, entityType, entityId);
+        return;
+      }
+    }
+    db.prepare(
+      `INSERT INTO sync_jobs(entity_type, entity_id, op, payload, status, attempts, next_run_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'pending', 0, ?, ?, ?)`
+    ).run(entityType, entityId, op, JSON.stringify(payload), now, now, now);
+    refreshEntityStatus(db, entityType, entityId);
+  });
+}
+function dropEntityJobs(db, entityType, entityId) {
+  const busy = [...claimSet(db)];
+  const notBusy = busy.length ? ` AND id NOT IN (${busy.map(() => "?").join(", ")})` : "";
+  db.prepare(`DELETE FROM sync_jobs WHERE entity_type = ? AND entity_id = ? AND status IN ('pending', 'error')${notBusy}`).run(
+    entityType,
+    entityId,
+    ...busy
+  );
+}
+function wakeEntity(db, entityType, entityId, now) {
+  db.prepare("UPDATE sync_jobs SET next_run_at = ? WHERE entity_type = ? AND entity_id = ? AND status = 'pending'").run(now, entityType, entityId);
+}
+function wakeOp(db, op, now) {
+  db.prepare("UPDATE sync_jobs SET next_run_at = ? WHERE op = ? AND status = 'pending'").run(now, op);
+}
+function toJob(r) {
+  return { id: r.id, entityType: r.entity_type, entityId: r.entity_id, op: r.op, payload: JSON.parse(r.payload), attempts: r.attempts };
+}
+async function runJob(deps, handlers, job) {
+  const { db } = deps;
+  let result;
+  try {
+    const handler = handlers[job.op];
+    if (!handler) throw Object.assign(new Error(`Ch\u01B0a h\u1ED7 tr\u1EE3 thao t\xE1c ${job.op}`), { permanent: true });
+    await handler(deps, job);
+    db.prepare("UPDATE sync_jobs SET status = 'done', last_error = NULL, updated_at = ? WHERE id = ?").run(deps.now(), job.id);
+    result = "done";
+  } catch (err) {
+    const now = deps.now();
+    const message = err.message;
+    if (err instanceof SyncDeferred) {
+      db.prepare("UPDATE sync_jobs SET next_run_at = ?, last_error = ?, updated_at = ? WHERE id = ?").run(now + DEFER_MS, message, now, job.id);
+      result = "deferred";
+    } else {
+      const attempts = job.attempts + 1;
+      const permanent = Boolean(err.permanent) || !isTransientError(err);
+      if (permanent || attempts >= MAX_ATTEMPTS) {
+        db.prepare("UPDATE sync_jobs SET status = 'error', attempts = ?, last_error = ?, updated_at = ? WHERE id = ?").run(attempts, message, now, job.id);
+      } else {
+        db.prepare("UPDATE sync_jobs SET attempts = ?, next_run_at = ?, last_error = ?, updated_at = ? WHERE id = ?").run(
+          attempts,
+          now + retryDelayMs(attempts),
+          message,
+          now,
+          job.id
+        );
+      }
+      const code = err instanceof HanetApiError ? err.returnCode : "network";
+      console.warn(`[SYNC] op=${job.op} entity=${job.entityType}:${job.entityId} code=${code}`);
+      result = "failed";
+    }
+  }
+  refreshEntityStatus(db, job.entityType, job.entityId);
+  return result;
+}
+async function runClaimed(deps, handlers, row) {
+  const claims = claimSet(deps.db);
+  if (claims.has(row.id)) return null;
+  claims.add(row.id);
+  try {
+    const fresh = deps.db.prepare(`${HEAD_SQL} AND j.id = ?`).get(deps.now(), row.id);
+    if (!fresh) return null;
+    return await runJob(deps, handlers, toJob(fresh));
+  } finally {
+    claims.delete(row.id);
+  }
+}
+async function runDueJobs(deps, handlers, limit = RUN_LIMIT) {
+  const out = { done: 0, failed: 0, deferred: 0 };
+  if (!reconcileEnabled(deps.db)) return out;
+  const rows = deps.db.prepare(`${HEAD_SQL} ORDER BY j.id LIMIT ?`).all(deps.now(), limit);
+  for (const row of rows) {
+    const r = await runClaimed(deps, handlers, row);
+    if (r) out[r]++;
+  }
+  return out;
+}
+async function runEntityJobs(deps, handlers, entityType, entityId) {
+  if (!reconcileEnabled(deps.db)) return;
+  for (let i = 0; i < 10; i++) {
+    const row = deps.db.prepare(`${HEAD_SQL} AND j.entity_type = ? AND j.entity_id = ? LIMIT 1`).get(deps.now(), entityType, entityId);
+    if (!row || await runClaimed(deps, handlers, row) !== "done") return;
+  }
+}
+function depsOf(ctx) {
+  return { db: ctx.db, fetch: ctx.fetch, now: ctx.now };
+}
+function kickEntity(ctx, entityType, entityId) {
+  if (!ctx.config.kickSync) return;
+  void Promise.resolve().then(() => (init_sync_handlers(), sync_handlers_exports)).then(({ SYNC_HANDLERS: SYNC_HANDLERS2 }) => runEntityJobs(depsOf(ctx), SYNC_HANDLERS2, entityType, entityId)).catch((err) => console.error("[SYNC] l\u1ED7i ch\u1EA1y ngay:", err.message));
+}
+function kickAll(ctx) {
+  if (!ctx.config.kickSync) return;
+  void Promise.resolve().then(() => (init_sync_handlers(), sync_handlers_exports)).then(({ SYNC_HANDLERS: SYNC_HANDLERS2 }) => runDueJobs(depsOf(ctx), SYNC_HANDLERS2)).catch((err) => console.error("[SYNC] l\u1ED7i ch\u1EA1y h\xE0ng \u0111\u1EE3i:", err.message));
+}
+function retryJobs(db, filter, now) {
+  const where = ["status = 'error'"];
+  const params = [];
+  if (filter.jobId !== void 0) {
+    where.push("id = ?");
+    params.push(filter.jobId);
+  }
+  if (filter.entityType && filter.entityId) {
+    where.push("entity_type = ? AND entity_id = ?");
+    params.push(filter.entityType, filter.entityId);
+  }
+  const affected = db.prepare(`SELECT DISTINCT entity_type, entity_id FROM sync_jobs WHERE ${where.join(" AND ")}`).all(...params);
+  const r = db.prepare(`UPDATE sync_jobs SET status = 'pending', attempts = 0, next_run_at = ?, updated_at = ? WHERE ${where.join(" AND ")}`).run(now, now, ...params);
+  for (const a of affected) refreshEntityStatus(db, a.entity_type, a.entity_id);
+  return Number(r.changes);
+}
+function labelOf(db, type, id, payload) {
+  if (type === "user") {
+    const u = db.prepare("SELECT name, code FROM users WHERE id = ?").get(id);
+    if (u) return `${u.name} (${u.code})`;
+  } else {
+    const row = db.prepare(`SELECT name FROM ${type === "department" ? "departments" : "cameras"} WHERE id = ?`).get(id);
+    if (row) return row.name;
+  }
+  return String(payload.name ?? payload.code ?? id);
+}
+function syncSummary(db) {
+  const c = db.prepare(
+    `SELECT SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS p, SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS e FROM sync_jobs`
+  ).get();
+  const rows = db.prepare("SELECT * FROM sync_jobs WHERE status = 'error' ORDER BY updated_at DESC, id DESC LIMIT 50").all();
+  const errors = rows.map((r) => {
+    const payload = JSON.parse(r.payload);
+    return {
+      id: r.id,
+      entityType: r.entity_type,
+      entityId: r.entity_id,
+      op: r.op,
+      label: labelOf(db, r.entity_type, r.entity_id, payload),
+      attempts: r.attempts,
+      lastError: r.last_error ?? null,
+      updatedAt: r.updated_at
+    };
+  });
+  return { pending: Number(c.p ?? 0), error: Number(c.e ?? 0), errors };
+}
+function purgeDoneJobs(db, now) {
+  return Number(db.prepare("DELETE FROM sync_jobs WHERE status = 'done' AND updated_at < ?").run(now - DONE_TTL_MS).changes);
+}
+var SyncDeferred, RETRY_DELAYS_MIN, RETRY_LATER_MIN, MAX_ATTEMPTS, DEFER_MS, DONE_TTL_MS, RUN_LIMIT, COALESCE, REMOVE, STATUS_TABLE, claimed, HEAD_SQL;
+var init_hanet_sync = __esm({
+  "server/hanet-sync.ts"() {
+    init_db();
+    init_hanet_api();
+    init_hanet();
+    SyncDeferred = class extends Error {
+    };
+    RETRY_DELAYS_MIN = [1, 2, 5, 15];
+    RETRY_LATER_MIN = 60;
+    MAX_ATTEMPTS = 20;
+    DEFER_MS = 5 * 6e4;
+    DONE_TTL_MS = 7 * 24 * 60 * 6e4;
+    RUN_LIMIT = 50;
+    COALESCE = /* @__PURE__ */ new Set(["user.info", "dept.update", "camera.rename"]);
+    REMOVE = /* @__PURE__ */ new Set(["user.remove", "dept.remove"]);
+    STATUS_TABLE = { user: "users", department: "departments" };
+    claimed = /* @__PURE__ */ new WeakMap();
+    HEAD_SQL = `SELECT j.* FROM sync_jobs j
+  WHERE j.status = 'pending' AND j.next_run_at <= ?
+    AND j.id = (SELECT MIN(k.id) FROM sync_jobs k WHERE k.entity_type = j.entity_type AND k.entity_id = j.entity_id AND k.status IN ('pending', 'error'))`;
+  }
+});
+
+// server/check-node.ts
+var [major, minor] = process.versions.node.split(".").map(Number);
+if (major < 22 || major === 22 && minor < 13) {
+  console.error(`[STARTUP] C\u1EA7n Node.js >= 22.13 (\u0111ang ch\u1EA1y ${process.versions.node}). H\xE3y n\xE2ng c\u1EA5p Node r\u1ED3i ch\u1EA1y l\u1EA1i.`);
+  process.exit(1);
+}
+
+// server/index.ts
+init_db();
+import "dotenv/config";
+import path3 from "node:path";
+import express2 from "express";
+
+// server/app.ts
+init_errors();
+import express from "express";
 
 // server/auth.ts
 import { randomBytes as randomBytes2, scryptSync, timingSafeEqual, createHash } from "node:crypto";
@@ -306,41 +1269,12 @@ function scopeWhere(scope, userIdCol, deptCol) {
   }
 }
 
-// server/vntime.ts
-var VN_OFFSET_MS = 7 * 60 * 60 * 1e3;
-var DAY_MS = 24 * 60 * 60 * 1e3;
-function toVnDate(ts) {
-  return new Date(ts + VN_OFFSET_MS).toISOString().slice(0, 10);
-}
-function vnMinutesOfDay(ts) {
-  const d = new Date(ts + VN_OFFSET_MS);
-  return d.getUTCHours() * 60 + d.getUTCMinutes();
-}
-function parseHHmm(s) {
-  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(s);
-  if (!m) throw new Error(`Gi\u1EDD kh\xF4ng h\u1EE3p l\u1EC7: ${s}`);
-  return Number(m[1]) * 60 + Number(m[2]);
-}
-function isValidDate(s) {
-  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
-  const t = Date.parse(`${s}T00:00:00Z`);
-  return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === s;
-}
-function vnDateTimeToTs(date, hhmm2) {
-  const [y, mo, d] = date.split("-").map(Number);
-  return Date.UTC(y, mo - 1, d, 0, parseHHmm(hhmm2)) - VN_OFFSET_MS;
-}
-function vnDayStart(date) {
-  return vnDateTimeToTs(date, "00:00");
-}
-function addDays(date, n) {
-  return new Date(Date.parse(`${date}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
-}
-function daysBetween(from, to) {
-  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS);
-}
+// server/middleware.ts
+init_errors();
 
 // server/bootstrap.ts
+init_db();
+init_vntime();
 var DEFAULT_ADMIN_PASSWORD = "Admin@123";
 var SYSTEM_ADMIN_CODE = "ADMIN";
 var NOT_SYSTEM_ADMIN = `u.code != '${SYSTEM_ADMIN_CODE}'`;
@@ -438,11 +1372,12 @@ function currentUser(req) {
 }
 
 // server/routes/auth.ts
+init_errors();
 import { Router } from "express";
 
 // server/repo.ts
 var USER_SELECT = `SELECT u.id, u.code, u.name, u.email, u.phone, u.role, u.department_id,
-  d.name AS department_name, u.position, u.avatar_url, u.hanet_person_id, u.face_registered, u.status, u.created_at
+  d.name AS department_name, u.position, u.avatar_url, u.hanet_person_id, u.face_registered, u.status, u.hanet_sync_status, u.hanet_sync_error, u.face_error, u.created_at
   FROM users u LEFT JOIN departments d ON d.id = u.department_id`;
 function mapUser(r) {
   return {
@@ -459,6 +1394,9 @@ function mapUser(r) {
     hanetPersonId: r.hanet_person_id ?? null,
     faceRegistered: r.face_registered === 1,
     status: r.status,
+    hanetSyncStatus: r.hanet_sync_status ?? "synced",
+    hanetSyncError: r.hanet_sync_error ?? null,
+    faceError: r.face_error ?? null,
     createdAt: r.created_at
   };
 }
@@ -530,9 +1468,12 @@ function authRoutes(ctx) {
 }
 
 // server/routes/users.ts
+init_db();
+init_errors();
 import { Router as Router2 } from "express";
 
 // server/backup.ts
+init_vntime();
 import fs2 from "node:fs";
 import path2 from "node:path";
 var BACKUP_KEEP = 30;
@@ -577,10 +1518,171 @@ function latestBackup(dir) {
 }
 
 // server/routes/users.ts
-var ROLES = ["hr", "dept_manager", "employee"];
+init_vntime();
+
+// server/sightings.ts
+var SIGHTING_TTL_MS = 24 * 60 * 6e4;
+var SIGHTING_PICK_WINDOW_MS = 30 * 6e4;
+var LIST_LIMIT = 30;
+function mapSighting(r) {
+  return {
+    id: r.id,
+    kind: r.kind,
+    personId: r.person_id ?? null,
+    aliasId: r.alias_id ?? null,
+    personName: r.person_name ?? null,
+    deviceId: r.device_id,
+    deviceName: r.device_name ?? null,
+    ts: r.ts,
+    imageUrl: r.image_url
+  };
+}
+function recordSighting(db, s, now) {
+  db.prepare(
+    `INSERT INTO face_sightings(kind, person_id, alias_id, person_name, device_id, device_name, ts, image_url, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(s.kind, s.personId, s.aliasId, s.personName, s.deviceId, s.deviceName, s.ts, s.imageUrl, now);
+}
+function listSightings(db, now, kind) {
+  const since = now - SIGHTING_PICK_WINDOW_MS;
+  const rows = kind ? db.prepare("SELECT * FROM face_sightings WHERE created_at >= ? AND kind = ? ORDER BY created_at DESC, id DESC LIMIT 500").all(since, kind) : db.prepare("SELECT * FROM face_sightings WHERE created_at >= ? ORDER BY created_at DESC, id DESC LIMIT 500").all(since);
+  const known = db.prepare("SELECT 1 FROM users WHERE code = ? OR (hanet_person_id IS NOT NULL AND hanet_person_id = ?)");
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const r of rows) {
+    const s = mapSighting(r);
+    if (s.kind === "unlinked") {
+      const key = s.personId ?? `alias:${s.aliasId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (known.get(s.aliasId?.toUpperCase() ?? "", s.personId ?? "")) continue;
+    }
+    out.push(s);
+    if (out.length >= LIST_LIMIT) break;
+  }
+  return out;
+}
+function getSighting(db, id) {
+  const row = db.prepare("SELECT * FROM face_sightings WHERE id = ?").get(id);
+  return row ? mapSighting(row) : null;
+}
+function deleteSighting(db, id) {
+  db.prepare("DELETE FROM face_sightings WHERE id = ?").run(id);
+}
+function purgeSightings(db, now) {
+  return Number(db.prepare("DELETE FROM face_sightings WHERE created_at < ?").run(now - SIGHTING_TTL_MS).changes);
+}
+
+// server/hanet-face.ts
+init_hanet_api();
+init_hanet();
+init_hanet_sync();
+function linkFace(db, userId, personId, departmentId, now) {
+  db.prepare("UPDATE users SET hanet_person_id = ?, face_registered = 1, face_error = NULL WHERE id = ?").run(personId, userId);
+  if (departmentId) enqueue(db, "user", userId, "user.department", { fromHanetDeptId: null, toDepartmentId: departmentId }, now);
+  wakeEntity(db, "user", userId, now);
+}
+async function registerFace(deps, userId, imageUrl) {
+  const { db } = deps;
+  const u = db.prepare("SELECT id, code, name, position, department_id, face_registered FROM users WHERE id = ?").get(userId);
+  if (!u) return { ok: false, message: "Kh\xF4ng t\xECm th\u1EA5y nh\xE2n s\u1EF1" };
+  const fail = (message) => {
+    db.prepare("UPDATE users SET face_error = ? WHERE id = ?").run(message, userId);
+    return { ok: false, message };
+  };
+  const placeId = getPlaceIds(db)[0];
+  if (!reconcileEnabled(db) || !placeId) return fail("Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Hanet (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
+  try {
+    if (u.face_registered === 1) {
+      await hanetApi.updateFaceByUrl(deps, { aliasId: u.code, placeId, url: imageUrl });
+      db.prepare("UPDATE users SET face_error = NULL WHERE id = ?").run(userId);
+      return { ok: true, message: "\u0110\xE3 c\u1EADp nh\u1EADt \u1EA3nh nh\u1EADn di\u1EC7n tr\xEAn Hanet" };
+    }
+    let personId = null;
+    try {
+      personId = await hanetApi.registerByUrl(deps, { name: u.name, aliasId: u.code, placeId, url: imageUrl, title: u.position ?? "" });
+    } catch (err) {
+      if (!(err instanceof HanetApiError) || err.returnCode !== -9005) throw err;
+    }
+    if (!personId) personId = (await hanetApi.personsByAlias(deps, u.code))[0]?.personID ?? null;
+    if (!personId) return fail("Hanet kh\xF4ng tr\u1EA3 Person ID sau khi \u0111\u0103ng k\xFD");
+    linkFace(db, userId, String(personId), u.department_id, deps.now());
+    return { ok: true, message: "\u0110\xE3 \u0111\u0103ng k\xFD FaceID tr\xEAn Hanet" };
+  } catch (err) {
+    return fail(err.message);
+  }
+}
+
+// server/routes/users.ts
+init_hanet_sync();
+
+// server/hanet-import.ts
+init_db();
+init_hanet_api();
+init_hanet_sync();
+
+// server/validation.ts
 var CODE_RE = /^[A-Z0-9._-]{1,32}$/;
 var CODE_ERROR = "M\xE3 ch\u1EC9 g\u1ED3m ch\u1EEF kh\xF4ng d\u1EA5u, s\u1ED1, d\u1EA5u ch\u1EA5m, g\u1EA1ch ngang, g\u1EA1ch d\u01B0\u1EDBi (t\u1ED1i \u0111a 32 k\xFD t\u1EF1)";
-var str = (v) => typeof v === "string" ? v.trim() : void 0;
+
+// server/hanet-import.ts
+init_vntime();
+var IMPORT_PAGE_SIZE = 100;
+var MAX_PAGES2 = 50;
+async function fetchAllPersons(deps, placeId) {
+  const all = [];
+  for (let page = 1; page <= MAX_PAGES2; page++) {
+    const items = await hanetApi.listPersons(deps, placeId, page, IMPORT_PAGE_SIZE);
+    all.push(...items);
+    if (items.length < IMPORT_PAGE_SIZE) break;
+  }
+  return all;
+}
+function aliasCode(p) {
+  const upper = String(p.aliasID ?? "").trim().toUpperCase();
+  return upper !== "" && upper !== SYSTEM_ADMIN_CODE && CODE_RE.test(upper) ? upper : null;
+}
+function unlinkedPersons(db, persons) {
+  const known = db.prepare("SELECT 1 FROM users WHERE code = ? OR (hanet_person_id IS NOT NULL AND hanet_person_id = ?)");
+  return persons.filter((p) => {
+    if (!p.personID) return false;
+    const code = aliasCode(p) ?? String(p.aliasID ?? "").trim().toUpperCase();
+    return !known.get(code === SYSTEM_ADMIN_CODE ? "" : code, String(p.personID));
+  });
+}
+function nextEmployeeCode(db) {
+  const codes = db.prepare("SELECT code FROM users WHERE code GLOB 'NV[0-9][0-9][0-9][0-9]*'").all();
+  const max = codes.reduce((m, { code }) => /^NV\d{4,}$/.test(code) ? Math.max(m, Number(code.slice(2))) : m, 0);
+  return `NV${String(max + 1).padStart(4, "0")}`;
+}
+function importPersons(db, persons, departmentId, now) {
+  const exists = db.prepare("SELECT 1 FROM users WHERE code = ?");
+  const insert = db.prepare(
+    `INSERT INTO users(id, code, name, email, phone, role, department_id, position, avatar_url, hanet_person_id,
+       face_registered, status, password_hash, must_change_password, created_at)
+     VALUES (?, ?, ?, '', '', 'employee', ?, ?, ?, ?, 1, 'active', ?, 1, ?)`
+  );
+  return tx(
+    db,
+    () => persons.map((p) => {
+      const alias = String(p.aliasID ?? "").trim();
+      const fromAlias = aliasCode(p);
+      const code = fromAlias && !exists.get(fromAlias) ? fromAlias : nextEmployeeCode(db);
+      const id = newId("usr");
+      const tempPassword = generateTempPassword();
+      const name = String(p.name ?? "").trim() || code;
+      insert.run(id, code, name, departmentId, String(p.title ?? "").trim(), String(p.avatar ?? ""), String(p.personID), hashPassword(tempPassword), toVnDate(now));
+      if (code !== alias) enqueue(db, "user", id, "user.alias", { personId: String(p.personID), code }, now);
+      if (departmentId) enqueue(db, "user", id, "user.department", { fromHanetDeptId: null, toDepartmentId: departmentId }, now);
+      return { id, code, name, tempPassword };
+    })
+  );
+}
+
+// server/routes/users.ts
+init_hanet();
+var ROLES = ["hr", "dept_manager", "employee"];
+var str2 = (v) => typeof v === "string" ? v.trim() : void 0;
 function resolveDepartment(db, departmentId) {
   if (departmentId === void 0 || departmentId === null || departmentId === "") return null;
   if (typeof departmentId !== "string" || !db.prepare("SELECT 1 FROM departments WHERE id = ?").get(departmentId)) {
@@ -588,48 +1690,103 @@ function resolveDepartment(db, departmentId) {
   }
   return departmentId;
 }
+function resolveFaceImage(db, userId, b, now) {
+  if (b.sightingId !== void 0 && b.sightingId !== null && b.sightingId !== "") {
+    const s = getSighting(db, Number(b.sightingId));
+    if (!s) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y l\u01B0\u1EE3t ch\u1EE5p n\xE0y, h\xE3y ch\u1ECDn l\u01B0\u1EE3t m\u1EDBi h\u01A1n");
+    return { url: s.imageUrl, sightingId: s.id };
+  }
+  if (b.detectionId !== void 0 && b.detectionId !== null && userId) {
+    const row = db.prepare("SELECT image_url FROM detections WHERE id = ? AND user_id = ? AND ts >= ? AND image_url IS NOT NULL AND image_url != ''").get(Number(b.detectionId), userId, now - SIGHTING_TTL_MS);
+    if (!row) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y \u1EA3nh c\u1EE7a l\u01B0\u1EE3t qu\u1EB9t n\xE0y (ch\u1EC9 d\xF9ng \u0111\u01B0\u1EE3c l\u01B0\u1EE3t trong 24 gi\u1EDD)");
+    return { url: row.image_url, sightingId: null };
+  }
+  return null;
+}
 function userRoutes(ctx) {
   const { db } = ctx;
   const r = Router2();
+  const deps = { db, fetch: ctx.fetch, now: ctx.now };
   r.get("/users", (req, res) => {
     const w = scopeWhere(scopeFor(currentUser(req)), "u.id", "u.department_id");
     const rows = db.prepare(`${USER_SELECT} WHERE ${NOT_SYSTEM_ADMIN} AND ${w.sql} ORDER BY u.code`).all(...w.params);
     res.json({ users: rows.map(mapUser) });
   });
-  r.post("/users", requireRole("hr"), (req, res) => {
-    const b = req.body ?? {};
-    const code = (str(b.code) ?? "").toUpperCase();
-    const name = str(b.name) ?? "";
-    if (!CODE_RE.test(code)) throw new HttpError(400, CODE_ERROR);
-    if (code === SYSTEM_ADMIN_CODE) throw new HttpError(400, "M\xE3 ADMIN d\xE0nh ri\xEAng cho t\xE0i kho\u1EA3n qu\u1EA3n tr\u1ECB h\u1EC7 th\u1ED1ng");
-    if (!name) throw new HttpError(400, "H\u1ECD t\xEAn l\xE0 b\u1EAFt bu\u1ED9c");
-    const role = b.role === void 0 ? "employee" : b.role;
-    if (!ROLES.includes(role)) throw new HttpError(400, "Vai tr\xF2 kh\xF4ng h\u1EE3p l\u1EC7");
-    const departmentId = resolveDepartment(db, b.departmentId);
-    if (db.prepare("SELECT 1 FROM users WHERE code = ?").get(code)) throw new HttpError(409, "M\xE3 nh\xE2n vi\xEAn \u0111\xE3 t\u1ED3n t\u1EA1i");
-    const id = newId("usr");
-    const tempPassword = generateTempPassword();
-    db.prepare(
-      `INSERT INTO users(id, code, name, email, phone, role, department_id, position, avatar_url, hanet_person_id,
-         face_registered, status, password_hash, must_change_password, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 1, ?)`
-    ).run(
-      id,
-      code,
-      name,
-      str(b.email) ?? "",
-      str(b.phone) ?? "",
-      role,
-      departmentId,
-      str(b.position) ?? "",
-      str(b.avatarUrl) ?? "",
-      str(b.hanetPersonId) || null,
-      b.faceRegistered ? 1 : 0,
-      hashPassword(tempPassword),
-      toVnDate(ctx.now())
-    );
-    res.json({ user: getUser(db, id), tempPassword });
-  });
+  r.post(
+    "/users/import",
+    requireRole("hr"),
+    ah(async (req, res) => {
+      const b = req.body ?? {};
+      const wanted = new Set(
+        (Array.isArray(b.persons) ? b.persons : []).map((p) => String(p?.personId ?? "")).filter(Boolean)
+      );
+      if (wanted.size === 0) throw new HttpError(400, "Ch\u01B0a ch\u1ECDn ng\u01B0\u1EDDi n\xE0o \u0111\u1EC3 nh\u1EADp");
+      if (wanted.size > 500) throw new HttpError(400, "M\u1ED7i l\u1EA7n nh\u1EADp t\u1ED1i \u0111a 500 ng\u01B0\u1EDDi");
+      const departmentId = resolveDepartment(db, b.departmentId);
+      const placeId = getPlaceIds(db)[0];
+      if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, "Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Hanet (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
+      let all;
+      try {
+        all = await fetchAllPersons(deps, placeId);
+      } catch (err) {
+        throw new HttpError(502, `Kh\xF4ng l\u1EA5y \u0111\u01B0\u1EE3c danh s\xE1ch ng\u01B0\u1EDDi t\u1EEB Hanet: ${err.message}`);
+      }
+      const chosen = unlinkedPersons(db, all).filter((p) => wanted.has(String(p.personID)));
+      if (chosen.length === 0) throw new HttpError(400, "Kh\xF4ng c\xF3 ng\u01B0\u1EDDi h\u1EE3p l\u1EC7 \u0111\u1EC3 nh\u1EADp (c\xF3 th\u1EC3 \u0111\xE3 \u0111\u01B0\u1EE3c nh\u1EADp tr\u01B0\u1EDBc \u0111\xF3)");
+      const created = importPersons(db, chosen, departmentId, ctx.now());
+      for (const c of created) kickEntity(ctx, "user", c.id);
+      res.json({ created });
+    })
+  );
+  r.post(
+    "/users",
+    requireRole("hr"),
+    ah(async (req, res) => {
+      const b = req.body ?? {};
+      const code = (str2(b.code) ?? "").toUpperCase();
+      const name = str2(b.name) ?? "";
+      if (!CODE_RE.test(code)) throw new HttpError(400, CODE_ERROR);
+      if (code === SYSTEM_ADMIN_CODE) throw new HttpError(400, "M\xE3 ADMIN d\xE0nh ri\xEAng cho t\xE0i kho\u1EA3n qu\u1EA3n tr\u1ECB h\u1EC7 th\u1ED1ng");
+      if (!name) throw new HttpError(400, "H\u1ECD t\xEAn l\xE0 b\u1EAFt bu\u1ED9c");
+      const role = b.role === void 0 ? "employee" : b.role;
+      if (!ROLES.includes(role)) throw new HttpError(400, "Vai tr\xF2 kh\xF4ng h\u1EE3p l\u1EC7");
+      const departmentId = resolveDepartment(db, b.departmentId);
+      if (db.prepare("SELECT 1 FROM users WHERE code = ?").get(code)) throw new HttpError(409, "M\xE3 nh\xE2n vi\xEAn \u0111\xE3 t\u1ED3n t\u1EA1i");
+      const image = resolveFaceImage(db, null, b, ctx.now());
+      const hanetPersonId = str2(b.hanetPersonId) || null;
+      const id = newId("usr");
+      const tempPassword = generateTempPassword();
+      db.prepare(
+        `INSERT INTO users(id, code, name, email, phone, role, department_id, position, avatar_url, hanet_person_id,
+           face_registered, status, password_hash, must_change_password, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 1, ?)`
+      ).run(
+        id,
+        code,
+        name,
+        str2(b.email) ?? "",
+        str2(b.phone) ?? "",
+        role,
+        departmentId,
+        str2(b.position) ?? "",
+        str2(b.avatarUrl) ?? "",
+        hanetPersonId,
+        hanetPersonId ? 1 : 0,
+        hashPassword(tempPassword),
+        toVnDate(ctx.now())
+      );
+      if (hanetPersonId && departmentId) {
+        enqueue(db, "user", id, "user.department", { fromHanetDeptId: null, toDepartmentId: departmentId }, ctx.now());
+      }
+      let face;
+      if (image) {
+        face = await registerFace(deps, id, image.url);
+        if (face.ok && image.sightingId !== null) deleteSighting(db, image.sightingId);
+      }
+      kickEntity(ctx, "user", id);
+      res.json({ user: getUser(db, id), tempPassword, ...face ? { face } : {} });
+    })
+  );
   r.put("/users/:id", requireRole("hr"), (req, res) => {
     const actor = currentUser(req);
     const target = getUser(db, req.params.id);
@@ -647,15 +1804,18 @@ function userRoutes(ctx) {
       params.push(val);
     };
     if (b.name !== void 0) {
-      const name = str(b.name);
+      const name = str2(b.name);
       if (!name) throw new HttpError(400, "H\u1ECD t\xEAn l\xE0 b\u1EAFt bu\u1ED9c");
       set("name", name);
     }
     for (const [key, col] of [["email", "email"], ["phone", "phone"], ["position", "position"], ["avatarUrl", "avatar_url"]]) {
-      if (b[key] !== void 0) set(col, str(b[key]) ?? "");
+      if (b[key] !== void 0) set(col, str2(b[key]) ?? "");
     }
-    if (b.hanetPersonId !== void 0) set("hanet_person_id", str(b.hanetPersonId) || null);
-    if (b.faceRegistered !== void 0) set("face_registered", b.faceRegistered ? 1 : 0);
+    if (b.hanetPersonId !== void 0) {
+      const pid = str2(b.hanetPersonId) || null;
+      set("hanet_person_id", pid);
+      set("face_registered", pid ? 1 : 0);
+    }
     if (b.role !== void 0) {
       if (!ROLES.includes(b.role)) throw new HttpError(400, "Vai tr\xF2 kh\xF4ng h\u1EE3p l\u1EC7");
       set("role", b.role);
@@ -667,6 +1827,17 @@ function userRoutes(ctx) {
     if (b.departmentId !== void 0) set("department_id", resolveDepartment(db, b.departmentId));
     if (sets.length) db.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).run(...params, target.id);
     if (b.status === "inactive" && target.status !== "inactive") deleteUserSessions(db, target.id);
+    const after = getUser(db, target.id);
+    const now = ctx.now();
+    if (after.faceRegistered && (after.name !== target.name || after.position !== target.position)) {
+      enqueue(db, "user", target.id, "user.info", { code: after.code, name: after.name, title: after.position }, now);
+    }
+    const linkedNow = Boolean(after.hanetPersonId) && !target.hanetPersonId;
+    if (after.hanetPersonId && (after.departmentId !== target.departmentId || linkedNow && after.departmentId)) {
+      const from = target.departmentId && !linkedNow ? db.prepare("SELECT hanet_department_id FROM departments WHERE id = ?").get(target.departmentId)?.hanet_department_id ?? null : null;
+      enqueue(db, "user", target.id, "user.department", { fromHanetDeptId: from, toDepartmentId: after.departmentId }, now);
+    }
+    kickEntity(ctx, "user", target.id);
     res.json({ user: getUser(db, target.id) });
   });
   r.post("/users/:id/reset-password", requireRole("hr"), (req, res) => {
@@ -679,22 +1850,60 @@ function userRoutes(ctx) {
     console.warn(`[SECURITY] password_reset by=${actor.code} target=${target.code} ip=${req.ip}`);
     res.json({ tempPassword });
   });
+  r.post(
+    "/users/:id/face",
+    requireRole("hr"),
+    ah(async (req, res) => {
+      const target = getUser(db, req.params.id);
+      if (!target) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y nh\xE2n s\u1EF1");
+      const image = resolveFaceImage(db, target.id, req.body ?? {}, ctx.now());
+      if (!image) throw new HttpError(400, "H\xE3y ch\u1ECDn m\u1ED9t l\u01B0\u1EE3t camera ch\u1EE5p");
+      const face = await registerFace(deps, target.id, image.url);
+      if (face.ok && image.sightingId !== null) deleteSighting(db, image.sightingId);
+      if (face.ok) kickEntity(ctx, "user", target.id);
+      res.json({ user: getUser(db, target.id), face });
+    })
+  );
+  r.get("/users/:id/face-candidates", requireRole("hr"), (req, res) => {
+    const target = getUser(db, req.params.id);
+    if (!target) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y nh\xE2n s\u1EF1");
+    const now = ctx.now();
+    const rows = db.prepare(
+      `SELECT id, ts, image_url, device_id, device_name FROM detections
+         WHERE user_id = ? AND ts >= ? AND image_url IS NOT NULL AND image_url != '' ORDER BY ts DESC LIMIT 30`
+    ).all(target.id, now - SIGHTING_TTL_MS);
+    const body = {
+      detections: rows.map((d) => ({ id: d.id, ts: d.ts, imageUrl: d.image_url, deviceName: d.device_name ?? d.device_id })),
+      strangers: listSightings(db, now, "stranger")
+    };
+    res.json(body);
+  });
   r.delete("/users/:id", requireSystemAdmin, (req, res) => {
     const actor = currentUser(req);
     const target = getUser(db, req.params.id);
     if (!target) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y nh\xE2n s\u1EF1");
     if (target.id === actor.id) throw new HttpError(400, "Kh\xF4ng th\u1EC3 t\u1EF1 x\xF3a t\xE0i kho\u1EA3n \u0111ang \u0111\u0103ng nh\u1EADp");
     const backup = backupNow(db, ctx.config.backupDir, "pre-delete", ctx.now());
+    if (target.faceRegistered || target.hanetPersonId) {
+      enqueue(db, "user", target.id, "user.remove", { code: target.code, name: target.name, personId: target.hanetPersonId }, ctx.now());
+    } else {
+      dropEntityJobs(db, "user", target.id);
+    }
     db.prepare("DELETE FROM users WHERE id = ?").run(target.id);
     console.warn(`[SECURITY] user_deleted by=${actor.code} target=${target.code} backup=${backup} ip=${req.ip}`);
+    kickEntity(ctx, "user", target.id);
     res.json({ success: true, backup });
   });
   return r;
 }
 
 // server/routes/departments.ts
+init_db();
+init_errors();
 import { Router as Router3 } from "express";
-var DEPT_SELECT = `SELECT d.id, d.code, d.name, d.description, d.manager_id, m.name AS manager_name, d.created_at,
+init_hanet_sync();
+init_vntime();
+var DEPT_SELECT = `SELECT d.id, d.code, d.name, d.description, d.manager_id, m.name AS manager_name, d.hanet_sync_status, d.hanet_sync_error, d.created_at,
   (SELECT COUNT(*) FROM users x WHERE x.department_id = d.id) AS member_count
   FROM departments d LEFT JOIN users m ON m.id = d.manager_id`;
 function mapDept(r) {
@@ -706,6 +1915,8 @@ function mapDept(r) {
     managerId: r.manager_id ?? null,
     managerName: r.manager_name ?? null,
     memberCount: Number(r.member_count),
+    hanetSyncStatus: r.hanet_sync_status ?? "synced",
+    hanetSyncError: r.hanet_sync_error ?? null,
     createdAt: r.created_at
   };
 }
@@ -750,6 +1961,8 @@ function departmentRoutes(ctx) {
       managerId,
       toVnDate(ctx.now())
     );
+    enqueue(db, "department", id, "dept.create", { name, desc: typeof b.description === "string" ? b.description.trim() : "" }, ctx.now());
+    kickEntity(ctx, "department", id);
     res.json({ department: getDept(db, id) });
   });
   r.put("/departments/:id", requireRole("hr"), (req, res) => {
@@ -767,6 +1980,11 @@ function departmentRoutes(ctx) {
     if (b.managerId !== void 0) {
       db.prepare("UPDATE departments SET manager_id = ? WHERE id = ?").run(resolveManager(db, b.managerId), dept.id);
     }
+    const after = getDept(db, dept.id);
+    if (after.name !== dept.name || after.description !== dept.description) {
+      enqueue(db, "department", dept.id, "dept.update", { name: after.name, desc: after.description }, ctx.now());
+      kickEntity(ctx, "department", dept.id);
+    }
     res.json({ department: getDept(db, dept.id) });
   });
   r.delete("/departments/:id", requireSystemAdmin, (req, res) => {
@@ -774,15 +1992,57 @@ function departmentRoutes(ctx) {
     const dept = getDept(db, req.params.id);
     if (!dept) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y ph\xF2ng ban");
     const backup = backupNow(db, ctx.config.backupDir, "pre-delete", ctx.now());
+    const hanetDeptId = db.prepare("SELECT hanet_department_id FROM departments WHERE id = ?").get(dept.id).hanet_department_id;
+    if (hanetDeptId) enqueue(db, "department", dept.id, "dept.remove", { hanetDepartmentId: hanetDeptId, name: dept.name }, ctx.now());
+    else dropEntityJobs(db, "department", dept.id);
     db.prepare("DELETE FROM departments WHERE id = ?").run(dept.id);
     console.warn(`[SECURITY] department_deleted by=${actor.code} target=${dept.code} backup=${backup} ip=${req.ip}`);
+    kickEntity(ctx, "department", dept.id);
     res.json({ success: true, backup });
   });
   return r;
 }
 
 // server/routes/cameras.ts
+init_db();
+init_errors();
 import { Router as Router4 } from "express";
+
+// server/cameras.ts
+init_db();
+init_hanet_api();
+init_hanet();
+async function importCameras(deps) {
+  const { db } = deps;
+  const placeId = getPlaceIds(db)[0];
+  if (!placeId) return 0;
+  const devices = await hanetApi.listDevices(deps, placeId);
+  const exists = db.prepare("SELECT 1 FROM cameras WHERE device_key = ?");
+  const insert = db.prepare(
+    `INSERT INTO cameras(id, name, device_key, place_id, place_name, location, ip_address, created_at) VALUES (?, ?, ?, ?, ?, '', '', ?)`
+  );
+  let added = 0;
+  for (const d of devices) {
+    const key = String(d.deviceID ?? "").trim();
+    if (!key || exists.get(key)) continue;
+    insert.run(newId("cam"), String(d.deviceName || key), key, Number(d.placeID) || placeId, String(d.placeName ?? ""), new Date(deps.now()).toISOString());
+    added++;
+  }
+  return added;
+}
+async function refreshCameraStatus(deps) {
+  const { db } = deps;
+  const keys = db.prepare("SELECT device_key FROM cameras ORDER BY device_key").all().map((r) => r.device_key);
+  if (keys.length === 0) return;
+  const status = await hanetApi.connectionStatus(deps, keys);
+  const now = deps.now();
+  const update = db.prepare("UPDATE cameras SET online = ?, status_checked_at = ? WHERE device_key = ?");
+  for (const k of keys) update.run(status[k] === true ? 1 : 0, now, k);
+}
+
+// server/routes/cameras.ts
+init_hanet();
+init_hanet_sync();
 function mapCamera(r) {
   return {
     id: r.id,
@@ -792,14 +2052,21 @@ function mapCamera(r) {
     placeName: r.place_name ?? "",
     location: r.location ?? "",
     ipAddress: r.ip_address ?? "",
+    online: r.online === null || r.online === void 0 ? null : r.online === 1,
+    statusCheckedAt: r.status_checked_at ?? null,
     createdAt: r.created_at
   };
 }
 function cameraRoutes(ctx) {
   const { db } = ctx;
   const r = Router4();
+  const deps = { db, fetch: ctx.fetch, now: ctx.now };
+  const listCameras = () => db.prepare("SELECT * FROM cameras ORDER BY name").all().map(mapCamera);
+  const requireHanet = () => {
+    if (!reconcileEnabled(db)) throw new HttpError(400, "Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Hanet (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
+  };
   r.get("/cameras", (_req, res) => {
-    res.json({ cameras: db.prepare("SELECT * FROM cameras ORDER BY name").all().map(mapCamera) });
+    res.json({ cameras: listCameras() });
   });
   r.post("/cameras", requireRole("hr"), (req, res) => {
     const b = req.body ?? {};
@@ -816,176 +2083,66 @@ function cameraRoutes(ctx) {
     ).run(id, name, deviceKey, placeId, text(b.placeName), text(b.location), text(b.ipAddress), new Date(ctx.now()).toISOString());
     res.json({ camera: mapCamera(db.prepare("SELECT * FROM cameras WHERE id = ?").get(id)) });
   });
+  r.post(
+    "/cameras/import",
+    requireRole("hr"),
+    ah(async (_req, res) => {
+      requireHanet();
+      let added;
+      try {
+        added = await importCameras(deps);
+      } catch (err) {
+        throw new HttpError(502, `Kh\xF4ng l\u1EA5y \u0111\u01B0\u1EE3c danh s\xE1ch camera t\u1EEB Hanet: ${err.message}`);
+      }
+      res.json({ added, cameras: listCameras() });
+    })
+  );
+  r.post(
+    "/cameras/refresh-status",
+    requireRole("hr"),
+    ah(async (_req, res) => {
+      requireHanet();
+      try {
+        await refreshCameraStatus(deps);
+      } catch (err) {
+        throw new HttpError(502, `Kh\xF4ng l\u1EA5y \u0111\u01B0\u1EE3c tr\u1EA1ng th\xE1i camera t\u1EEB Hanet: ${err.message}`);
+      }
+      res.json({ cameras: listCameras() });
+    })
+  );
+  r.put("/cameras/:id", requireRole("hr"), (req, res) => {
+    const row = db.prepare("SELECT * FROM cameras WHERE id = ?").get(req.params.id);
+    if (!row) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y camera");
+    const b = req.body ?? {};
+    const text = (v) => typeof v === "string" ? v.trim() : "";
+    const name = b.name === void 0 ? row.name : text(b.name);
+    if (!name) throw new HttpError(400, "T\xEAn camera l\xE0 b\u1EAFt bu\u1ED9c");
+    db.prepare("UPDATE cameras SET name = ?, location = ?, ip_address = ? WHERE id = ?").run(
+      name,
+      b.location === void 0 ? row.location : text(b.location),
+      b.ipAddress === void 0 ? row.ip_address : text(b.ipAddress),
+      row.id
+    );
+    if (name !== row.name) {
+      enqueue(db, "camera", row.id, "camera.rename", { deviceId: row.device_key, name }, ctx.now());
+      kickEntity(ctx, "camera", row.id);
+    }
+    res.json({ camera: mapCamera(db.prepare("SELECT * FROM cameras WHERE id = ?").get(row.id)) });
+  });
   r.delete("/cameras/:id", requireRole("hr"), (req, res) => {
     const result = db.prepare("DELETE FROM cameras WHERE id = ?").run(req.params.id);
     if (Number(result.changes) === 0) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y camera");
+    dropEntityJobs(db, "camera", req.params.id);
     res.json({ success: true });
   });
   return r;
 }
 
 // server/routes/attendance.ts
+init_errors();
 import { Router as Router5 } from "express";
-
-// server/settings.ts
-function getSetting(db, key) {
-  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
-  return row?.value;
-}
-function setSetting(db, key, value) {
-  db.prepare("INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value);
-}
-function deleteSetting(db, key) {
-  db.prepare("DELETE FROM settings WHERE key = ?").run(key);
-}
-var DEFAULT_WORK_SETTINGS = {
-  workStart: "08:00",
-  lateGraceMinutes: 15,
-  workEnd: "17:00",
-  minOutGapMinutes: 30
-};
-function getWorkSettings(db) {
-  return {
-    workStart: getSetting(db, "work_start") ?? DEFAULT_WORK_SETTINGS.workStart,
-    lateGraceMinutes: Number(getSetting(db, "late_grace_minutes") ?? DEFAULT_WORK_SETTINGS.lateGraceMinutes),
-    workEnd: getSetting(db, "work_end") ?? DEFAULT_WORK_SETTINGS.workEnd,
-    minOutGapMinutes: Number(getSetting(db, "min_out_gap_minutes") ?? DEFAULT_WORK_SETTINGS.minOutGapMinutes)
-  };
-}
-function intInRange(v, min, max, label) {
-  const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
-  if (typeof n !== "number" || !Number.isInteger(n) || n < min || n > max) {
-    throw new HttpError(400, `${label} ph\u1EA3i l\xE0 s\u1ED1 nguy\xEAn t\u1EEB ${min} \u0111\u1EBFn ${max}`);
-  }
-  return n;
-}
-function hhmm(v, label) {
-  if (typeof v !== "string") throw new HttpError(400, `${label} kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng HH:mm)`);
-  try {
-    parseHHmm(v);
-  } catch {
-    throw new HttpError(400, `${label} kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng HH:mm)`);
-  }
-  return v;
-}
-function validateWorkSettings(input) {
-  if (!input || typeof input !== "object") throw new HttpError(400, "Thi\u1EBFu c\u1EA5u h\xECnh gi\u1EDD l\xE0m vi\u1EC7c");
-  const b = input;
-  const ws = {
-    workStart: hhmm(b.workStart, "Gi\u1EDD v\xE0o"),
-    lateGraceMinutes: intInRange(b.lateGraceMinutes, 0, 120, "S\u1ED1 ph\xFAt cho ph\xE9p mu\u1ED9n"),
-    workEnd: hhmm(b.workEnd, "Gi\u1EDD ra"),
-    minOutGapMinutes: intInRange(b.minOutGapMinutes, 1, 720, "Ng\u01B0\u1EE1ng gi\u1EDD ra")
-  };
-  if (parseHHmm(ws.workEnd) <= parseHHmm(ws.workStart)) throw new HttpError(400, "Gi\u1EDD ra ph\u1EA3i sau gi\u1EDD v\xE0o");
-  return ws;
-}
-function saveWorkSettings(db, ws) {
-  setSetting(db, "work_start", ws.workStart);
-  setSetting(db, "late_grace_minutes", String(ws.lateGraceMinutes));
-  setSetting(db, "work_end", ws.workEnd);
-  setSetting(db, "min_out_gap_minutes", String(ws.minOutGapMinutes));
-}
-
-// server/attendance.ts
-function toDaySettings(ws) {
-  return {
-    workStart: parseHHmm(ws.workStart),
-    graceMinutes: ws.lateGraceMinutes,
-    workEnd: parseHHmm(ws.workEnd),
-    minOutGapMinutes: ws.minOutGapMinutes
-  };
-}
-function computeDay(input) {
-  const { detectionTs, settings, lateExcused, manualIn, manualOut } = input;
-  const minDet = detectionTs.length ? Math.min(...detectionTs) : null;
-  const maxDet = detectionTs.length ? Math.max(...detectionTs) : null;
-  const firstIn = manualIn ?? minDet;
-  if (firstIn === null) return null;
-  let lastOut = null;
-  if (manualOut !== null) lastOut = manualOut;
-  else if (maxDet !== null && maxDet - firstIn >= settings.minOutGapMinutes * 6e4) lastOut = maxDet;
-  const inMin = vnMinutesOfDay(firstIn);
-  const isLate = !lateExcused && inMin > settings.workStart + settings.graceMinutes;
-  const lateMinutes = isLate ? inMin - settings.workStart : 0;
-  const outMin = lastOut === null ? null : vnMinutesOfDay(lastOut);
-  const isEarly = outMin !== null && outMin < settings.workEnd;
-  const earlyMinutes = isEarly ? settings.workEnd - outMin : 0;
-  let status;
-  if (lastOut === null) status = "missing_out";
-  else if (isLate && isEarly) status = "late_and_early";
-  else if (isLate) status = "late";
-  else if (isEarly) status = "early_leave";
-  else status = "on_time";
-  return { firstIn, lastOut, lateMinutes, earlyMinutes, status, detectionCount: detectionTs.length };
-}
-function simulatorFilter() {
-  return process.env.NODE_ENV === "production" ? " AND source != 'simulator'" : "";
-}
-function readAdjustment(db, userId, workDate) {
-  const row = db.prepare("SELECT late_excused, manual_in, manual_out FROM attendance_days WHERE user_id = ? AND work_date = ?").get(userId, workDate);
-  return {
-    lateExcused: row?.late_excused === 1,
-    manualIn: row?.manual_in ?? null,
-    manualOut: row?.manual_out ?? null
-  };
-}
-function writeDay(db, userId, workDate, adj, settings) {
-  const detections = db.prepare(`SELECT ts FROM detections WHERE user_id = ? AND work_date = ?${simulatorFilter()}`).all(userId, workDate);
-  const result = computeDay({
-    detectionTs: detections.map((d) => d.ts),
-    settings,
-    lateExcused: adj.lateExcused,
-    manualIn: adj.manualIn,
-    manualOut: adj.manualOut
-  });
-  if (!result) {
-    db.prepare("DELETE FROM attendance_days WHERE user_id = ? AND work_date = ?").run(userId, workDate);
-    return;
-  }
-  db.prepare(
-    `INSERT INTO attendance_days(user_id, work_date, first_in, last_out, late_minutes, early_minutes, status,
-       late_excused, manual_in, manual_out, detection_count)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(user_id, work_date) DO UPDATE SET
-       first_in = excluded.first_in, last_out = excluded.last_out, late_minutes = excluded.late_minutes,
-       early_minutes = excluded.early_minutes, status = excluded.status, late_excused = excluded.late_excused,
-       manual_in = excluded.manual_in, manual_out = excluded.manual_out, detection_count = excluded.detection_count`
-  ).run(
-    userId,
-    workDate,
-    result.firstIn,
-    result.lastOut,
-    result.lateMinutes,
-    result.earlyMinutes,
-    result.status,
-    adj.lateExcused ? 1 : 0,
-    adj.manualIn,
-    adj.manualOut,
-    result.detectionCount
-  );
-}
-function recomputeDay(db, userId, workDate, settings) {
-  writeDay(db, userId, workDate, readAdjustment(db, userId, workDate), settings ?? toDaySettings(getWorkSettings(db)));
-}
-function applyDayAdjustment(db, userId, workDate, patch) {
-  const adj = { ...readAdjustment(db, userId, workDate), ...patch };
-  writeDay(db, userId, workDate, adj, toDaySettings(getWorkSettings(db)));
-}
-function recomputeRange(db, from, to) {
-  const settings = toDaySettings(getWorkSettings(db));
-  const pairs = db.prepare(
-    `SELECT user_id, work_date FROM detections WHERE work_date BETWEEN ? AND ?
-       UNION
-       SELECT user_id, work_date FROM attendance_days WHERE work_date BETWEEN ? AND ?`
-  ).all(from, to, from, to);
-  tx(db, () => {
-    for (const p of pairs) recomputeDay(db, p.user_id, p.work_date, settings);
-  });
-  return pairs.length;
-}
-
-// server/routes/attendance.ts
+init_attendance();
+init_vntime();
 var DAY_SELECT = `SELECT a.*, u.code AS employee_code, u.name AS employee_name, u.avatar_url, u.department_id,
   d.name AS department_name
   FROM attendance_days a JOIN users u ON u.id = a.user_id LEFT JOIN departments d ON d.id = u.department_id`;
@@ -1124,6 +2281,7 @@ function attendanceRoutes(ctx) {
 
 // server/routes/settings.ts
 import { Router as Router6 } from "express";
+init_settings();
 function settingsRoutes(ctx) {
   const { db } = ctx;
   const r = Router6();
@@ -1138,7 +2296,11 @@ function settingsRoutes(ctx) {
 }
 
 // server/routes/requests.ts
+init_db();
+init_errors();
 import { Router as Router7 } from "express";
+init_attendance();
+init_vntime();
 var TYPES = ["missed_punch", "late_explanation", "leave_request"];
 var REQUEST_SELECT = `SELECT r.*, u.name AS employee_name, u.code AS employee_code, u.department_id, rv.name AS reviewer_name
   FROM requests r JOIN users u ON u.id = r.user_id LEFT JOIN users rv ON rv.id = r.reviewed_by`;
@@ -1244,264 +2406,13 @@ function requestRoutes(ctx) {
 }
 
 // server/routes/hanet.ts
+init_errors();
 import { Router as Router8 } from "express";
-
-// server/hanet.ts
-import { randomBytes as randomBytes3 } from "node:crypto";
-var str2 = (v) => v === void 0 || v === null || String(v).trim() === "" ? null : String(v).trim();
-var num = (v) => {
-  const s = str2(v);
-  if (s === null) return null;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
-};
-function normalizeTs(raw, now) {
-  if (raw === null || raw <= 0) return { ts: now, fromServer: true };
-  return { ts: raw < 1e12 ? Math.round(raw * 1e3) : raw, fromServer: false };
-}
-function parseCheckin(body, now) {
-  if (!body || typeof body !== "object") return null;
-  const b = body;
-  const d = b.data && typeof b.data === "object" ? b.data : b;
-  const deviceId = str2(d.deviceID);
-  const aliasId = str2(d.aliasID);
-  const personId = str2(d.personID);
-  if (!deviceId || !aliasId && !personId) return null;
-  const { ts, fromServer } = normalizeTs(num(d.time ?? d.checkinTime), now);
-  return {
-    input: {
-      personId,
-      aliasId,
-      personName: str2(d.personName),
-      personType: num(d.personType ?? d.type),
-      deviceId,
-      deviceName: str2(d.deviceName),
-      placeId: num(d.placeID),
-      ts,
-      imageUrl: str2(d.detected_image_url ?? d.avatar)
-    },
-    note: fromServer ? "Thi\u1EBFu th\u1EDDi gian t\u1EEB Hanet, d\xF9ng gi\u1EDD nh\u1EADn" : null
-  };
-}
-var UNMATCHED_MESSAGE = "Kh\xF4ng kh\u1EDBp nh\xE2n vi\xEAn n\xE0o";
-var RECENT_FACES_WINDOW_MS = 10 * 6e4;
-var RECENT_FACES_LIMIT = 20;
-function recentUnmatchedFaces(db, now) {
-  const since = new Date(now - RECENT_FACES_WINDOW_MS).toISOString();
-  const rows = db.prepare("SELECT raw_payload FROM webhook_logs WHERE status = 'ignored' AND message LIKE ? AND received_at >= ? ORDER BY id DESC").all(`${UNMATCHED_MESSAGE}%`, since);
-  const known = db.prepare("SELECT 1 FROM users WHERE code = ? OR (hanet_person_id IS NOT NULL AND hanet_person_id = ?)");
-  const seen = /* @__PURE__ */ new Set();
-  const faces = [];
-  for (const row of rows) {
-    let body;
-    try {
-      body = row.raw_payload ? JSON.parse(row.raw_payload) : null;
-    } catch {
-      continue;
-    }
-    const parsed = parseCheckin(body, now);
-    if (!parsed) continue;
-    const { personId, aliasId, personName, deviceName, ts, imageUrl } = parsed.input;
-    const key = personId ?? `alias:${aliasId}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    if (known.get(aliasId?.toUpperCase() ?? "", personId ?? "")) continue;
-    faces.push({ personId, aliasId, personName, deviceName, ts, imageUrl });
-    if (faces.length >= RECENT_FACES_LIMIT) break;
-  }
-  return faces;
-}
-function ingestCheckin(db, input, source) {
-  if (input.personType !== null && input.personType !== 0) return { status: "ignored", message: "Kh\xF4ng ph\u1EA3i nh\xE2n vi\xEAn" };
-  let user;
-  if (input.aliasId) user = db.prepare("SELECT id, status FROM users WHERE code = ?").get(input.aliasId.toUpperCase());
-  if (!user && input.personId) user = db.prepare("SELECT id, status FROM users WHERE hanet_person_id = ?").get(input.personId);
-  if (!user) return { status: "ignored", message: UNMATCHED_MESSAGE };
-  if (user.status !== "active") return { status: "ignored", message: "Nh\xE2n vi\xEAn \u0111\xE3 ng\u1EEBng ho\u1EA1t \u0111\u1ED9ng", userId: user.id };
-  const userId = user.id;
-  const workDate = toVnDate(input.ts);
-  return tx(db, () => {
-    const r = db.prepare(
-      `INSERT INTO detections(user_id, hanet_person_id, device_id, device_name, place_id, ts, work_date, image_url, source)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, device_id, ts) DO NOTHING`
-    ).run(userId, input.personId, input.deviceId, input.deviceName, input.placeId, input.ts, workDate, input.imageUrl, source);
-    if (Number(r.changes) === 0) return { status: "duplicate", message: "L\u01B0\u1EE3t nh\u1EADn di\u1EC7n \u0111\xE3 c\xF3", userId };
-    recomputeDay(db, userId, workDate);
-    return { status: "success", message: `\u0110\xE3 ghi nh\u1EADn ng\xE0y ${workDate}`, userId };
-  });
-}
-var WEBHOOK_LOG_LIMIT = 500;
-function logWebhook(db, e, now) {
-  db.prepare("INSERT INTO webhook_logs(received_at, status, person_name, device_name, message, raw_payload) VALUES (?, ?, ?, ?, ?, ?)").run(
-    new Date(now).toISOString(),
-    e.status,
-    e.personName ?? null,
-    e.deviceName ?? null,
-    e.message ?? null,
-    e.rawPayload === void 0 ? null : JSON.stringify(e.rawPayload)
-  );
-  db.prepare("DELETE FROM webhook_logs WHERE id <= (SELECT id FROM webhook_logs ORDER BY id DESC LIMIT 1 OFFSET ?)").run(WEBHOOK_LOG_LIMIT);
-}
-var WEBHOOK_TOKEN_KEY = "hanet.webhook_token";
-function getWebhookToken(db) {
-  return getSetting(db, WEBHOOK_TOKEN_KEY) ?? rotateWebhookToken(db);
-}
-function rotateWebhookToken(db) {
-  const token = randomBytes3(24).toString("base64url");
-  setSetting(db, WEBHOOK_TOKEN_KEY, token);
-  return token;
-}
-function mask(v) {
-  return v ? `\u2022\u2022\u2022\u2022${v.slice(-4)}` : "";
-}
-var HANET_DEFAULT_API_BASE = "https://partner.hanet.ai";
-function getPlaceIds(db) {
-  try {
-    const v = JSON.parse(getSetting(db, "hanet.place_ids") ?? "[]");
-    return Array.isArray(v) ? v.filter((n) => Number.isInteger(n) && n > 0) : [];
-  } catch {
-    return [];
-  }
-}
-function reconcileEnabled(db) {
-  return Boolean(getSetting(db, "hanet.client_id")) && Boolean(getSetting(db, "hanet.refresh_token") || getSetting(db, "hanet.access_token")) && getPlaceIds(db).length > 0;
-}
-function getHanetConfigView(db) {
-  return {
-    clientId: getSetting(db, "hanet.client_id") ?? "",
-    clientSecret: mask(getSetting(db, "hanet.client_secret")),
-    accessToken: mask(getSetting(db, "hanet.access_token")),
-    refreshToken: mask(getSetting(db, "hanet.refresh_token")),
-    apiBase: getSetting(db, "hanet.api_base") ?? HANET_DEFAULT_API_BASE,
-    placeIds: getPlaceIds(db),
-    webhookPath: `/api/hanet/webhook/${getWebhookToken(db)}`,
-    lastReconcileAt: getSetting(db, "hanet.last_reconcile_at") ?? null,
-    lastReconcileError: getSetting(db, "hanet.last_reconcile_error") ?? null,
-    reconcileEnabled: reconcileEnabled(db)
-  };
-}
-var TEXT_FIELDS = [
-  ["clientId", "hanet.client_id"],
-  ["clientSecret", "hanet.client_secret"],
-  ["accessToken", "hanet.access_token"],
-  ["refreshToken", "hanet.refresh_token"],
-  ["apiBase", "hanet.api_base"]
-];
-function updateHanetConfig(db, body) {
-  const b = body ?? {};
-  for (const [field, key] of TEXT_FIELDS) {
-    const v = b[field];
-    if (typeof v === "string" && v.trim() !== "" && !v.startsWith("\u2022\u2022\u2022\u2022")) setSetting(db, key, v.trim());
-  }
-  if (Array.isArray(b.placeIds)) {
-    const ids = b.placeIds.map(Number).filter((n) => Number.isInteger(n) && n > 0);
-    setSetting(db, "hanet.place_ids", JSON.stringify(ids));
-  }
-}
-
-// server/hanet-api.ts
-var HanetApiError = class extends Error {
-  constructor(returnCode, message) {
-    super(message);
-    this.returnCode = returnCode;
-  }
-};
-var OAUTH_TOKEN_URL = "https://oauth.hanet.com/token";
-var PAGE_SIZE = 500;
-var TOKEN_EXPIRED = -103;
-var MAX_PAGES = 200;
-async function postForm(deps, url, params) {
-  const res = await deps.fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams(params).toString()
-  });
-  if (!res.ok) throw new HanetApiError(res.status, `HTTP ${res.status} t\u1EEB ${url}`);
-  return res.json();
-}
-async function refreshAccessToken(deps) {
-  const { db } = deps;
-  const refreshToken = getSetting(db, "hanet.refresh_token");
-  const clientId = getSetting(db, "hanet.client_id");
-  const clientSecret = getSetting(db, "hanet.client_secret");
-  if (!refreshToken || !clientId || !clientSecret) {
-    throw new HanetApiError(0, "L\xE0m m\u1EDBi token th\u1EA5t b\u1EA1i: thi\u1EBFu Client ID, Client Secret ho\u1EB7c Refresh Token");
-  }
-  const body = await postForm(deps, OAUTH_TOKEN_URL, {
-    grant_type: "refresh_token",
-    client_id: clientId,
-    client_secret: clientSecret,
-    refresh_token: refreshToken
-  });
-  const token = body?.access_token;
-  if (typeof token !== "string" || !token) {
-    throw new HanetApiError(Number(body?.returnCode ?? 0), `L\xE0m m\u1EDBi token th\u1EA5t b\u1EA1i: ${body?.returnMessage ?? body?.error ?? "kh\xF4ng r\xF5 l\xFD do"}`);
-  }
-  setSetting(db, "hanet.access_token", token);
-  if (typeof body.refresh_token === "string" && body.refresh_token) setSetting(db, "hanet.refresh_token", body.refresh_token);
-  return token;
-}
-async function callApi(deps, apiPath, params, retried = false) {
-  const token = getSetting(deps.db, "hanet.access_token") ?? await refreshAccessToken(deps);
-  const base = (getSetting(deps.db, "hanet.api_base") ?? HANET_DEFAULT_API_BASE).replace(/\/+$/, "");
-  const body = await postForm(deps, base + apiPath, { token, ...params });
-  const code = Number(body?.returnCode);
-  if (code === TOKEN_EXPIRED && !retried) {
-    await refreshAccessToken(deps);
-    return callApi(deps, apiPath, params, true);
-  }
-  if (code !== 1) throw new HanetApiError(code, `Hanet tr\u1EA3 l\u1ED7i ${code}: ${body?.returnMessage ?? ""}`);
-  return body;
-}
-async function fetchCheckins(deps, placeId, from, to) {
-  const all = [];
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const body = await callApi(deps, "/person/getCheckinByPlaceIdInTimestamp", {
-      placeID: String(placeId),
-      from: String(from),
-      to: String(to),
-      type: "0",
-      page: String(page),
-      size: String(PAGE_SIZE)
-    });
-    const data = Array.isArray(body.data) ? body.data : [];
-    all.push(...data);
-    if (data.length < PAGE_SIZE) break;
-  }
-  return all;
-}
-async function reconcileRange(deps, from, to) {
-  const { db } = deps;
-  const summary = { inserted: 0, duplicates: 0, ignored: 0 };
-  try {
-    for (const placeId of getPlaceIds(db)) {
-      for (const item of await fetchCheckins(deps, placeId, from, to)) {
-        const parsed = parseCheckin(item, deps.now());
-        if (!parsed) {
-          summary.ignored++;
-          continue;
-        }
-        const r = ingestCheckin(db, parsed.input, "reconcile");
-        if (r.status === "success") summary.inserted++;
-        else if (r.status === "duplicate") summary.duplicates++;
-        else summary.ignored++;
-      }
-    }
-  } catch (err) {
-    setSetting(db, "hanet.last_reconcile_error", err.message);
-    throw err;
-  }
-  setSetting(db, "hanet.last_reconcile_at", new Date(deps.now()).toISOString());
-  deleteSetting(db, "hanet.last_reconcile_error");
-  return summary;
-}
-async function reconcileDate(deps, date) {
-  const from = vnDayStart(date);
-  const to = Math.min(vnDayStart(addDays(date, 1)) - 1, deps.now());
-  return reconcileRange(deps, from, to);
-}
-
-// server/routes/hanet.ts
+init_hanet();
+init_hanet_api();
+init_settings();
+init_vntime();
+init_hanet_sync();
 function hanetPublicRoutes(ctx) {
   const { db } = ctx;
   const r = Router8();
@@ -1515,7 +2426,13 @@ function hanetPublicRoutes(ctx) {
     }
     const parsed = parseCheckin(req.body, now);
     if (!parsed) {
-      logWebhook(db, { status: "ignored", message: "Kh\xF4ng ph\u1EA3i s\u1EF1 ki\u1EC7n nh\u1EADn di\u1EC7n", rawPayload: req.body }, now);
+      const stranger = parseStranger(req.body, now);
+      if (stranger) {
+        recordSighting(db, { kind: "stranger", personId: null, aliasId: null, personName: null, ...stranger }, now);
+        logWebhook(db, { status: "ignored", deviceName: stranger.deviceName, message: STRANGER_MESSAGE, rawPayload: req.body }, now);
+      } else {
+        logWebhook(db, { status: "ignored", message: "Kh\xF4ng ph\u1EA3i s\u1EF1 ki\u1EC7n nh\u1EADn di\u1EC7n", rawPayload: req.body }, now);
+      }
       res.json({ returnCode: 1, returnMessage: "ignored" });
       return;
     }
@@ -1530,6 +2447,14 @@ function hanetPublicRoutes(ctx) {
       }
       res.status(500).json({ returnCode: -503, returnMessage: "L\u1ED7i l\u01B0u d\u1EEF li\u1EC7u" });
       return;
+    }
+    if (result.status === "ignored" && result.message === UNMATCHED_MESSAGE && parsed.input.imageUrl) {
+      const i = parsed.input;
+      recordSighting(
+        db,
+        { kind: "unlinked", personId: i.personId, aliasId: i.aliasId, personName: i.personName, deviceId: i.deviceId, deviceName: i.deviceName, ts: i.ts, imageUrl: i.imageUrl },
+        now
+      );
     }
     logWebhook(
       db,
@@ -1558,15 +2483,77 @@ function hanetRoutes(ctx) {
   });
   r.put("/hanet/config", hr, (req, res) => {
     updateHanetConfig(db, req.body);
+    kickAll(ctx);
     res.json({ config: getHanetConfigView(db) });
   });
+  r.post(
+    "/hanet/test-connection",
+    hr,
+    ah(async (_req, res) => {
+      const fail = (message) => ({ ok: false, account: null, places: [], message });
+      if (!getSetting(db, "hanet.client_id") || !(getSetting(db, "hanet.refresh_token") || getSetting(db, "hanet.access_token"))) {
+        res.json(fail("Ch\u01B0a nh\u1EADp Client ID v\xE0 Refresh Token (ho\u1EB7c Access Token)"));
+        return;
+      }
+      const deps = { db, fetch: ctx.fetch, now: ctx.now };
+      try {
+        const account = await hanetApi.getProfile(deps);
+        const places = await hanetApi.getPlaces(deps);
+        const body = {
+          ok: true,
+          account,
+          places,
+          message: `\u0110\xE3 k\u1EBFt n\u1ED1i t\xE0i kho\u1EA3n ${account.name || account.email}, ${places.length} \u0111\u1ECBa \u0111i\u1EC3m`
+        };
+        res.json(body);
+      } catch (err) {
+        res.json(fail(err.message));
+      }
+    })
+  );
   r.post("/hanet/webhook-token/rotate", hr, (req, res) => {
     rotateWebhookToken(db);
     console.warn(`[SECURITY] webhook_token_rotated by=${currentUser(req).code} ip=${req.ip}`);
     res.json({ config: getHanetConfigView(db) });
   });
-  r.get("/hanet/recent-faces", hr, (_req, res) => {
-    res.json({ faces: recentUnmatchedFaces(db, ctx.now()) });
+  r.get("/hanet/sightings", hr, (req, res) => {
+    const kind = req.query.kind;
+    if (kind !== void 0 && kind !== "stranger" && kind !== "unlinked") throw new HttpError(400, "Lo\u1EA1i l\u01B0\u1EE3t ch\u1EE5p kh\xF4ng h\u1EE3p l\u1EC7");
+    res.json({ sightings: listSightings(db, ctx.now(), kind) });
+  });
+  r.get(
+    "/hanet/persons/unlinked",
+    hr,
+    ah(async (_req, res) => {
+      const placeId = getPlaceIds(db)[0];
+      if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, "Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Hanet (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
+      let persons;
+      try {
+        persons = await fetchAllPersons({ db, fetch: ctx.fetch, now: ctx.now }, placeId);
+      } catch (err) {
+        throw new HttpError(502, `Kh\xF4ng l\u1EA5y \u0111\u01B0\u1EE3c danh s\xE1ch ng\u01B0\u1EDDi t\u1EEB Hanet: ${err.message}`);
+      }
+      res.json({ persons: unlinkedPersons(db, persons) });
+    })
+  );
+  r.get("/hanet/sync", hr, (_req, res) => {
+    res.json(syncSummary(db));
+  });
+  r.post("/hanet/sync/retry", hr, (req, res) => {
+    const b = req.body ?? {};
+    const filter = {};
+    if (b.jobId !== void 0) {
+      if (!Number.isInteger(Number(b.jobId))) throw new HttpError(400, "M\xE3 vi\u1EC7c kh\xF4ng h\u1EE3p l\u1EC7");
+      filter.jobId = Number(b.jobId);
+    }
+    if (b.entityType !== void 0 || b.entityId !== void 0) {
+      if (!["user", "department", "camera"].includes(b.entityType) || typeof b.entityId !== "string") throw new HttpError(400, "\u0110\u1ED1i t\u01B0\u1EE3ng kh\xF4ng h\u1EE3p l\u1EC7");
+      filter.entityType = b.entityType;
+      filter.entityId = b.entityId;
+    }
+    retryJobs(db, filter, ctx.now());
+    kickAll(ctx);
+    res.json(syncSummary(db));
   });
   r.get("/hanet/webhook-logs", hr, (_req, res) => {
     const rows = db.prepare("SELECT * FROM webhook_logs ORDER BY id DESC LIMIT 200").all();
@@ -1631,6 +2618,8 @@ function hanetRoutes(ctx) {
 }
 
 // server/routes/admin.ts
+init_db();
+init_errors();
 import { Router as Router9 } from "express";
 function adminRoutes(ctx) {
   const { db } = ctx;
@@ -1704,13 +2693,20 @@ function createApp(ctx) {
 }
 
 // server/jobs.ts
+init_hanet();
+init_hanet_sync();
+init_sync_handlers();
+init_hanet_api();
+init_vntime();
 function dueJobs(now) {
   const m = vnMinutesOfDay(now);
   return {
     backup: m === 2 * 60,
     reconcileToday: m % 15 === 0,
     reconcileYesterday: m === 5,
-    purgeSessions: m % 60 === 0
+    purgeSessions: m % 60 === 0,
+    purgeHourly: m % 60 === 30,
+    cameraStatus: m % 5 === 0
   };
 }
 function startJobs(ctx) {
@@ -1731,7 +2727,11 @@ function startJobs(ctx) {
     const today = toVnDate(now);
     if (due.backup) run("backup", () => backupNow(ctx.db, ctx.config.backupDir, "daily", now));
     if (due.purgeSessions) run("purge-sessions", () => purgeExpiredSessions(ctx.db, now));
+    if (due.purgeHourly) run("purge-sightings", () => purgeSightings(ctx.db, now));
+    if (due.purgeHourly) run("purge-sync-jobs", () => purgeDoneJobs(ctx.db, now));
+    run("sync", () => runDueJobs(deps, SYNC_HANDLERS));
     if (reconcileEnabled(ctx.db)) {
+      if (due.cameraStatus) run("camera-status", () => refreshCameraStatus(deps));
       if (due.reconcileToday) run("reconcile-today", () => reconcileDate(deps, today));
       if (due.reconcileYesterday) run("reconcile-yesterday", () => reconcileDate(deps, addDays(today, -1)));
     }
@@ -1767,7 +2767,8 @@ async function main() {
       production,
       simulatorEnabled: !production || process.env.ENABLE_SIMULATOR === "1",
       trustProxy: process.env.TRUST_PROXY === "1",
-      backupDir
+      backupDir,
+      kickSync: true
     },
     limiter: new LoginLimiter(),
     fetch: globalThis.fetch,
@@ -1787,6 +2788,7 @@ async function main() {
   app.listen(PORT, "0.0.0.0", () => console.log(`[Petrolimex Attendance] \u0110ang ch\u1EA1y t\u1EA1i http://0.0.0.0:${PORT}`));
 }
 main().catch((err) => {
-  console.error("[STARTUP] Kh\xF4ng kh\u1EDFi \u0111\u1ED9ng \u0111\u01B0\u1EE3c:", err);
+  if (err instanceof SchemaVersionError) console.error(err.message);
+  else console.error("[STARTUP] Kh\xF4ng kh\u1EDFi \u0111\u1ED9ng \u0111\u01B0\u1EE3c:", err);
   process.exit(1);
 });
