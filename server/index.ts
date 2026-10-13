@@ -33,6 +33,7 @@ async function main() {
       simulatorEnabled: !production || process.env.ENABLE_SIMULATOR === '1',
       trustProxy: process.env.TRUST_PROXY === '1',
       backupDir,
+      kickSync: true,
     },
     limiter: new LoginLimiter(),
     fetch: globalThis.fetch,

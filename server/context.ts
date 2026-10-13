@@ -6,6 +6,8 @@ export interface AppConfig {
   simulatorEnabled: boolean;
   trustProxy: boolean;
   backupDir: string;
+  /** Thử đồng bộ Hanet ngay sau khi lưu (production). Test tắt để tự gọi runDueJobs. */
+  kickSync: boolean;
 }
 
 export interface AppContext {

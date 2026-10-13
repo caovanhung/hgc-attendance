@@ -12,7 +12,8 @@ import { hanetApi, reconcileDate } from '../hanet-api';
 import { getSetting } from '../settings';
 import { isValidDate, toVnDate, vnDateTimeToTs } from '../vntime';
 import { listSightings, recordSighting } from '../sightings';
-import type { HanetConnectionTest, SightingKind, WebhookLog } from '../../shared/types';
+import { kickAll, retryJobs, syncSummary } from '../hanet-sync';
+import type { HanetConnectionTest, SightingKind, SyncEntity, WebhookLog } from '../../shared/types';
 
 export function hanetPublicRoutes(ctx: AppContext): Router {
   const { db } = ctx;
@@ -91,6 +92,7 @@ export function hanetRoutes(ctx: AppContext): Router {
 
   r.put('/hanet/config', hr, (req, res) => {
     updateHanetConfig(db, req.body);
+    kickAll(ctx);
     res.json({ config: getHanetConfigView(db) });
   });
 
@@ -130,6 +132,27 @@ export function hanetRoutes(ctx: AppContext): Router {
     const kind = req.query.kind;
     if (kind !== undefined && kind !== 'stranger' && kind !== 'unlinked') throw new HttpError(400, 'Loại lượt chụp không hợp lệ');
     res.json({ sightings: listSightings(db, ctx.now(), kind as SightingKind | undefined) });
+  });
+
+  r.get('/hanet/sync', hr, (_req, res) => {
+    res.json(syncSummary(db));
+  });
+
+  r.post('/hanet/sync/retry', hr, (req, res) => {
+    const b = req.body ?? {};
+    const filter: { jobId?: number; entityType?: SyncEntity; entityId?: string } = {};
+    if (b.jobId !== undefined) {
+      if (!Number.isInteger(Number(b.jobId))) throw new HttpError(400, 'Mã việc không hợp lệ');
+      filter.jobId = Number(b.jobId);
+    }
+    if (b.entityType !== undefined || b.entityId !== undefined) {
+      if (!['user', 'department', 'camera'].includes(b.entityType) || typeof b.entityId !== 'string') throw new HttpError(400, 'Đối tượng không hợp lệ');
+      filter.entityType = b.entityType;
+      filter.entityId = b.entityId;
+    }
+    retryJobs(db, filter, ctx.now());
+    kickAll(ctx);
+    res.json(syncSummary(db));
   });
 
   r.get('/hanet/webhook-logs', hr, (_req, res) => {

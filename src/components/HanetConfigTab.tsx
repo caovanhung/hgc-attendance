@@ -3,6 +3,7 @@ import type { HanetConfigView } from '../types';
 import { api, errorMessage } from '../api';
 import { WebhookCard } from './config/WebhookCard';
 import { WorkSettingsCard } from './config/WorkSettingsCard';
+import { SyncStatusCard } from './config/SyncStatusCard';
 import { HanetCredentialsCard } from './config/HanetCredentialsCard';
 import { BackupsCard } from './config/BackupsCard';
 import { WebhookLogsCard } from './config/WebhookLogsCard';
@@ -30,6 +31,7 @@ export const HanetConfigTab: React.FC<HanetConfigTabProps> = ({ onRefresh }) => 
       <WebhookCard config={config} onChange={setConfig} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <HanetCredentialsCard config={config} onChange={setConfig} onReconciled={onRefresh} />
+        <SyncStatusCard />
         <WorkSettingsCard onRecomputed={onRefresh} />
         <BackupsCard />
         <WebhookLogsCard />

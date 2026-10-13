@@ -91,7 +91,7 @@ export async function startTestApp(overrides: TestAppOverrides = {}): Promise<Te
   const backupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hgc-backup-'));
   const ctx: AppContext = {
     db,
-    config: { production: false, simulatorEnabled: true, trustProxy: false, backupDir, ...overrides.config },
+    config: { production: false, simulatorEnabled: true, trustProxy: false, backupDir, kickSync: false, ...overrides.config },
     limiter: overrides.limiter ?? new LoginLimiter(),
     fetch: overrides.fetch ?? ((async () => { throw new Error('fetch không được dùng trong test này'); }) as unknown as typeof fetch),
     now: overrides.now ?? (() => Date.now()),

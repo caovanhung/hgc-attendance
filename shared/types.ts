@@ -218,3 +218,31 @@ export interface FaceSighting {
   ts: number;
   imageUrl: string;
 }
+
+export type SyncEntity = 'user' | 'department' | 'camera';
+export type SyncOp =
+  | 'user.info'
+  | 'user.department'
+  | 'user.alias'
+  | 'user.remove'
+  | 'dept.create'
+  | 'dept.update'
+  | 'dept.remove'
+  | 'camera.rename';
+
+export interface SyncJobView {
+  id: number;
+  entityType: SyncEntity;
+  entityId: string;
+  op: SyncOp;
+  label: string; // tên đối tượng để hiển thị
+  attempts: number;
+  lastError: string | null;
+  updatedAt: number;
+}
+
+export interface SyncSummary {
+  pending: number;
+  error: number;
+  errors: SyncJobView[]; // 50 việc lỗi gần nhất
+}

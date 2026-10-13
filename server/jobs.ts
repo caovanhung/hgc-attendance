@@ -3,6 +3,8 @@ import { backupNow } from './backup';
 import { purgeExpiredSessions } from './auth';
 import { reconcileEnabled } from './hanet';
 import { purgeSightings } from './sightings';
+import { purgeDoneJobs, runDueJobs } from './hanet-sync';
+import { SYNC_HANDLERS } from './sync-handlers';
 import { reconcileDate, type HanetDeps } from './hanet-api';
 import { addDays, toVnDate, vnMinutesOfDay } from './vntime';
 
@@ -49,6 +51,8 @@ export function startJobs(ctx: AppContext): () => void {
     if (due.backup) run('backup', () => backupNow(ctx.db, ctx.config.backupDir, 'daily', now));
     if (due.purgeSessions) run('purge-sessions', () => purgeExpiredSessions(ctx.db, now));
     if (due.purgeHourly) run('purge-sightings', () => purgeSightings(ctx.db, now));
+    if (due.purgeHourly) run('purge-sync-jobs', () => purgeDoneJobs(ctx.db, now));
+    run('sync', () => runDueJobs(deps, SYNC_HANDLERS));
     if (reconcileEnabled(ctx.db)) {
       if (due.reconcileToday) run('reconcile-today', () => reconcileDate(deps, today));
       if (due.reconcileYesterday) run('reconcile-yesterday', () => reconcileDate(deps, addDays(today, -1)));
