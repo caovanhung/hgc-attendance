@@ -213,7 +213,7 @@ export default function App() {
       )}
 
       <footer className="mt-auto border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-500">
-        Hệ thống Điểm danh Camera AI Hanet
+        Hệ thống Điểm danh Camera AI do HGC phát triển
       </footer>
     </div>
   );

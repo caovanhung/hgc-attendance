@@ -1,6 +1,6 @@
 {
-  "name": "Hanet Attendance Hub",
-  "description": "Hệ thống điểm danh đa phòng ban tích hợp Camera AI Hanet với phân quyền HR, Trưởng phòng và Nhân viên",
+  "name": "Petrolimex Attendance",
+  "description": "Hệ thống Điểm danh Camera AI do HGC phát triển, phân quyền HR, Trưởng phòng và Nhân viên",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

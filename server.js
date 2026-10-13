@@ -1722,7 +1722,7 @@ async function main() {
     app.get("*", (_req, res) => res.sendFile(path3.join(distPath, "index.html")));
   }
   startJobs(ctx);
-  app.listen(PORT, "0.0.0.0", () => console.log(`[Hanet Attendance] \u0110ang ch\u1EA1y t\u1EA1i http://0.0.0.0:${PORT}`));
+  app.listen(PORT, "0.0.0.0", () => console.log(`[Petrolimex Attendance] \u0110ang ch\u1EA1y t\u1EA1i http://0.0.0.0:${PORT}`));
 }
 main().catch((err) => {
   console.error("[STARTUP] Kh\xF4ng kh\u1EDFi \u0111\u1ED9ng \u0111\u01B0\u1EE3c:", err);

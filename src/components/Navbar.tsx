@@ -47,7 +47,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-600 to-orange-500 flex items-center justify-center text-white shrink-0">
               <CameraIcon className="w-6 h-6" />
             </div>
-            <span className="font-bold text-lg text-slate-900 tracking-tight truncate">Hanet Attendance</span>
+            <span className="font-bold text-lg text-slate-900 tracking-tight truncate">Petrolimex Attendance</span>
           </div>
 
           <div className="flex items-center gap-2">

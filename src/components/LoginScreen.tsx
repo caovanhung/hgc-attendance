@@ -31,7 +31,7 @@ export const LoginScreen: React.FC<{ onLoggedIn: () => void }> = ({ onLoggedIn }
             <Camera className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="font-bold text-slate-900">Hệ thống điểm danh Hanet</h1>
+            <h1 className="font-bold text-slate-900">Petrolimex Attendance</h1>
             <p className="text-xs text-slate-500">Đăng nhập bằng mã nhân viên</p>
           </div>
         </div>
