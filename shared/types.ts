@@ -78,6 +78,7 @@ export interface Detection {
   ts: number;
   imageUrl: string | null;
   source: DetectionSource;
+  videoUrl: string | null; // trang xem lại video trên Hanet Connect; null nếu người xem không được phép
 }
 
 export type RequestType = 'missed_punch' | 'late_explanation' | 'leave_request';

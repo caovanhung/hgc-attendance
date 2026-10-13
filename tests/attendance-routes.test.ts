@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { startTestApp, seedUser, seedDepartment, loginAs, addDetection, type TestApp } from './helpers';
 import { vnDateTimeToTs, toVnDate } from '../server/vntime';
+import { deleteSetting, setSetting } from '../server/settings';
 
 const D = '2026-10-13';
 const at = (hhmm: string, date = D) => vnDateTimeToTs(date, hhmm);
@@ -203,6 +204,26 @@ test('chi tiết thẻ thống kê: danh sách người khớp đúng con số',
     const tp = await loginAs(app, 'TP01');
     assert.deepEqual(((await tp.get('/api/stats/details?type=total')).body.rows as { employeeCode: string }[]).map((x) => x.employeeCode).sort(), ['NV01', 'TP01']);
     assert.equal((await hr.get('/api/stats/details?type=abc')).status, 400);
+  } finally {
+    await app.close();
+  }
+});
+
+test('nút Xem video: link Hanet Connect đúng địa điểm, camera, ngày giờ VN; chỉ HR và Trưởng phòng', async () => {
+  const { app, ids } = await setup();
+  try {
+    setSetting(app.db, 'hanet.place_ids', '[998833]');
+    // 00:30 giờ VN ngày 14/10 là 17:30 UTC ngày 13/10: link phải mang ngày 14/10
+    addDetection(app.db, ids.nv1, at('00:30', '2026-10-14'), { deviceId: 'C21272C952' });
+    addDetection(app.db, ids.nv1, at('00:40', '2026-10-14'), { deviceId: 'SIM', source: 'simulator' });
+    const path = `/api/attendance/${ids.nv1}/2026-10-14/detections`;
+    const urls = async (code: string) => ((await (await loginAs(app, code)).get(path)).body.detections as { videoUrl: string | null }[]).map((d) => d.videoUrl);
+    const expected = 'https://connect.hanet.ai/998833/video?id_device=C21272C952&day=2026-10-14';
+    assert.deepEqual(await urls('HR01'), [expected, null]);
+    assert.deepEqual(await urls('TP01'), [expected, null]);
+    assert.deepEqual(await urls('NV01'), [null, null]);
+    deleteSetting(app.db, 'hanet.place_ids');
+    assert.deepEqual(await urls('HR01'), [null, null]);
   } finally {
     await app.close();
   }

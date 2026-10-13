@@ -197,3 +197,10 @@ export function updateHanetConfig(db: Db, body: unknown): void {
     setSetting(db, 'hanet.place_ids', JSON.stringify(ids));
   }
 }
+
+/** Trang xem lại video của Hanet Connect. Không gọi API nội bộ: HR tự đăng nhập Hanet Connect. */
+export const HANET_CONNECT_BASE = 'https://connect.hanet.ai';
+
+export function hanetVideoUrl(placeId: number, deviceId: string, day: string): string {
+  return `${HANET_CONNECT_BASE}/${placeId}/video?id_device=${encodeURIComponent(deviceId)}&day=${day}`;
+}

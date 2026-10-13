@@ -6,6 +6,7 @@ import { canSeeUser, getUser, type Row } from '../repo';
 import { scopeFor, scopeWhere } from '../auth';
 import { recomputeRange } from '../attendance';
 import { NOT_SYSTEM_ADMIN } from '../bootstrap';
+import { getPlaceIds, hanetVideoUrl } from '../hanet';
 import { daysBetween, isValidDate, toVnDate } from '../vntime';
 import type { AttendanceDay, Detection, StatsData, StatsDetailRow, StatsDetailType } from '../../shared/types';
 
@@ -78,8 +79,11 @@ export function attendanceRoutes(ctx: AppContext): Router {
     if (!canSeeUser(currentUser(req), target)) throw new HttpError(403, 'Bạn không có quyền xem dữ liệu này');
     if (!isValidDate(req.params.date)) throw new HttpError(400, 'Ngày không hợp lệ (định dạng YYYY-MM-DD)');
     const rows = db
-      .prepare('SELECT id, device_id, device_name, place_id, ts, image_url, source FROM detections WHERE user_id = ? AND work_date = ? ORDER BY ts')
+      .prepare('SELECT id, device_id, device_name, place_id, ts, work_date, image_url, source FROM detections WHERE user_id = ? AND work_date = ? ORDER BY ts')
       .all(target.id, req.params.date) as Row[];
+    const viewer = currentUser(req);
+    const placeId = getPlaceIds(db)[0];
+    const canWatch = (viewer.role === 'hr' || viewer.role === 'dept_manager') && placeId !== undefined;
     const detections: Detection[] = rows.map((x) => ({
       id: x.id,
       deviceId: x.device_id,
@@ -88,6 +92,7 @@ export function attendanceRoutes(ctx: AppContext): Router {
       ts: x.ts,
       imageUrl: x.image_url ?? null,
       source: x.source,
+      videoUrl: canWatch && x.source !== 'simulator' ? hanetVideoUrl(placeId as number, x.device_id, x.work_date) : null,
     }));
     res.json({ detections });
   });
