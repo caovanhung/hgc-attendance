@@ -4,7 +4,7 @@ import { tx } from './db';
 import { recomputeDay } from './attendance';
 import { getSetting, setSetting } from './settings';
 import { toVnDate } from './vntime';
-import type { DetectionSource, HanetConfigView, RecentFace, WebhookLogStatus } from '../shared/types';
+import type { DetectionSource, HanetConfigView, WebhookLogStatus } from '../shared/types';
 
 export interface CheckinInput {
   personId: string | null;
@@ -61,6 +61,22 @@ export function parseCheckin(body: unknown, now: number): { input: CheckinInput;
   };
 }
 
+export const STRANGER_MESSAGE = 'Người lạ';
+
+/**
+ * Người lạ (personType 2): không có personID/aliasID nên parseCheckin trả null,
+ * nhưng có ảnh để HR chọn đăng ký FaceID. Trả null nếu không phải người lạ có ảnh.
+ */
+export function parseStranger(body: unknown, now: number): { deviceId: string; deviceName: string | null; ts: number; imageUrl: string } | null {
+  if (!body || typeof body !== 'object') return null;
+  const b = body as Record<string, unknown>;
+  const d = (b.data && typeof b.data === 'object' ? b.data : b) as Record<string, unknown>;
+  const deviceId = str(d.deviceID);
+  const imageUrl = str(d.detected_image_url);
+  if (num(d.personType) !== 2 || !deviceId || !imageUrl) return null;
+  return { deviceId, deviceName: str(d.deviceName), ts: normalizeTs(num(d.time), now).ts, imageUrl };
+}
+
 export interface IngestResult {
   status: 'success' | 'ignored' | 'duplicate';
   message: string;
@@ -69,40 +85,6 @@ export interface IngestResult {
 
 /** Lời nhắn ghi vào nhật ký webhook khi người được nhận diện chưa có trong danh sách nhân sự. */
 export const UNMATCHED_MESSAGE = 'Không khớp nhân viên nào';
-export const RECENT_FACES_WINDOW_MS = 10 * 60_000;
-const RECENT_FACES_LIMIT = 20;
-
-/**
- * Người camera vừa nhận diện (trong 10 phút) nhưng chưa khớp nhân sự nào, mới nhất trước, mỗi người một dòng.
- * Dùng để gợi ý điền mã nhân viên (= aliasID), họ tên và Person ID khi thêm nhân sự.
- */
-export function recentUnmatchedFaces(db: Db, now: number): RecentFace[] {
-  const since = new Date(now - RECENT_FACES_WINDOW_MS).toISOString();
-  const rows = db
-    .prepare("SELECT raw_payload FROM webhook_logs WHERE status = 'ignored' AND message LIKE ? AND received_at >= ? ORDER BY id DESC")
-    .all(`${UNMATCHED_MESSAGE}%`, since) as { raw_payload: string | null }[];
-  const known = db.prepare('SELECT 1 FROM users WHERE code = ? OR (hanet_person_id IS NOT NULL AND hanet_person_id = ?)');
-  const seen = new Set<string>();
-  const faces: RecentFace[] = [];
-  for (const row of rows) {
-    let body: unknown;
-    try {
-      body = row.raw_payload ? JSON.parse(row.raw_payload) : null;
-    } catch {
-      continue;
-    }
-    const parsed = parseCheckin(body, now);
-    if (!parsed) continue;
-    const { personId, aliasId, personName, deviceName, ts, imageUrl } = parsed.input;
-    const key = personId ?? `alias:${aliasId}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    if (known.get(aliasId?.toUpperCase() ?? '', personId ?? '')) continue;
-    faces.push({ personId, aliasId, personName, deviceName, ts, imageUrl });
-    if (faces.length >= RECENT_FACES_LIMIT) break;
-  }
-  return faces;
-}
 
 export function ingestCheckin(db: Db, input: CheckinInput, source: DetectionSource): IngestResult {
   if (input.personType !== null && input.personType !== 0) return { status: 'ignored', message: 'Không phải nhân viên' };

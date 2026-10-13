@@ -2,6 +2,7 @@ import type { AppContext } from './context';
 import { backupNow } from './backup';
 import { purgeExpiredSessions } from './auth';
 import { reconcileEnabled } from './hanet';
+import { purgeSightings } from './sightings';
 import { reconcileDate, type HanetDeps } from './hanet-api';
 import { addDays, toVnDate, vnMinutesOfDay } from './vntime';
 
@@ -10,6 +11,7 @@ export interface DueJobs {
   reconcileToday: boolean;
   reconcileYesterday: boolean;
   purgeSessions: boolean;
+  purgeHourly: boolean;
 }
 
 export function dueJobs(now: number): DueJobs {
@@ -19,6 +21,7 @@ export function dueJobs(now: number): DueJobs {
     reconcileToday: m % 15 === 0,
     reconcileYesterday: m === 5,
     purgeSessions: m % 60 === 0,
+    purgeHourly: m % 60 === 30,
   };
 }
 
@@ -45,6 +48,7 @@ export function startJobs(ctx: AppContext): () => void {
     const today = toVnDate(now);
     if (due.backup) run('backup', () => backupNow(ctx.db, ctx.config.backupDir, 'daily', now));
     if (due.purgeSessions) run('purge-sessions', () => purgeExpiredSessions(ctx.db, now));
+    if (due.purgeHourly) run('purge-sightings', () => purgeSightings(ctx.db, now));
     if (reconcileEnabled(ctx.db)) {
       if (due.reconcileToday) run('reconcile-today', () => reconcileDate(deps, today));
       if (due.reconcileYesterday) run('reconcile-yesterday', () => reconcileDate(deps, addDays(today, -1)));

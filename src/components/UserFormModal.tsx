@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Camera, RefreshCw } from 'lucide-react';
-import type { Department, RecentFace, User, UserRole, UserStatus } from '../types';
+import type { Department, FaceSighting, User, UserRole, UserStatus } from '../types';
 import { api, errorMessage } from '../api';
 import { ROLE_LABEL, fmtTime } from '../format';
 import { Field, Modal, inputCls, primaryBtn, secondaryBtn } from './ui';
@@ -28,7 +28,7 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
   const [status, setStatus] = useState<UserStatus>(user?.status ?? 'active');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [faces, setFaces] = useState<RecentFace[] | null>(null);
+  const [faces, setFaces] = useState<FaceSighting[] | null>(null);
   const [facesLoading, setFacesLoading] = useState(false);
   const [facesError, setFacesError] = useState<string | null>(null);
 
@@ -36,7 +36,7 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
     setFacesLoading(true);
     setFacesError(null);
     try {
-      setFaces((await api<{ faces: RecentFace[] }>('/api/hanet/recent-faces')).faces);
+      setFaces((await api<{ sightings: FaceSighting[] }>('/api/hanet/sightings?kind=unlinked')).sightings);
     } catch (err) {
       setFacesError(errorMessage(err));
     } finally {
@@ -44,7 +44,7 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
     }
   };
 
-  const pickFace = (f: RecentFace) => {
+  const pickFace = (f: FaceSighting) => {
     if (!isEdit) {
       // Người chưa có aliasID trên Hanet: giữ mã HR đã gõ.
       if (f.aliasId) setCode(f.aliasId);
@@ -90,14 +90,14 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
           {facesError && <p className="text-rose-600">{facesError}</p>}
           {faces && faces.length === 0 && (
             <p className="text-[11px] text-slate-500">
-              Không có ai mới được nhận diện trong 10 phút gần đây (người đã có trong danh sách nhân sự không hiện ở đây). Hãy đứng trước camera rồi bấm lại.
+              Không có ai mới được nhận diện trong 30 phút gần đây (người đã có trong danh sách nhân sự không hiện ở đây). Hãy đứng trước camera rồi bấm lại.
             </p>
           )}
           {faces && faces.length > 0 && (
             <div className="space-y-1.5 max-h-56 overflow-y-auto">
               {faces.map((f) => (
                 <button
-                  key={f.personId ?? `alias:${f.aliasId}`}
+                  key={f.id}
                   type="button"
                   onClick={() => pickFace(f)}
                   className="w-full flex items-center gap-3 p-2 rounded-xl bg-white border border-slate-200 hover:border-orange-400 text-left cursor-pointer"

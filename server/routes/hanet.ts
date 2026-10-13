@@ -6,12 +6,13 @@ import { getUser, type Row } from '../repo';
 import { safeEqualStrings } from '../auth';
 import {
   getHanetConfigView, getWebhookToken, ingestCheckin, logWebhook, parseCheckin, rotateWebhookToken, updateHanetConfig,
-  reconcileEnabled, recentUnmatchedFaces, type CheckinInput, type IngestResult,
+  reconcileEnabled, parseStranger, STRANGER_MESSAGE, UNMATCHED_MESSAGE, type CheckinInput, type IngestResult,
 } from '../hanet';
 import { hanetApi, reconcileDate } from '../hanet-api';
 import { getSetting } from '../settings';
 import { isValidDate, toVnDate, vnDateTimeToTs } from '../vntime';
-import type { HanetConnectionTest, WebhookLog } from '../../shared/types';
+import { listSightings, recordSighting } from '../sightings';
+import type { HanetConnectionTest, SightingKind, WebhookLog } from '../../shared/types';
 
 export function hanetPublicRoutes(ctx: AppContext): Router {
   const { db } = ctx;
@@ -27,7 +28,13 @@ export function hanetPublicRoutes(ctx: AppContext): Router {
     }
     const parsed = parseCheckin(req.body, now);
     if (!parsed) {
-      logWebhook(db, { status: 'ignored', message: 'Không phải sự kiện nhận diện', rawPayload: req.body }, now);
+      const stranger = parseStranger(req.body, now);
+      if (stranger) {
+        recordSighting(db, { kind: 'stranger', personId: null, aliasId: null, personName: null, ...stranger }, now);
+        logWebhook(db, { status: 'ignored', deviceName: stranger.deviceName, message: STRANGER_MESSAGE, rawPayload: req.body }, now);
+      } else {
+        logWebhook(db, { status: 'ignored', message: 'Không phải sự kiện nhận diện', rawPayload: req.body }, now);
+      }
       res.json({ returnCode: 1, returnMessage: 'ignored' });
       return;
     }
@@ -43,6 +50,14 @@ export function hanetPublicRoutes(ctx: AppContext): Router {
       }
       res.status(500).json({ returnCode: -503, returnMessage: 'Lỗi lưu dữ liệu' });
       return;
+    }
+    if (result.status === 'ignored' && result.message === UNMATCHED_MESSAGE && parsed.input.imageUrl) {
+      const i = parsed.input;
+      recordSighting(
+        db,
+        { kind: 'unlinked', personId: i.personId, aliasId: i.aliasId, personName: i.personName, deviceId: i.deviceId, deviceName: i.deviceName, ts: i.ts, imageUrl: i.imageUrl as string },
+        now,
+      );
     }
     logWebhook(
       db,
@@ -111,8 +126,10 @@ export function hanetRoutes(ctx: AppContext): Router {
     res.json({ config: getHanetConfigView(db) });
   });
 
-  r.get('/hanet/recent-faces', hr, (_req, res) => {
-    res.json({ faces: recentUnmatchedFaces(db, ctx.now()) });
+  r.get('/hanet/sightings', hr, (req, res) => {
+    const kind = req.query.kind;
+    if (kind !== undefined && kind !== 'stranger' && kind !== 'unlinked') throw new HttpError(400, 'Loại lượt chụp không hợp lệ');
+    res.json({ sightings: listSightings(db, ctx.now(), kind as SightingKind | undefined) });
   });
 
   r.get('/hanet/webhook-logs', hr, (_req, res) => {

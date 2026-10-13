@@ -146,15 +146,6 @@ export interface StatsData {
   totalCameras: number;
 }
 
-export interface RecentFace {
-  personId: string | null;
-  aliasId: string | null;
-  personName: string | null;
-  deviceName: string | null;
-  ts: number;
-  imageUrl: string | null;
-}
-
 export type StatsDetailType = 'total' | 'present' | 'on_time' | 'late' | 'missing_out' | 'not_checked_in';
 
 export interface StatsDetailRow {
@@ -211,4 +202,19 @@ export interface HanetConnectionTest {
   account: { name: string; email: string } | null;
   places: HanetPlace[];
   message: string;
+}
+
+export type SightingKind = 'stranger' | 'unlinked';
+
+/** Lượt camera chụp người chưa khớp nhân sự nào (giữ 24 giờ) — nguồn ảnh đăng ký FaceID. */
+export interface FaceSighting {
+  id: number;
+  kind: SightingKind;
+  personId: string | null;
+  aliasId: string | null;
+  personName: string | null;
+  deviceId: string;
+  deviceName: string | null;
+  ts: number;
+  imageUrl: string;
 }
