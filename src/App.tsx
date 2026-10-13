@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { AlertCircle, RefreshCw } from 'lucide-react';
 import { Navbar } from './components/Navbar';
 import { StatsCards } from './components/StatsCards';
 import { AttendanceTable } from './components/AttendanceTable';
@@ -13,159 +14,175 @@ import { EmployeesTab } from './components/EmployeesTab';
 import { RequestsTab } from './components/RequestsTab';
 import { HanetConfigTab } from './components/HanetConfigTab';
 import { HanetSimulatorModal } from './components/HanetSimulatorModal';
-import { User, Department, Camera, AttendanceEvent, AttendanceRequest, StatsData } from './types';
-import { RefreshCw, Sparkles, Shield, AlertCircle } from 'lucide-react';
+import { LoginScreen } from './components/LoginScreen';
+import { ChangePasswordScreen } from './components/ChangePasswordScreen';
+import { api, ApiError, AUTH_EVENT, errorMessage, type AuthEventDetail } from './api';
+import { vnToday } from './format';
+import type { AttendanceDay, AttendanceRequest, Camera, Department, MeResponse, StatsData, User } from './types';
+
+type AuthState = 'loading' | 'anonymous' | 'must-change' | 'ready';
+
+const TABS_BY_ROLE: Record<User['role'], string[]> = {
+  hr: ['attendance', 'requests', 'cameras', 'departments', 'employees', 'hanet_config'],
+  dept_manager: ['attendance', 'requests', 'cameras', 'departments'],
+  employee: ['attendance', 'requests'],
+};
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [availableUsers, setAvailableUsers] = useState<User[]>([]);
+  const [authState, setAuthState] = useState<AuthState>('loading');
+  const [me, setMe] = useState<MeResponse | null>(null);
+  const [changingPassword, setChangingPassword] = useState(false);
+
+  const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [cameras, setCameras] = useState<Camera[]>([]);
-  const [records, setRecords] = useState<AttendanceEvent[]>([]);
+  const [records, setRecords] = useState<AttendanceDay[]>([]);
   const [requests, setRequests] = useState<AttendanceRequest[]>([]);
   const [stats, setStats] = useState<StatsData | null>(null);
 
-  const [activeTab, setActiveTab] = useState<string>('attendance');
+  const [activeTab, setActiveTab] = useState('attendance');
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [selectedDept, setSelectedDept] = useState<string>('');
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [loading, setLoading] = useState(true);
-  const [lastRefreshed, setLastRefreshed] = useState<string>('');
+  const [selectedDate, setSelectedDate] = useState(vnToday());
+  const [selectedDept, setSelectedDept] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [lastRefreshed, setLastRefreshed] = useState('');
 
-  // Fetch initial profile & accounts
-  const fetchMe = async () => {
+  const loadMe = useCallback(async () => {
     try {
-      const res = await fetch('/api/me');
-      const data = await res.json();
-      setCurrentUser(data.user);
-      setAvailableUsers(data.availableAccounts || []);
+      const data = await api<MeResponse>('/api/auth/me');
+      setMe(data);
+      setAuthState(data.mustChangePassword ? 'must-change' : 'ready');
+      setLoadError(null);
     } catch (err) {
-      console.error('Error fetching profile:', err);
+      if (err instanceof ApiError && err.status === 401) {
+        setMe(null);
+        setAuthState('anonymous');
+      } else {
+        setLoadError(errorMessage(err));
+        setAuthState('anonymous');
+      }
     }
-  };
+  }, []);
 
-  // Fetch all core datasets
+  useEffect(() => {
+    loadMe();
+  }, [loadMe]);
+
+  useEffect(() => {
+    const onAuth = (e: Event) => {
+      const detail = (e as CustomEvent<AuthEventDetail>).detail;
+      if (detail === 'logged-out') {
+        setMe(null);
+        setAuthState('anonymous');
+      } else {
+        setAuthState('must-change');
+      }
+    };
+    window.addEventListener(AUTH_EVENT, onAuth);
+    return () => window.removeEventListener(AUTH_EVENT, onAuth);
+  }, []);
+
   const fetchData = useCallback(async () => {
+    setLoading(true);
     try {
-      const [deptRes, camRes, attRes, reqRes, statsRes] = await Promise.all([
-        fetch('/api/departments'),
-        fetch('/api/cameras'),
-        fetch(`/api/attendance?date=${selectedDate}&departmentId=${selectedDept}&search=${encodeURIComponent(searchQuery)}`),
-        fetch('/api/attendance/requests'),
-        fetch('/api/stats'),
+      const q = new URLSearchParams({ date: selectedDate || vnToday(), departmentId: selectedDept, search: searchQuery });
+      const [u, d, c, a, r, s] = await Promise.all([
+        api<{ users: User[] }>('/api/users'),
+        api<{ departments: Department[] }>('/api/departments'),
+        api<{ cameras: Camera[] }>('/api/cameras'),
+        api<{ records: AttendanceDay[] }>(`/api/attendance?${q}`),
+        api<{ requests: AttendanceRequest[] }>('/api/requests'),
+        api<StatsData>('/api/stats'),
       ]);
-
-      const [deptData, camData, attData, reqData, statsData] = await Promise.all([
-        deptRes.json(),
-        camRes.json(),
-        attRes.json(),
-        reqRes.json(),
-        statsRes.json(),
-      ]);
-
-      setDepartments(deptData.departments || []);
-      setCameras(camData.cameras || []);
-      setRecords(attData.records || []);
-      setRequests(reqData.requests || []);
-      setStats(statsData);
+      setUsers(u.users);
+      setDepartments(d.departments);
+      setCameras(c.cameras);
+      setRecords(a.records);
+      setRequests(r.requests);
+      setStats(s);
+      setLoadError(null);
       setLastRefreshed(new Date().toLocaleTimeString('vi-VN'));
     } catch (err) {
-      console.error('Error loading data:', err);
+      if (!(err instanceof ApiError && (err.status === 401 || err.code === 'MUST_CHANGE_PASSWORD'))) setLoadError(errorMessage(err));
     } finally {
       setLoading(false);
     }
   }, [selectedDate, selectedDept, searchQuery]);
 
   useEffect(() => {
-    fetchMe();
-  }, []);
+    if (authState === 'ready') fetchData();
+  }, [authState, fetchData]);
 
-  useEffect(() => {
-    if (currentUser) {
-      fetchData();
-    }
-  }, [currentUser, fetchData]);
-
-  // Switch Role / User handler
-  const handleSwitchUser = async (userId: string) => {
-    setLoading(true);
+  const logout = async () => {
     try {
-      const res = await fetch('/api/auth/switch-user', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setCurrentUser(data.user);
-        // Reset tab if current tab is restricted
-        if (data.user.role === 'employee' && (activeTab === 'departments' || activeTab === 'employees' || activeTab === 'hanet_config')) {
-          setActiveTab('attendance');
-        } else if (data.user.role === 'dept_manager' && (activeTab === 'employees' || activeTab === 'hanet_config')) {
-          setActiveTab('attendance');
-        }
-      }
-    } catch (err) {
-      console.error('Error switching user:', err);
-    } finally {
-      setLoading(false);
+      await api('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // phiên có thể đã hết hạn; vẫn đưa về màn đăng nhập
     }
+    setMe(null);
+    setChangingPassword(false);
+    setActiveTab('attendance');
+    setAuthState('anonymous');
   };
 
-  const onlineCameras = cameras.filter((c) => c.status === 'online').length;
+  if (authState === 'loading') {
+    return <div className="min-h-screen flex items-center justify-center text-sm text-slate-500">Đang tải...</div>;
+  }
+  if (authState === 'anonymous') return <LoginScreen onLoggedIn={loadMe} />;
+  if (authState === 'must-change' || changingPassword || !me) {
+    return (
+      <ChangePasswordScreen
+        forced={authState === 'must-change'}
+        onDone={() => {
+          setChangingPassword(false);
+          loadMe();
+        }}
+        onCancel={() => setChangingPassword(false)}
+        onLogout={logout}
+      />
+    );
+  }
+
+  const currentUser = me.user;
+  const tab = TABS_BY_ROLE[currentUser.role].includes(activeTab) ? activeTab : 'attendance';
+  const refreshAll = () => {
+    fetchData();
+    loadMe();
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col text-slate-900 font-sans antialiased">
-      {/* Top Navigation */}
       <Navbar
         currentUser={currentUser}
-        availableUsers={availableUsers}
-        onSwitchUser={handleSwitchUser}
-        onlineCameraCount={onlineCameras}
         totalCameraCount={cameras.length}
+        showSimulator={me.simulatorEnabled && currentUser.role === 'hr'}
         onOpenSimulator={() => setIsSimulatorOpen(true)}
-        activeTab={activeTab}
+        onChangePassword={() => setChangingPassword(true)}
+        onLogout={logout}
+        activeTab={tab}
         setActiveTab={setActiveTab}
       />
 
-      {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Role Quick Hint Banner */}
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 bg-white p-3 rounded-2xl border border-slate-200/80 shadow-2xs">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-orange-500"></span>
-            <span>
-              Đang đăng nhập với vai trò: <strong className="text-slate-800">{currentUser?.name}</strong> (
-              {currentUser?.role === 'hr'
-                ? 'Quản trị viên Nhân sự - Xem toàn bộ hệ thống'
-                : currentUser?.role === 'dept_manager'
-                ? `Trưởng phòng - Phụ trách ${currentUser?.departmentName}`
-                : `Nhân viên - Chỉ xem lịch sử cá nhân (${currentUser?.code})`}
-              )
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
+          {loadError ? (
+            <span className="flex items-center gap-1.5 text-rose-600">
+              <AlertCircle className="w-4 h-4" /> {loadError}
             </span>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => fetchData()}
-              className="flex items-center gap-1.5 text-slate-600 hover:text-slate-900 font-medium transition cursor-pointer"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-orange-500' : ''}`} />
-              <span>Cập nhật ({lastRefreshed || 'Mới nhất'})</span>
-            </button>
-          </div>
+          ) : (
+            <span />
+          )}
+          <button onClick={() => fetchData()} className="flex items-center gap-1.5 text-slate-600 hover:text-slate-900 font-medium cursor-pointer">
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-orange-500' : ''}`} />
+            <span>Cập nhật ({lastRefreshed || 'mới nhất'})</span>
+          </button>
         </div>
 
-        {/* Dynamic Metric Cards (scoped to role) */}
-        <StatsCards
-          stats={stats}
-          currentUser={currentUser}
-          todayRecords={records}
-        />
+        <StatsCards stats={stats} currentUser={currentUser} />
 
-        {/* Tab Switch Views */}
-        {activeTab === 'attendance' && (
+        {tab === 'attendance' && (
           <AttendanceTable
             records={records}
             currentUser={currentUser}
@@ -178,80 +195,25 @@ export default function App() {
             setSearchQuery={setSearchQuery}
           />
         )}
-
-        {activeTab === 'cameras' && (
-          <CamerasTab
-            cameras={cameras}
-            currentUser={currentUser}
-            onRefresh={fetchData}
-            onOpenSimulatorForCamera={(camId) => {
-              setIsSimulatorOpen(true);
-            }}
-          />
-        )}
-
-        {activeTab === 'requests' && (
-          <RequestsTab
-            requests={requests}
-            currentUser={currentUser}
-            onRefresh={fetchData}
-          />
-        )}
-
-        {activeTab === 'departments' && currentUser?.role !== 'employee' && (
-          <DepartmentsTab
-            departments={departments}
-            users={availableUsers}
-            currentUser={currentUser}
-            onRefresh={() => {
-              fetchData();
-              fetchMe();
-            }}
-          />
-        )}
-
-        {activeTab === 'employees' && currentUser?.role === 'hr' && (
-          <EmployeesTab
-            users={availableUsers}
-            departments={departments}
-            currentUser={currentUser}
-            onRefresh={() => {
-              fetchData();
-              fetchMe();
-            }}
-          />
-        )}
-
-        {activeTab === 'hanet_config' && currentUser?.role === 'hr' && (
-          <HanetConfigTab
-            onRefresh={fetchData}
-          />
-        )}
+        {tab === 'requests' && <RequestsTab requests={requests} currentUser={currentUser} onRefresh={fetchData} />}
+        {tab === 'cameras' && <CamerasTab cameras={cameras} currentUser={currentUser} onRefresh={fetchData} />}
+        {tab === 'departments' && <DepartmentsTab departments={departments} users={users} currentUser={currentUser} onRefresh={refreshAll} />}
+        {tab === 'employees' && <EmployeesTab users={users} departments={departments} currentUser={currentUser} onRefresh={refreshAll} />}
+        {tab === 'hanet_config' && <HanetConfigTab onRefresh={fetchData} />}
       </main>
 
-      {/* Hanet Camera Scanner Simulator Modal */}
-      <HanetSimulatorModal
-        isOpen={isSimulatorOpen}
-        onClose={() => setIsSimulatorOpen(false)}
-        cameras={cameras}
-        users={availableUsers}
-        onSimulateSuccess={() => {
-          fetchData();
-        }}
-      />
+      {me.simulatorEnabled && currentUser.role === 'hr' && (
+        <HanetSimulatorModal
+          isOpen={isSimulatorOpen}
+          onClose={() => setIsSimulatorOpen(false)}
+          cameras={cameras}
+          users={users}
+          onSimulateSuccess={fetchData}
+        />
+      )}
 
-      {/* Footer */}
       <footer className="mt-auto border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-slate-700">Hệ thống Điểm danh Camera AI Hanet</span>
-            <span>•</span>
-            <span>Petrolimex Hà Nội Enterprise Attendance</span>
-          </div>
-          <div className="text-[11px] text-slate-400">
-            Tích hợp theo chuẩn Hanet Open API Webhook & FaceID Cloud
-          </div>
-        </div>
+        Hệ thống Điểm danh Camera AI Hanet
       </footer>
     </div>
   );

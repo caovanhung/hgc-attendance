@@ -1,297 +1,184 @@
 import React, { useState } from 'react';
-import { FileText, Plus, CheckCircle, XCircle, Clock, AlertCircle, MessageSquare } from 'lucide-react';
-import { AttendanceRequest, User } from '../types';
+import { CheckCircle, Clock, MessageSquare, Plus, XCircle } from 'lucide-react';
+import type { AttendanceRequest, RequestType, User } from '../types';
+import { api, errorMessage } from '../api';
+import { vnToday } from '../format';
+import { Field, Modal, inputCls, primaryBtn, secondaryBtn } from './ui';
 
 interface RequestsTabProps {
   requests: AttendanceRequest[];
-  currentUser: User | null;
+  currentUser: User;
   onRefresh: () => void;
 }
 
-export const RequestsTab: React.FC<RequestsTabProps> = ({
-  requests,
-  currentUser,
-  onRefresh,
-}) => {
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [type, setType] = useState<'late_explanation' | 'missed_punch' | 'leave_request'>('late_explanation');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [suggestedTime, setSuggestedTime] = useState('08:10');
+const TYPE_META: Record<RequestType, { label: string; badge: string }> = {
+  late_explanation: { label: 'Giải trình đi muộn', badge: 'bg-amber-100 text-amber-800' },
+  missed_punch: { label: 'Quên quẹt mặt', badge: 'bg-blue-100 text-blue-800' },
+  leave_request: { label: 'Xin nghỉ', badge: 'bg-purple-100 text-purple-800' },
+};
+
+export const RequestsTab: React.FC<RequestsTabProps> = ({ requests, currentUser, onRefresh }) => {
+  const [showAdd, setShowAdd] = useState(false);
+  const [type, setType] = useState<RequestType>('late_explanation');
+  const [workDate, setWorkDate] = useState(vnToday());
+  const [suggestedIn, setSuggestedIn] = useState('');
+  const [suggestedOut, setSuggestedOut] = useState('');
   const [reason, setReason] = useState('');
-  const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
-  const role = currentUser?.role;
-  const canReview = role === 'dept_manager' || role === 'hr';
+  const canReview = (req: AttendanceRequest) => currentUser.role !== 'employee' && req.userId !== currentUser.id;
 
-  const handleSubmitRequest = async (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!reason) return;
-
+    setFormError(null);
     try {
-      const res = await fetch('/api/attendance/requests', {
+      await api('/api/requests', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: {
+          workDate,
           type,
-          date,
-          suggestedTime,
           reason,
-        }),
+          ...(type === 'missed_punch' ? { suggestedIn: suggestedIn || undefined, suggestedOut: suggestedOut || undefined } : {}),
+        },
       });
-      const data = await res.json();
-      if (data.success) {
-        setShowAddModal(false);
-        setReason('');
-        onRefresh();
-      }
+      setShowAdd(false);
+      setReason('');
+      setSuggestedIn('');
+      setSuggestedOut('');
+      onRefresh();
     } catch (err) {
-      console.error(err);
+      setFormError(errorMessage(err));
     }
   };
 
-  const handleReview = async (requestId: string, status: 'approved' | 'rejected') => {
-    setReviewingId(requestId);
+  const review = async (id: string, status: 'approved' | 'rejected') => {
+    const comment = window.prompt(status === 'approved' ? 'Ghi chú khi duyệt (có thể để trống):' : 'Lý do từ chối:') ?? null;
+    if (comment === null) return;
+    setBusyId(id);
     try {
-      const res = await fetch(`/api/attendance/requests/${requestId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status,
-          comment: status === 'approved' ? 'Đã duyệt điều chỉnh công' : 'Không chấp thuận giải trình',
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        onRefresh();
-      }
+      await api(`/api/requests/${id}`, { method: 'PUT', body: { status, comment } });
+      onRefresh();
     } catch (err) {
-      console.error(err);
+      window.alert(errorMessage(err));
     } finally {
-      setReviewingId(null);
-    }
-  };
-
-  const getTypeLabel = (t: string) => {
-    switch (t) {
-      case 'late_explanation':
-        return { label: 'Giải trình Đi muộn', badge: 'bg-amber-100 text-amber-800' };
-      case 'missed_punch':
-        return { label: 'Quên quét khuôn mặt', badge: 'bg-blue-100 text-blue-800' };
-      case 'leave_request':
-        return { label: 'Đơn xin nghỉ phép', badge: 'bg-purple-100 text-purple-800' };
-      default:
-        return { label: t, badge: 'bg-slate-100 text-slate-800' };
+      setBusyId(null);
     }
   };
 
   return (
     <div className="space-y-6">
-      {/* Banner */}
       <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-base font-bold text-slate-900">Đơn Giải trình Điểm danh & Xin phép</h2>
+          <h2 className="text-base font-bold text-slate-900">Đơn giải trình & xin phép</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            {role === 'employee'
-              ? 'Nhân viên gửi giải trình khi camera không quét được hoặc đi muộn có lý do chính đáng.'
-              : 'Trưởng phòng xem và phê duyệt giải trình của thành viên trong phòng ban của mình.'}
+            {currentUser.role === 'employee'
+              ? 'Gửi giải trình khi đi muộn có lý do, quên quẹt mặt, hoặc xin nghỉ.'
+              : 'Duyệt đơn của nhân viên trong phạm vi bạn quản lý. Không thể tự duyệt đơn của mình.'}
           </p>
         </div>
-
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-xs transition cursor-pointer shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Tạo đơn giải trình mới</span>
+        <button onClick={() => setShowAdd(true)} className={primaryBtn}>
+          <Plus className="w-4 h-4" /> Tạo đơn mới
         </button>
       </div>
 
-      {/* Requests List */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-        <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-          <span className="font-bold text-xs text-slate-800">
-            Danh sách đơn ({requests.length})
-          </span>
-          <span className="text-xs text-slate-500">
-            {canReview ? 'Bạn có quyền phê duyệt' : 'Đơn của bạn'}
-          </span>
-        </div>
-
+        <div className="p-4 border-b border-slate-100 text-xs font-bold text-slate-800">Danh sách đơn ({requests.length})</div>
         {requests.length === 0 ? (
-          <div className="p-12 text-center text-slate-400 text-xs">
-            Chưa có đơn giải trình nào
-          </div>
+          <div className="p-12 text-center text-slate-400 text-xs">Chưa có đơn nào</div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {requests.map((req) => {
-              const typeMeta = getTypeLabel(req.type);
-              const isPending = req.status === 'pending';
-              const isApproved = req.status === 'approved';
-
-              return (
-                <div key={req.id} className="p-4 hover:bg-slate-50 transition flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div className="space-y-1.5 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${typeMeta.badge}`}>
-                        {typeMeta.label}
-                      </span>
-                      <span className="text-xs font-bold text-slate-900">
-                        {req.employeeName}
-                      </span>
-                      <span className="text-[11px] text-slate-400">
-                        Ngày: {req.date}
-                      </span>
+            {requests.map((req) => (
+              <div key={req.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
+                <div className="space-y-1.5 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${TYPE_META[req.type].badge}`}>{TYPE_META[req.type].label}</span>
+                    <span className="font-bold text-slate-900">{req.employeeName}</span>
+                    <span className="text-[11px] text-slate-400">Ngày {req.workDate.split('-').reverse().join('/')}</span>
+                  </div>
+                  <p className="text-slate-700 bg-slate-50 p-2.5 rounded-xl border border-slate-100 max-w-2xl">"{req.reason}"</p>
+                  {(req.suggestedIn || req.suggestedOut) && (
+                    <div className="text-[11px] text-slate-500">
+                      Giờ đề xuất: vào <strong className="font-mono">{req.suggestedIn ?? '—'}</strong>, ra{' '}
+                      <strong className="font-mono">{req.suggestedOut ?? '—'}</strong>
                     </div>
-
-                    <p className="text-xs text-slate-700 bg-slate-50 p-2.5 rounded-xl border border-slate-100 max-w-2xl">
-                      "{req.reason}"
-                    </p>
-
-                    {req.suggestedTime && (
-                      <div className="text-[11px] text-slate-500">
-                        Giờ đề xuất ghi nhận: <strong className="text-slate-800 font-mono">{req.suggestedTime}</strong>
-                      </div>
-                    )}
-
-                    {req.reviewedBy && (
-                      <div className="text-[11px] text-slate-500 flex items-center gap-1.5 pt-0.5">
-                        <MessageSquare className="w-3 h-3 text-slate-400" />
-                        <span>Người duyệt: <strong>{req.reviewedBy}</strong> ({req.comment || 'Chấp thuận'})</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Actions / Status */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    {isPending ? (
-                      canReview ? (
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => handleReview(req.id, 'approved')}
-                            disabled={reviewingId === req.id}
-                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs flex items-center gap-1 shadow-xs cursor-pointer disabled:opacity-50"
-                          >
-                            <CheckCircle className="w-3.5 h-3.5" />
-                            <span>Duyệt</span>
-                          </button>
-                          <button
-                            onClick={() => handleReview(req.id, 'rejected')}
-                            disabled={reviewingId === req.id}
-                            className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold text-xs flex items-center gap-1 border border-rose-200 cursor-pointer disabled:opacity-50"
-                          >
-                            <XCircle className="w-3.5 h-3.5" />
-                            <span>Từ chối</span>
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-                          <Clock className="w-3.5 h-3.5" />
-                          <span>Đang chờ duyệt</span>
-                        </span>
-                      )
-                    ) : isApproved ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        <CheckCircle className="w-3.5 h-3.5" />
-                        <span>Đã phê duyệt</span>
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
-                        <XCircle className="w-3.5 h-3.5" />
-                        <span>Từ chối</span>
-                      </span>
-                    )}
-                  </div>
+                  )}
+                  {req.reviewerName && (
+                    <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                      <MessageSquare className="w-3 h-3" /> {req.reviewerName}
+                      {req.comment ? `: ${req.comment}` : ''}
+                    </div>
+                  )}
                 </div>
-              );
-            })}
+                <div className="shrink-0">
+                  {req.status === 'pending' ? (
+                    canReview(req) ? (
+                      <div className="flex gap-1.5">
+                        <button disabled={busyId === req.id} onClick={() => review(req.id, 'approved')} className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50">
+                          <CheckCircle className="w-3.5 h-3.5" /> Duyệt
+                        </button>
+                        <button disabled={busyId === req.id} onClick={() => review(req.id, 'rejected')} className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold border border-rose-200 flex items-center gap-1 cursor-pointer disabled:opacity-50">
+                          <XCircle className="w-3.5 h-3.5" /> Từ chối
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                        <Clock className="w-3.5 h-3.5" /> Chờ duyệt
+                      </span>
+                    )
+                  ) : req.status === 'approved' ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <CheckCircle className="w-3.5 h-3.5" /> Đã duyệt
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+                      <XCircle className="w-3.5 h-3.5" /> Từ chối
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
 
-      {/* Submit Request Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-200">
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <FileText className="w-4 h-4 text-orange-400" />
-                <span className="font-bold text-sm">Gửi Đơn Giải Trình Điểm Danh</span>
+      {showAdd && (
+        <Modal title="Tạo đơn mới" onClose={() => setShowAdd(false)}>
+          <form onSubmit={submit} className="space-y-3.5">
+            <Field label="Loại đơn">
+              <select value={type} onChange={(e) => setType(e.target.value as RequestType)} className={inputCls}>
+                <option value="late_explanation">Giải trình đi muộn có lý do</option>
+                <option value="missed_punch">Quên quẹt mặt (bổ sung giờ vào/ra)</option>
+                <option value="leave_request">Xin nghỉ</option>
+              </select>
+            </Field>
+            <Field label="Ngày áp dụng">
+              <input type="date" required max={vnToday()} value={workDate} onChange={(e) => setWorkDate(e.target.value)} className={inputCls} />
+            </Field>
+            {type === 'missed_punch' && (
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Giờ vào đề xuất">
+                  <input type="time" value={suggestedIn} onChange={(e) => setSuggestedIn(e.target.value)} className={inputCls} />
+                </Field>
+                <Field label="Giờ ra đề xuất">
+                  <input type="time" value={suggestedOut} onChange={(e) => setSuggestedOut(e.target.value)} className={inputCls} />
+                </Field>
               </div>
-              <button
-                onClick={() => setShowAddModal(false)}
-                className="text-slate-400 hover:text-white p-1 cursor-pointer"
-              >
-                ✕
+            )}
+            <Field label="Lý do">
+              <textarea rows={3} required value={reason} onChange={(e) => setReason(e.target.value)} className={inputCls} />
+            </Field>
+            {formError && <p className="text-rose-600">{formError}</p>}
+            <div className="flex gap-2 pt-1">
+              <button type="button" onClick={() => setShowAdd(false)} className={`${secondaryBtn} flex-1`}>
+                Hủy
+              </button>
+              <button type="submit" className={`${primaryBtn} flex-1`}>
+                Gửi đơn
               </button>
             </div>
-
-            <form onSubmit={handleSubmitRequest} className="p-5 space-y-3.5 text-xs">
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Loại đề xuất:</label>
-                <select
-                  value={type}
-                  onChange={(e) => setType(e.target.value as any)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-hidden focus:border-orange-500 bg-white"
-                >
-                  <option value="late_explanation">Giải trình Đi muộn có lý do</option>
-                  <option value="missed_punch">Quên quét camera khi vào ca</option>
-                  <option value="leave_request">Đơn xin nghỉ phép</option>
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Ngày áp dụng:</label>
-                  <input
-                    type="date"
-                    required
-                    value={date}
-                    onChange={(e) => setDate(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-hidden focus:border-orange-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Giờ đề xuất:</label>
-                  <input
-                    type="time"
-                    value={suggestedTime}
-                    onChange={(e) => setSuggestedTime(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-hidden focus:border-orange-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Lý do giải trình chi tiết:</label>
-                <textarea
-                  rows={3}
-                  required
-                  placeholder="Ghi rõ lý do (ví dụ: Tắc đường, đi công tác ngoài, sự cố máy ảnh...)"
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-hidden focus:border-orange-500"
-                />
-              </div>
-
-              <div className="pt-2 flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50 cursor-pointer"
-                >
-                  Hủy
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold cursor-pointer"
-                >
-                  Gửi đơn cho Trưởng phòng
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+          </form>
+        </Modal>
       )}
     </div>
   );
