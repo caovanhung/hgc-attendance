@@ -4,6 +4,7 @@ import { tx } from './db';
 import { recomputeDay } from './attendance';
 import { getSetting, setSetting } from './settings';
 import { toVnDate } from './vntime';
+import { SYSTEM_ADMIN_CODE } from './bootstrap';
 import type { DetectionSource, HanetConfigView, WebhookLogStatus } from '../shared/types';
 
 export interface CheckinInput {
@@ -90,7 +91,9 @@ export function ingestCheckin(db: Db, input: CheckinInput, source: DetectionSour
   if (input.personType !== null && input.personType !== 0) return { status: 'ignored', message: 'Không phải nhân viên' };
   type Match = { id: string; status: string } | undefined;
   let user: Match;
-  if (input.aliasId) user = db.prepare('SELECT id, status FROM users WHERE code = ?').get(input.aliasId.toUpperCase()) as Match;
+  // aliasID ADMIN không bao giờ khớp tài khoản hệ thống (mã này mang quyền xóa dữ liệu): chỉ khớp theo Person ID
+  const alias = input.aliasId?.toUpperCase();
+  if (alias && alias !== SYSTEM_ADMIN_CODE) user = db.prepare('SELECT id, status FROM users WHERE code = ?').get(alias) as Match;
   if (!user && input.personId) user = db.prepare('SELECT id, status FROM users WHERE hanet_person_id = ?').get(input.personId) as Match;
   if (!user) return { status: 'ignored', message: UNMATCHED_MESSAGE };
   if (user.status !== 'active') return { status: 'ignored', message: 'Nhân viên đã ngừng hoạt động', userId: user.id };

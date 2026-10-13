@@ -33,14 +33,17 @@ export async function registerFace(deps: HanetDeps, userId: string, imageUrl: st
       db.prepare('UPDATE users SET face_error = NULL WHERE id = ?').run(userId);
       return { ok: true, message: 'Đã cập nhật ảnh nhận diện trên Hanet' };
     }
-    let personId: string | null = null;
+    let personId: string | null;
     try {
       personId = await hanetApi.registerByUrl(deps, { name: u.name, aliasId: u.code, placeId, url: imageUrl, title: u.position ?? '' });
     } catch (err) {
-      // -9005: người đã có trên Hanet với mã này → tra lại để liên kết
-      if (!(err instanceof HanetApiError) || err.returnCode !== -9005) throw err;
+      // -9005: mã này đã là aliasID của một người khác trên Hanet. Không tự liên kết (có thể là người khác hẳn);
+      // HR dùng "Nhập từ Hanet" nếu đúng là người đó, hoặc đổi mã nhân viên.
+      if (err instanceof HanetApiError && err.returnCode === -9005) {
+        return fail(`Mã ${u.code} đã là aliasID của một người khác trên Hanet. Dùng "Nhập từ Hanet" để liên kết người đó, hoặc đổi mã nhân viên.`);
+      }
+      throw err;
     }
-    if (!personId) personId = (await hanetApi.personsByAlias(deps, u.code))[0]?.personID ?? null;
     if (!personId) return fail('Hanet không trả Person ID sau khi đăng ký');
     linkFace(db, userId, String(personId), u.department_id, deps.now());
     return { ok: true, message: 'Đã đăng ký FaceID trên Hanet' };

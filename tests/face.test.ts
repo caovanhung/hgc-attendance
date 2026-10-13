@@ -57,15 +57,20 @@ test('-9006 ảnh không đạt: vẫn tạo nhân sự, ghi lý do, giữ lư�
   }
 });
 
-test('-9005 đã có trên Hanet: tra theo mã rồi liên kết', async () => {
-  const { app, hr } = await setup({
+test('-9005 mã đã là aliasID của người khác trên Hanet: không liên kết, báo lỗi và lưu face_error', async () => {
+  const { app, fake, hr } = await setup({
     '/person/registerByUrl': fail(-9005),
     '/person/getUserInfoByAliasID': ok([{ aliasID: 'NV11', name: 'X', personID: 'P-CU', avatar: '', title: '' }]),
   });
   try {
-    const r = await hr.post('/api/users', { code: 'NV11', name: 'X', sightingId: addStranger(app.db) });
-    assert.equal(r.body.face.ok, true);
-    assert.equal(r.body.user.hanetPersonId, 'P-CU');
+    const sightingId = addStranger(app.db);
+    const r = await hr.post('/api/users', { code: 'NV11', name: 'X', sightingId });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const message = 'Mã NV11 đã là aliasID của một người khác trên Hanet. Dùng "Nhập từ Hanet" để liên kết người đó, hoặc đổi mã nhân viên.';
+    assert.deepEqual(r.body.face, { ok: false, message });
+    assert.deepEqual([r.body.user.hanetPersonId, r.body.user.faceRegistered, r.body.user.faceError], [null, false, message]);
+    assert.equal(fake.last('/person/getUserInfoByAliasID'), undefined, 'không tra để liên kết');
+    assert.equal(sightingCount(app.db), 1, 'giữ lượt chụp để HR thử lại');
   } finally {
     await app.close();
   }

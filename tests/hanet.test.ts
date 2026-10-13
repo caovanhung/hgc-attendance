@@ -207,3 +207,18 @@ test('mô phỏng: HR tạo lượt source=simulator; tắt thì 404', async () 
   }
 });
 
+
+test('webhook aliasID ADMIN không bao giờ khớp tài khoản hệ thống: chỉ khớp theo Person ID', async () => {
+  const { app, url, ids } = await setup();
+  try {
+    const admin = seedUser(app.db, { code: 'ADMIN', role: 'hr' });
+    const c = new Client(app.baseUrl);
+    await c.post(url, { aliasID: 'admin', personID: '2134589559210508288', deviceID: 'C1', time: T0830 });
+    assert.equal(days(app, ids.nv1)[0].detection_count, 1, 'ghi cho người có Person ID này');
+    await c.post(url, { aliasID: 'ADMIN', personID: 'P-KHONG-CO', deviceID: 'C1', time: T0830 + 60_000 });
+    assert.deepEqual(days(app, admin), [], 'không ghi công cho ADMIN');
+    assert.equal(lastLog(app).status, 'ignored');
+  } finally {
+    await app.close();
+  }
+});
