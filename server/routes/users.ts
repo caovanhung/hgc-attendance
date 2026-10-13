@@ -11,7 +11,7 @@ import { toVnDate } from '../vntime';
 import { NOT_SYSTEM_ADMIN, SYSTEM_ADMIN_CODE } from '../bootstrap';
 import { deleteSighting, getSighting, listSightings, SIGHTING_TTL_MS } from '../sightings';
 import { registerFace } from '../hanet-face';
-import { enqueue, kickEntity } from '../hanet-sync';
+import { dropEntityJobs, enqueue, kickEntity } from '../hanet-sync';
 import { fetchAllPersons, importPersons, unlinkedPersons } from '../hanet-import';
 import { getPlaceIds, reconcileEnabled } from '../hanet';
 import { CODE_ERROR, CODE_RE } from '../validation';
@@ -180,6 +180,21 @@ export function userRoutes(ctx: AppContext): Router {
 
     if (sets.length) db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...params, target.id);
     if (b.status === 'inactive' && target.status !== 'inactive') deleteUserSessions(db, target.id);
+    const after = getUser(db, target.id)!;
+    const now = ctx.now();
+    if (after.faceRegistered && (after.name !== target.name || after.position !== target.position)) {
+      enqueue(db, 'user', target.id, 'user.info', { code: after.code, name: after.name, title: after.position }, now);
+    }
+    const linkedNow = Boolean(after.hanetPersonId) && !target.hanetPersonId;
+    if (after.hanetPersonId && (after.departmentId !== target.departmentId || (linkedNow && after.departmentId))) {
+      const from =
+        target.departmentId && !linkedNow
+          ? ((db.prepare('SELECT hanet_department_id FROM departments WHERE id = ?').get(target.departmentId) as { hanet_department_id: string | null } | undefined)
+              ?.hanet_department_id ?? null)
+          : null;
+      enqueue(db, 'user', target.id, 'user.department', { fromHanetDeptId: from, toDepartmentId: after.departmentId }, now);
+    }
+    kickEntity(ctx, 'user', target.id);
     res.json({ user: getUser(db, target.id) });
   });
 
@@ -232,9 +247,15 @@ export function userRoutes(ctx: AppContext): Router {
     if (!target) throw new HttpError(404, 'Không tìm thấy nhân sự');
     if (target.id === actor.id) throw new HttpError(400, 'Không thể tự xóa tài khoản đang đăng nhập');
     const backup = backupNow(db, ctx.config.backupDir, 'pre-delete', ctx.now());
+    if (target.faceRegistered || target.hanetPersonId) {
+      enqueue(db, 'user', target.id, 'user.remove', { code: target.code, name: target.name, personId: target.hanetPersonId }, ctx.now());
+    } else {
+      dropEntityJobs(db, 'user', target.id);
+    }
     // Khóa ngoại tự xóa phiên, lượt nhận diện, bảng công, đơn của người này; bỏ chức trưởng phòng nếu có.
     db.prepare('DELETE FROM users WHERE id = ?').run(target.id);
     console.warn(`[SECURITY] user_deleted by=${actor.code} target=${target.code} backup=${backup} ip=${req.ip}`);
+    kickEntity(ctx, 'user', target.id);
     res.json({ success: true, backup });
   });
 

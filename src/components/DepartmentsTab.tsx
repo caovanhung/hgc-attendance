@@ -4,6 +4,7 @@ import type { Department, User } from '../types';
 import { api, errorMessage } from '../api';
 import { ROLE_LABEL, SYSTEM_ADMIN_CODE } from '../format';
 import { ConfirmDeleteDialog, Field, Modal, inputCls, primaryBtn, secondaryBtn } from './ui';
+import { SyncBadge, SyncRetryButton } from './SyncBadge';
 
 interface DepartmentsTabProps {
   departments: Department[];
@@ -77,6 +78,9 @@ export const DepartmentsTab: React.FC<DepartmentsTabProps> = ({ departments, use
               </div>
               <h3 className="font-bold text-sm text-slate-900">{d.name}</h3>
               <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">{d.description || 'Chưa có mô tả'}</p>
+              <div className="mt-2">
+                <SyncBadge status={d.hanetSyncStatus} error={d.hanetSyncError} />
+              </div>
               <div className="mt-3 pt-2 border-t border-slate-100 flex items-center gap-1.5 text-[11px] text-slate-600">
                 <Shield className="w-3.5 h-3.5 text-amber-600" /> {d.managerName ?? 'Chưa chỉ định trưởng phòng'}
               </div>
@@ -90,6 +94,7 @@ export const DepartmentsTab: React.FC<DepartmentsTabProps> = ({ departments, use
           <div className="p-4 border-b border-slate-100 flex items-center justify-between">
             <h3 className="font-bold text-sm text-slate-900">Nhân sự: {active.name}</h3>
             <div className="flex gap-2">
+              {isHR && active.hanetSyncStatus === 'error' && <SyncRetryButton entityType="department" entityId={active.id} onDone={onRefresh} />}
               {isHR && (
                 <button
                   onClick={() => setForm({ id: active.id, code: active.code, name: active.name, description: active.description, managerId: active.managerId ?? '' })}

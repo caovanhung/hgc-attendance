@@ -7,6 +7,7 @@ import { UserFormModal } from './UserFormModal';
 import { ImportFromHanetModal } from './ImportFromHanetModal';
 import { TempPasswordDialog } from './TempPasswordDialog';
 import { ConfirmDeleteDialog, inputCls, primaryBtn, secondaryBtn } from './ui';
+import { SyncBadge, SyncRetryButton } from './SyncBadge';
 
 interface EmployeesTabProps {
   users: User[];
@@ -93,6 +94,15 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
                 <span className="text-[10px] font-mono font-bold px-1.5 rounded bg-slate-100 text-slate-600">{u.code}</span>
                 <h3 className="font-bold text-sm text-slate-900 mt-1 truncate">{u.name}</h3>
                 <p className="text-slate-500 truncate">{u.position || '—'}</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <SyncBadge status={u.hanetSyncStatus} error={u.hanetSyncError} />
+                  {u.hanetSyncStatus === 'error' && <SyncRetryButton entityType="user" entityId={u.id} onDone={onRefresh} />}
+                </div>
+                {u.hanetSyncStatus !== 'synced' && u.hanetSyncError && (
+                  <p className="text-[10px] text-slate-500 mt-0.5 truncate" title={u.hanetSyncError}>
+                    {u.hanetSyncError}
+                  </p>
+                )}
               </div>
               <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-slate-50 text-slate-700 border-slate-200 shrink-0">{ROLE_LABEL[u.role]}</span>
             </div>
