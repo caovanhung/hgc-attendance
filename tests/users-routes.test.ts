@@ -84,7 +84,7 @@ test('HR sửa thông tin; chuyển inactive thì phiên của người đó b�
   try {
     const hr = await loginAs(app, 'HR01');
     const nv = await loginAs(app, 'NV01');
-    const r = await hr.put(`/api/users/${ids.nv1}`, { name: 'Tên mới', departmentId: kd, hanetPersonId: '2134589559210508288', faceRegistered: true });
+    const r = await hr.put(`/api/users/${ids.nv1}`, { name: 'Tên mới', departmentId: kd, hanetPersonId: '2134589559210508288' });
     assert.equal(r.status, 200);
     assert.equal(r.body.user.name, 'Tên mới');
     assert.equal(r.body.user.departmentName, 'Kinh doanh');

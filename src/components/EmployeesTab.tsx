@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { KeyRound, Pencil, Search, Trash2, UserPlus } from 'lucide-react';
-import type { Department, User } from '../types';
+import type { Department, FaceResult, User } from '../types';
 import { api, errorMessage } from '../api';
 import { ROLE_LABEL, SYSTEM_ADMIN_CODE } from '../format';
 import { UserFormModal } from './UserFormModal';
@@ -20,6 +20,7 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
   const [deptFilter, setDeptFilter] = useState('');
   const [search, setSearch] = useState('');
   const [deleting, setDeleting] = useState<User | null>(null);
+  const [faceNotice, setFaceNotice] = useState<FaceResult | null>(null);
   const isSystemAdmin = currentUser.code === SYSTEM_ADMIN_CODE;
 
   const resetPassword = async (u: User) => {
@@ -45,13 +46,22 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
         <div>
           <h2 className="text-base font-bold text-slate-900">Quản lý nhân sự</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Mã nhân viên phải trùng <span className="font-mono">aliasID</span> trên Hanet để camera khớp đúng người. Đồng bộ khuôn mặt lên Hanet chưa được hỗ trợ; hãy đăng ký trên ứng dụng Hanet.
+            Người mới: nhờ đứng trước camera Hanet, rồi bấm Thêm nhân sự → Lấy từ camera để đăng ký FaceID. Thay đổi trên web tự đồng bộ sang Hanet.
           </p>
         </div>
         <button onClick={() => setEditing('new')} className={primaryBtn}>
           <UserPlus className="w-4 h-4" /> Thêm nhân sự
         </button>
       </div>
+
+      {faceNotice && (
+        <div className={`rounded-2xl p-3 text-xs flex items-center justify-between gap-2 ${faceNotice.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-700'}`}>
+          <span>FaceID: {faceNotice.message}</span>
+          <button onClick={() => setFaceNotice(null)} className="cursor-pointer" aria-label="Đóng">
+            ✕
+          </button>
+        </div>
+      )}
 
       <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs flex flex-wrap gap-3">
         <div className="relative flex-1 min-w-[220px]">
@@ -82,7 +92,11 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
             <div className="mt-3 pt-3 border-t border-slate-100 space-y-1">
               <div className="flex justify-between"><span className="text-slate-400">Phòng ban</span><span>{u.departmentName ?? '—'}</span></div>
               <div className="flex justify-between"><span className="text-slate-400">Hanet Person ID</span><span className="font-mono">{u.hanetPersonId ?? '—'}</span></div>
-              <div className="flex justify-between"><span className="text-slate-400">Khuôn mặt</span><span>{u.faceRegistered ? 'Đã đăng ký' : 'Chưa đăng ký'}</span></div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">FaceID</span>
+                <span className={u.faceRegistered ? 'text-emerald-700' : 'text-amber-700'}>{u.faceRegistered ? 'Đã có FaceID' : 'Chưa có FaceID'}</span>
+              </div>
+              {!u.faceRegistered && u.faceError && <p className="text-[10px] text-rose-600">{u.faceError}</p>}
               <div className="flex justify-between"><span className="text-slate-400">Trạng thái</span><span>{u.status === 'active' ? 'Đang làm việc' : 'Đã nghỉ'}</span></div>
             </div>
             <div className="mt-3 pt-3 border-t border-slate-100 flex gap-2">
@@ -113,9 +127,10 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
           departments={departments}
           currentUserId={currentUser.id}
           onClose={() => setEditing(null)}
-          onSaved={({ user, tempPassword: pw }) => {
+          onSaved={({ user, tempPassword: pw, face }) => {
             setEditing(null);
             if (pw) setTempPassword({ label: `${user.name} (${user.code})`, password: pw });
+            if (face) setFaceNotice(face);
             onRefresh();
           }}
         />

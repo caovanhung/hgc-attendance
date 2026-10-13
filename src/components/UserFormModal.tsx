@@ -1,17 +1,39 @@
 import React, { useState } from 'react';
-import { Camera, RefreshCw } from 'lucide-react';
-import type { Department, FaceSighting, User, UserRole, UserStatus } from '../types';
+import { Camera, RefreshCw, ScanFace } from 'lucide-react';
+import type { Department, FaceCandidates, FaceResult, FaceSighting, User, UserRole, UserStatus } from '../types';
 import { api, errorMessage } from '../api';
 import { ROLE_LABEL, fmtTime } from '../format';
 import { Field, Modal, inputCls, primaryBtn, secondaryBtn } from './ui';
+
+export interface UserSaved {
+  user: User;
+  tempPassword?: string;
+  face?: FaceResult;
+}
 
 interface Props {
   user?: User; // không có = tạo mới
   departments: Department[];
   currentUserId: string;
   onClose: () => void;
-  onSaved: (result: { user: User; tempPassword?: string }) => void;
+  onSaved: (result: UserSaved) => void;
 }
+
+type Picked = { sightingId?: number; detectionId?: number; url: string };
+
+const Thumb: React.FC<{ url: string; title: string; sub: string; selected: boolean; onClick: () => void }> = ({ url, title, sub, selected, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`text-left rounded-xl border overflow-hidden bg-white cursor-pointer ${selected ? 'border-orange-500 ring-2 ring-orange-300' : 'border-slate-200 hover:border-orange-400'}`}
+  >
+    <img src={url} alt="" className="w-full aspect-[3/4] object-cover bg-slate-100" />
+    <div className="p-1.5">
+      <div className="font-semibold text-[11px] truncate">{title}</div>
+      <div className="text-[10px] text-slate-500 truncate">{sub}</div>
+    </div>
+  </button>
+);
 
 export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserId, onClose, onSaved }) => {
   const isEdit = Boolean(user);
@@ -24,48 +46,59 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
   const [role, setRole] = useState<UserRole>(user?.role ?? 'employee');
   const [departmentId, setDepartmentId] = useState(user?.departmentId ?? '');
   const [hanetPersonId, setHanetPersonId] = useState(user?.hanetPersonId ?? '');
-  const [faceRegistered, setFaceRegistered] = useState(user?.faceRegistered ?? false);
   const [status, setStatus] = useState<UserStatus>(user?.status ?? 'active');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [faces, setFaces] = useState<FaceSighting[] | null>(null);
-  const [facesLoading, setFacesLoading] = useState(false);
+  const [sightings, setSightings] = useState<FaceSighting[] | null>(null);
+  const [candidates, setCandidates] = useState<FaceCandidates | null>(null);
+  const [loadingFaces, setLoadingFaces] = useState(false);
   const [facesError, setFacesError] = useState<string | null>(null);
+  const [picked, setPicked] = useState<Picked | null>(null);
+  const [faceMsg, setFaceMsg] = useState<FaceResult | null>(null);
 
   const loadFaces = async () => {
-    setFacesLoading(true);
+    setLoadingFaces(true);
     setFacesError(null);
     try {
-      setFaces((await api<{ sightings: FaceSighting[] }>('/api/hanet/sightings?kind=unlinked')).sightings);
+      if (user) setCandidates(await api<FaceCandidates>(`/api/users/${user.id}/face-candidates`));
+      else setSightings((await api<{ sightings: FaceSighting[] }>('/api/hanet/sightings')).sightings);
     } catch (err) {
       setFacesError(errorMessage(err));
     } finally {
-      setFacesLoading(false);
+      setLoadingFaces(false);
     }
   };
 
-  const pickFace = (f: FaceSighting) => {
-    if (!isEdit) {
-      // Người chưa có aliasID trên Hanet: giữ mã HR đã gõ.
-      if (f.aliasId) setCode(f.aliasId);
-      if (f.personName) setName(f.personName);
+  const pickSighting = (s: FaceSighting) => {
+    if (s.kind === 'unlinked') {
+      // Người đã có trên Hanet: liên kết theo Person ID, không đăng ký lại
+      if (!isEdit) {
+        // Người chưa có aliasID trên Hanet: giữ mã HR đã gõ.
+        if (s.aliasId) setCode(s.aliasId);
+        if (s.personName) setName(s.personName);
+      }
+      setHanetPersonId(s.personId ?? '');
+      setPicked(null);
+    } else {
+      setPicked({ sightingId: s.id, url: s.imageUrl });
+      if (!isEdit) setHanetPersonId('');
     }
-    setHanetPersonId(f.personId ?? '');
-    setFaceRegistered(true);
-    setFaces(null);
   };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const body = { name, email, phone, position, role, departmentId: departmentId || null, hanetPersonId, faceRegistered, status };
+    const body = { name, email, phone, position, role, departmentId: departmentId || null, hanetPersonId, status };
     try {
       if (user) {
         const r = await api<{ user: User }>(`/api/users/${user.id}`, { method: 'PUT', body });
         onSaved({ user: r.user });
       } else {
-        const r = await api<{ user: User; tempPassword: string }>('/api/users', { method: 'POST', body: { ...body, code } });
+        const r = await api<UserSaved>('/api/users', {
+          method: 'POST',
+          body: { ...body, code, ...(picked?.sightingId ? { sightingId: picked.sightingId } : {}) },
+        });
         onSaved(r);
       }
     } catch (err) {
@@ -75,43 +108,97 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
     }
   };
 
+  const updateFace = async () => {
+    if (!user || !picked) return;
+    setBusy(true);
+    setFaceMsg(null);
+    try {
+      const r = await api<{ user: User; face: FaceResult }>(`/api/users/${user.id}/face`, {
+        method: 'POST',
+        body: picked.sightingId ? { sightingId: picked.sightingId } : { detectionId: picked.detectionId },
+      });
+      if (r.face.ok) onSaved({ user: r.user, face: r.face });
+      else setFaceMsg(r.face);
+    } catch (err) {
+      setFaceMsg({ ok: false, message: errorMessage(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const strangers = (isEdit ? candidates?.strangers : sightings?.filter((s) => s.kind === 'stranger')) ?? [];
+  const unlinked = isEdit ? [] : (sightings?.filter((s) => s.kind === 'unlinked') ?? []);
+  const loaded = isEdit ? candidates !== null : sightings !== null;
+  const nothing = loaded && strangers.length === 0 && unlinked.length === 0 && (candidates?.detections.length ?? 0) === 0;
+
   return (
     <Modal title={isEdit ? `Sửa nhân sự ${user?.code}` : 'Thêm nhân sự'} onClose={onClose} wide>
       <form onSubmit={submit} className="space-y-3.5">
-        <div className="rounded-2xl border border-orange-200 bg-orange-50/60 p-3 space-y-2">
+        <div className="rounded-2xl border border-orange-200 bg-orange-50/60 p-3 space-y-2.5">
           <div className="flex items-center justify-between gap-2">
             <p className="text-[11px] text-slate-600">
-              Nhờ người này đứng trước camera, rồi bấm nút để tự điền {isEdit ? 'liên kết Hanet' : 'mã nhân viên, họ tên và liên kết Hanet'}.
+              {isEdit
+                ? 'Đổi ảnh nhận diện: chọn một lượt camera chụp người này rồi bấm Cập nhật FaceID.'
+                : 'Nhờ người này đứng trước camera Hanet, rồi bấm nút để chọn ảnh đăng ký FaceID (người lạ) hoặc liên kết người đã có trên Hanet.'}
             </p>
-            <button type="button" onClick={loadFaces} disabled={facesLoading} className={`${secondaryBtn} py-1.5 shrink-0`}>
-              {facesLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />} Lấy từ camera
+            <button type="button" onClick={loadFaces} disabled={loadingFaces} className={`${secondaryBtn} py-1.5 shrink-0`}>
+              {loadingFaces ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />} Lấy từ camera
             </button>
           </div>
           {facesError && <p className="text-rose-600">{facesError}</p>}
-          {faces && faces.length === 0 && (
-            <p className="text-[11px] text-slate-500">
-              Không có ai mới được nhận diện trong 30 phút gần đây (người đã có trong danh sách nhân sự không hiện ở đây). Hãy đứng trước camera rồi bấm lại.
-            </p>
+          {nothing && <p className="text-[11px] text-slate-500">Không có lượt chụp nào trong 30 phút gần đây. Hãy đứng trước camera rồi bấm lại.</p>}
+
+          {isEdit && candidates && candidates.detections.length > 0 && (
+            <div>
+              <div className="text-[11px] font-semibold text-slate-700 mb-1">Lượt quẹt của người này (24 giờ)</div>
+              <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                {candidates.detections.map((d) => (
+                  <Thumb
+                    key={d.id}
+                    url={d.imageUrl}
+                    title={fmtTime(d.ts)}
+                    sub={d.deviceName}
+                    selected={picked?.detectionId === d.id}
+                    onClick={() => setPicked({ detectionId: d.id, url: d.imageUrl })}
+                  />
+                ))}
+              </div>
+            </div>
           )}
-          {faces && faces.length > 0 && (
-            <div className="space-y-1.5 max-h-56 overflow-y-auto">
-              {faces.map((f) => (
+
+          {strangers.length > 0 && (
+            <div>
+              <div className="text-[11px] font-semibold text-slate-700 mb-1">Người lạ — chọn ảnh để đăng ký FaceID</div>
+              <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                {strangers.map((s) => (
+                  <Thumb
+                    key={s.id}
+                    url={s.imageUrl}
+                    title={fmtTime(s.ts)}
+                    sub={s.deviceName ?? s.deviceId}
+                    selected={picked?.sightingId === s.id}
+                    onClick={() => pickSighting(s)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {unlinked.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="text-[11px] font-semibold text-slate-700">Đã có trên Hanet — chọn để liên kết</div>
+              {unlinked.map((s) => (
                 <button
-                  key={f.id}
+                  key={s.id}
                   type="button"
-                  onClick={() => pickFace(f)}
+                  onClick={() => pickSighting(s)}
                   className="w-full flex items-center gap-3 p-2 rounded-xl bg-white border border-slate-200 hover:border-orange-400 text-left cursor-pointer"
                 >
-                  {f.imageUrl ? (
-                    <img src={f.imageUrl} alt="" className="w-10 h-10 rounded-lg object-cover bg-slate-100 shrink-0" />
-                  ) : (
-                    <div className="w-10 h-10 rounded-lg bg-slate-100 shrink-0" />
-                  )}
+                  <img src={s.imageUrl} alt="" className="w-10 h-10 rounded-lg object-cover bg-slate-100 shrink-0" />
                   <div className="min-w-0 flex-1">
-                    <div className="font-semibold text-slate-900 truncate">{f.personName ?? 'Không rõ tên'}</div>
+                    <div className="font-semibold text-slate-900 truncate">{s.personName ?? 'Không rõ tên'}</div>
                     <div className="text-[11px] text-slate-500 truncate">
-                      Mã: <span className="font-mono">{f.aliasId ?? '— (chưa có trên Hanet)'}</span> · {fmtTime(f.ts)}
-                      {f.deviceName ? ` · ${f.deviceName}` : ''}
+                      Mã: <span className="font-mono">{s.aliasId ?? '— (chưa có trên Hanet)'}</span> · {fmtTime(s.ts)}
                     </div>
                   </div>
                   <span className="text-[11px] font-semibold text-orange-600 shrink-0">Chọn</span>
@@ -119,14 +206,29 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
               ))}
             </div>
           )}
-          {hanetPersonId && (
+
+          {!isEdit && picked && <p className="text-[11px] text-emerald-700">✓ Sẽ đăng ký FaceID bằng ảnh đã chọn khi bấm Tạo nhân sự.</p>}
+          {!isEdit && hanetPersonId && (
             <p className="text-[11px] text-emerald-700">
               ✓ Đã liên kết với người trên Hanet (Person ID <span className="font-mono">{hanetPersonId}</span>)
             </p>
           )}
+          {isEdit && (
+            <div className="flex items-center justify-between gap-2">
+              <span className={`text-[11px] ${user?.faceRegistered ? 'text-emerald-700' : 'text-amber-700'}`}>
+                {user?.faceRegistered ? '✓ Đã có FaceID trên Hanet' : 'Chưa có FaceID'}
+                {user?.faceError && <span className="text-rose-600"> · Lỗi gần nhất: {user.faceError}</span>}
+              </span>
+              <button type="button" onClick={updateFace} disabled={busy || !picked} className={`${primaryBtn} py-1.5 shrink-0`}>
+                <ScanFace className="w-3.5 h-3.5" /> {user?.faceRegistered ? 'Cập nhật FaceID' : 'Đăng ký FaceID'}
+              </button>
+            </div>
+          )}
+          {faceMsg && <p className={faceMsg.ok ? 'text-emerald-700' : 'text-rose-600'}>{faceMsg.message}</p>}
         </div>
+
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Mã nhân viên" hint={isEdit ? undefined : 'Phải trùng aliasID trên Hanet; không rõ thì bấm "Lấy từ camera"'}>
+          <Field label="Mã nhân viên" hint={isEdit ? undefined : 'Phải trùng aliasID trên Hanet nếu người này đã có trên Hanet'}>
             <input className={`${inputCls} font-mono uppercase`} value={code} onChange={(e) => setCode(e.target.value)} disabled={isEdit} required />
           </Field>
           <Field label="Họ tên">
@@ -168,10 +270,6 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
               </select>
             </Field>
           )}
-          <label className="flex items-center gap-2 mt-5">
-            <input type="checkbox" checked={faceRegistered} onChange={(e) => setFaceRegistered(e.target.checked)} />
-            <span>Đã đăng ký khuôn mặt trên Hanet</span>
-          </label>
         </div>
         {isSelf && <p className="text-[11px] text-slate-500">Bạn không thể tự đổi vai trò hoặc trạng thái của mình.</p>}
         {error && <p className="text-rose-600">{error}</p>}

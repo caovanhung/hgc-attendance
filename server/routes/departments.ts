@@ -6,7 +6,7 @@ import { HttpError } from '../errors';
 import { currentUser, requireRole, requireSystemAdmin } from '../middleware';
 import { backupNow } from '../backup';
 import type { Row } from '../repo';
-import { CODE_RE } from './users';
+import { CODE_RE } from '../validation';
 import { toVnDate } from '../vntime';
 import type { Department } from '../../shared/types';
 

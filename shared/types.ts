@@ -246,3 +246,13 @@ export interface SyncSummary {
   error: number;
   errors: SyncJobView[]; // 50 việc lỗi gần nhất
 }
+
+export interface FaceResult {
+  ok: boolean;
+  message: string;
+}
+
+export interface FaceCandidates {
+  detections: { id: number; ts: number; imageUrl: string; deviceName: string }[];
+  strangers: FaceSighting[];
+}
