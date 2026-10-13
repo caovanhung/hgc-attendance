@@ -256,3 +256,10 @@ export interface FaceCandidates {
   detections: { id: number; ts: number; imageUrl: string; deviceName: string }[];
   strangers: FaceSighting[];
 }
+
+export interface ImportedUser {
+  id: string;
+  code: string;
+  name: string;
+  tempPassword: string;
+}

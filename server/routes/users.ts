@@ -12,6 +12,8 @@ import { NOT_SYSTEM_ADMIN, SYSTEM_ADMIN_CODE } from '../bootstrap';
 import { deleteSighting, getSighting, listSightings, SIGHTING_TTL_MS } from '../sightings';
 import { registerFace } from '../hanet-face';
 import { enqueue, kickEntity } from '../hanet-sync';
+import { fetchAllPersons, importPersons, unlinkedPersons } from '../hanet-import';
+import { getPlaceIds, reconcileEnabled } from '../hanet';
 import { CODE_ERROR, CODE_RE } from '../validation';
 import type { FaceCandidates, FaceResult, UserRole } from '../../shared/types';
 
@@ -55,6 +57,34 @@ export function userRoutes(ctx: AppContext): Router {
     const rows = db.prepare(`${USER_SELECT} WHERE ${NOT_SYSTEM_ADMIN} AND ${w.sql} ORDER BY u.code`).all(...w.params) as Row[];
     res.json({ users: rows.map(mapUser) });
   });
+
+  r.post(
+    '/users/import',
+    requireRole('hr'),
+    ah(async (req, res) => {
+      const b = req.body ?? {};
+      const wanted = new Set(
+        (Array.isArray(b.persons) ? b.persons : []).map((p: { personId?: unknown }) => String(p?.personId ?? '')).filter(Boolean),
+      );
+      if (wanted.size === 0) throw new HttpError(400, 'Chưa chọn người nào để nhập');
+      if (wanted.size > 500) throw new HttpError(400, 'Mỗi lần nhập tối đa 500 người');
+      const departmentId = resolveDepartment(db, b.departmentId);
+      const placeId = getPlaceIds(db)[0];
+      if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, 'Chưa cấu hình kết nối Hanet (Client ID, Refresh Token, địa điểm)');
+      let all;
+      try {
+        all = await fetchAllPersons(deps, placeId);
+      } catch (err) {
+        throw new HttpError(502, `Không lấy được danh sách người từ Hanet: ${(err as Error).message}`);
+      }
+      // Không tin dữ liệu client: chỉ nhập người thật sự có trên Hanet và chưa liên kết
+      const chosen = unlinkedPersons(db, all).filter((p) => wanted.has(String(p.personID)));
+      if (chosen.length === 0) throw new HttpError(400, 'Không có người hợp lệ để nhập (có thể đã được nhập trước đó)');
+      const created = importPersons(db, chosen, departmentId, ctx.now());
+      for (const c of created) kickEntity(ctx, 'user', c.id);
+      res.json({ created });
+    }),
+  );
 
   r.post(
     '/users',

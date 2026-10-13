@@ -6,11 +6,12 @@ import { getUser, type Row } from '../repo';
 import { safeEqualStrings } from '../auth';
 import {
   getHanetConfigView, getWebhookToken, ingestCheckin, logWebhook, parseCheckin, rotateWebhookToken, updateHanetConfig,
-  reconcileEnabled, parseStranger, STRANGER_MESSAGE, UNMATCHED_MESSAGE, type CheckinInput, type IngestResult,
+  reconcileEnabled, getPlaceIds, parseStranger, STRANGER_MESSAGE, UNMATCHED_MESSAGE, type CheckinInput, type IngestResult,
 } from '../hanet';
 import { hanetApi, reconcileDate } from '../hanet-api';
 import { getSetting } from '../settings';
 import { isValidDate, toVnDate, vnDateTimeToTs } from '../vntime';
+import { fetchAllPersons, unlinkedPersons } from '../hanet-import';
 import { listSightings, recordSighting } from '../sightings';
 import { kickAll, retryJobs, syncSummary } from '../hanet-sync';
 import type { HanetConnectionTest, SightingKind, SyncEntity, WebhookLog } from '../../shared/types';
@@ -133,6 +134,22 @@ export function hanetRoutes(ctx: AppContext): Router {
     if (kind !== undefined && kind !== 'stranger' && kind !== 'unlinked') throw new HttpError(400, 'Loại lượt chụp không hợp lệ');
     res.json({ sightings: listSightings(db, ctx.now(), kind as SightingKind | undefined) });
   });
+
+  r.get(
+    '/hanet/persons/unlinked',
+    hr,
+    ah(async (_req, res) => {
+      const placeId = getPlaceIds(db)[0];
+      if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, 'Chưa cấu hình kết nối Hanet (Client ID, Refresh Token, địa điểm)');
+      let persons;
+      try {
+        persons = await fetchAllPersons({ db, fetch: ctx.fetch, now: ctx.now }, placeId);
+      } catch (err) {
+        throw new HttpError(502, `Không lấy được danh sách người từ Hanet: ${(err as Error).message}`);
+      }
+      res.json({ persons: unlinkedPersons(db, persons) });
+    }),
+  );
 
   r.get('/hanet/sync', hr, (_req, res) => {
     res.json(syncSummary(db));

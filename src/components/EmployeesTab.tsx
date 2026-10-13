@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { KeyRound, Pencil, Search, Trash2, UserPlus } from 'lucide-react';
+import { CloudDownload, KeyRound, Pencil, Search, Trash2, UserPlus } from 'lucide-react';
 import type { Department, FaceResult, User } from '../types';
 import { api, errorMessage } from '../api';
 import { ROLE_LABEL, SYSTEM_ADMIN_CODE } from '../format';
 import { UserFormModal } from './UserFormModal';
+import { ImportFromHanetModal } from './ImportFromHanetModal';
 import { TempPasswordDialog } from './TempPasswordDialog';
 import { ConfirmDeleteDialog, inputCls, primaryBtn, secondaryBtn } from './ui';
 
@@ -17,6 +18,7 @@ interface EmployeesTabProps {
 export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, currentUser, onRefresh }) => {
   const [editing, setEditing] = useState<User | 'new' | null>(null);
   const [tempPassword, setTempPassword] = useState<{ label: string; password: string } | null>(null);
+  const [importing, setImporting] = useState(false);
   const [deptFilter, setDeptFilter] = useState('');
   const [search, setSearch] = useState('');
   const [deleting, setDeleting] = useState<User | null>(null);
@@ -49,9 +51,14 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
             Người mới: nhờ đứng trước camera Hanet, rồi bấm Thêm nhân sự → Lấy từ camera để đăng ký FaceID. Thay đổi trên web tự đồng bộ sang Hanet.
           </p>
         </div>
-        <button onClick={() => setEditing('new')} className={primaryBtn}>
-          <UserPlus className="w-4 h-4" /> Thêm nhân sự
-        </button>
+        <div className="flex gap-2 shrink-0">
+          <button onClick={() => setImporting(true)} className={secondaryBtn}>
+            <CloudDownload className="w-4 h-4" /> Nhập từ Hanet
+          </button>
+          <button onClick={() => setEditing('new')} className={primaryBtn}>
+            <UserPlus className="w-4 h-4" /> Thêm nhân sự
+          </button>
+        </div>
       </div>
 
       {faceNotice && (
@@ -157,6 +164,7 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
           </p>
         </ConfirmDeleteDialog>
       )}
+      {importing && <ImportFromHanetModal departments={departments} onClose={() => setImporting(false)} onImported={onRefresh} />}
       {tempPassword && <TempPasswordDialog employeeLabel={tempPassword.label} password={tempPassword.password} onClose={() => setTempPassword(null)} />}
     </div>
   );

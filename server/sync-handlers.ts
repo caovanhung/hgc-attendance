@@ -6,4 +6,7 @@ export const SYNC_HANDLERS: SyncHandlers = {
   'camera.rename': async (deps, job) => {
     await hanetApi.updateDevice(deps, String(job.payload.deviceId), String(job.payload.name));
   },
+  'user.alias': async (deps, job) => {
+    await hanetApi.updateAliasId(deps, String(job.payload.personId), String(job.payload.code));
+  },
 };
