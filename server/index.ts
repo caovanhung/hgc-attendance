@@ -2,7 +2,7 @@ import './check-node';
 import 'dotenv/config';
 import path from 'node:path';
 import express from 'express';
-import { openDb } from './db';
+import { openDb, SchemaVersionError } from './db';
 import { createApp } from './app';
 import { LoginLimiter } from './auth';
 import { DEFAULT_ADMIN_PASSWORD, ensureAdminAccess } from './bootstrap';
@@ -55,6 +55,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('[STARTUP] Không khởi động được:', err);
+  if (err instanceof SchemaVersionError) console.error(err.message);
+  else console.error('[STARTUP] Không khởi động được:', err);
   process.exit(1);
 });

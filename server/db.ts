@@ -10,7 +10,7 @@ const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite');
 
 export type Db = DatabaseSyncType;
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS departments (
   name TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   manager_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  hanet_department_id TEXT,
+  hanet_sync_status TEXT NOT NULL DEFAULT 'synced' CHECK (hanet_sync_status IN ('synced', 'pending', 'error')),
+  hanet_sync_error TEXT,
   created_at TEXT NOT NULL
 );
 
@@ -39,6 +42,9 @@ CREATE TABLE IF NOT EXISTS users (
   status TEXT NOT NULL CHECK (status IN ('active', 'inactive')),
   password_hash TEXT,
   must_change_password INTEGER NOT NULL DEFAULT 1,
+  hanet_sync_status TEXT NOT NULL DEFAULT 'synced' CHECK (hanet_sync_status IN ('synced', 'pending', 'error')),
+  hanet_sync_error TEXT,
+  face_error TEXT,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_users_department ON users(department_id);
@@ -60,6 +66,8 @@ CREATE TABLE IF NOT EXISTS cameras (
   place_name TEXT NOT NULL DEFAULT '',
   location TEXT NOT NULL DEFAULT '',
   ip_address TEXT NOT NULL DEFAULT '',
+  online INTEGER,
+  status_checked_at INTEGER,
   created_at TEXT NOT NULL
 );
 
@@ -124,16 +132,57 @@ CREATE TABLE IF NOT EXISTS webhook_logs (
   message TEXT,
   raw_payload TEXT
 );
+
+CREATE TABLE IF NOT EXISTS sync_jobs (
+  id INTEGER PRIMARY KEY,
+  entity_type TEXT NOT NULL CHECK (entity_type IN ('user', 'department', 'camera')),
+  entity_id TEXT NOT NULL,
+  op TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'error', 'done')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_run_at INTEGER NOT NULL,
+  last_error TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sync_due ON sync_jobs(status, next_run_at);
+CREATE INDEX IF NOT EXISTS idx_sync_entity ON sync_jobs(entity_type, entity_id, id);
+
+CREATE TABLE IF NOT EXISTS face_sightings (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('stranger', 'unlinked')),
+  person_id TEXT,
+  alias_id TEXT,
+  person_name TEXT,
+  device_id TEXT NOT NULL,
+  device_name TEXT,
+  ts INTEGER NOT NULL,
+  image_url TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sightings_created ON face_sightings(created_at);
 `;
+
+export class SchemaVersionError extends Error {
+  constructor(public found: number) {
+    super(`[STARTUP] Database phiên bản cũ (v${found}). Sao lưu rồi xóa data/attendance.db để hệ thống tạo mới.`);
+  }
+}
 
 export function openDb(file: string): Db {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
-  db.exec(SCHEMA);
-  if (!db.prepare('SELECT version FROM schema_version').get()) {
-    db.prepare('INSERT INTO schema_version(version) VALUES (?)').run(SCHEMA_VERSION);
+  // Kiểm tra phiên bản TRƯỚC khi chạy SCHEMA: không đụng vào DB cũ (không có migration).
+  const hasVersionTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'").get();
+  const found = hasVersionTable ? (db.prepare('SELECT version FROM schema_version').get() as { version: number } | undefined) : undefined;
+  if (found && found.version !== SCHEMA_VERSION) {
+    db.close();
+    throw new SchemaVersionError(found.version);
   }
+  db.exec(SCHEMA);
+  if (!found) db.prepare('INSERT INTO schema_version(version) VALUES (?)').run(SCHEMA_VERSION);
   return db;
 }
 

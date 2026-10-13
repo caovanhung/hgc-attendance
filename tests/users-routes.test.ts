@@ -23,6 +23,10 @@ test('GET /users theo phạm vi vai trò', async () => {
     assert.deepEqual(await codes(await loginAs(app, 'HR01')), ['HR01', 'NV01', 'NV02', 'TP01']);
     assert.deepEqual(await codes(await loginAs(app, 'TP01')), ['NV01', 'TP01']);
     assert.deepEqual(await codes(await loginAs(app, 'NV01')), ['NV01']);
+    const first = (await (await loginAs(app, 'HR01')).get('/api/users')).body.users[0];
+    assert.equal(first.hanetSyncStatus, 'synced');
+    assert.equal(first.hanetSyncError, null);
+    assert.equal(first.faceError, null);
   } finally {
     await app.close();
   }

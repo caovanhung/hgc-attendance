@@ -5,7 +5,7 @@ import { scopeFor, type AuthUser } from './auth';
 export type Row = Record<string, any>;
 
 export const USER_SELECT = `SELECT u.id, u.code, u.name, u.email, u.phone, u.role, u.department_id,
-  d.name AS department_name, u.position, u.avatar_url, u.hanet_person_id, u.face_registered, u.status, u.created_at
+  d.name AS department_name, u.position, u.avatar_url, u.hanet_person_id, u.face_registered, u.status, u.hanet_sync_status, u.hanet_sync_error, u.face_error, u.created_at
   FROM users u LEFT JOIN departments d ON d.id = u.department_id`;
 
 export function mapUser(r: Row): User {
@@ -23,6 +23,9 @@ export function mapUser(r: Row): User {
     hanetPersonId: r.hanet_person_id ?? null,
     faceRegistered: r.face_registered === 1,
     status: r.status,
+    hanetSyncStatus: r.hanet_sync_status ?? 'synced',
+    hanetSyncError: r.hanet_sync_error ?? null,
+    faceError: r.face_error ?? null,
     createdAt: r.created_at,
   };
 }

@@ -15,6 +15,8 @@ function mapCamera(r: Row): Camera {
     placeName: r.place_name ?? '',
     location: r.location ?? '',
     ipAddress: r.ip_address ?? '',
+    online: r.online === null || r.online === undefined ? null : r.online === 1,
+    statusCheckedAt: r.status_checked_at ?? null,
     createdAt: r.created_at,
   };
 }

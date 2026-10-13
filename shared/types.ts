@@ -1,5 +1,6 @@
 export type UserRole = 'hr' | 'dept_manager' | 'employee';
 export type UserStatus = 'active' | 'inactive';
+export type SyncStatus = 'synced' | 'pending' | 'error';
 
 export interface User {
   id: string;
@@ -15,6 +16,9 @@ export interface User {
   hanetPersonId: string | null;
   faceRegistered: boolean;
   status: UserStatus;
+  hanetSyncStatus: SyncStatus;
+  hanetSyncError: string | null;
+  faceError: string | null; // lý do đăng ký FaceID thất bại gần nhất
   createdAt: string;
 }
 
@@ -26,6 +30,8 @@ export interface Department {
   managerId: string | null;
   managerName: string | null;
   memberCount: number;
+  hanetSyncStatus: SyncStatus;
+  hanetSyncError: string | null;
   createdAt: string;
 }
 
@@ -37,6 +43,8 @@ export interface Camera {
   placeName: string;
   location: string;
   ipAddress: string;
+  online: boolean | null; // null = chưa kiểm tra
+  statusCheckedAt: number | null;
   createdAt: string;
 }
 
