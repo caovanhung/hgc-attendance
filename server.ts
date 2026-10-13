@@ -768,6 +768,13 @@ app.get('/api/hanet/webhook-logs', (req: Request, res: Response) => {
   res.json({ logs: db.webhookLogs });
 });
 
+// Reset Database API (Wipe all data to clean initial state)
+app.post('/api/admin/reset-database', (req: Request, res: Response) => {
+  const fresh = getInitialDatabase();
+  saveDb(fresh);
+  res.json({ success: true, message: 'Dữ liệu đã được đặt lại trạng thái trắng hoàn toàn' });
+});
+
 // Dashboard Statistics (Scoped by Role)
 app.get('/api/stats', (req: Request, res: Response) => {
   const db = loadDb();

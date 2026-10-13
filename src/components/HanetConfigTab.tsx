@@ -184,6 +184,35 @@ export const HanetConfigTab: React.FC<HanetConfigTabProps> = ({ onRefresh }) => 
                 </button>
               </div>
             </form>
+
+            <div className="mt-6 pt-5 border-t border-rose-100 bg-rose-50/50 -mx-5 -mb-5 p-5 rounded-b-2xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h4 className="font-bold text-xs text-rose-800">Đặt lại hệ thống về trạng thái trắng (Reset)</h4>
+                  <p className="text-[11px] text-rose-600 mt-0.5">Xóa sạch toàn bộ nhân sự, phòng ban, camera và lịch sử quét để cài đặt mới từ đầu.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (window.confirm('Bạn có chắc chắn muốn XÓA TOÀN BỘ dữ liệu điểm danh, phòng ban và nhân sự để bắt đầu mới từ đầu?')) {
+                      try {
+                        const res = await fetch('/api/admin/reset-database', { method: 'POST' });
+                        const data = await res.json();
+                        if (data.success) {
+                          alert(data.message);
+                          window.location.reload();
+                        }
+                      } catch (e) {
+                        console.error(e);
+                      }
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition cursor-pointer shrink-0 shadow-xs"
+                >
+                  Xóa sạch dữ liệu mẫu
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

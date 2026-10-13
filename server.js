@@ -536,6 +536,11 @@ app.get("/api/hanet/webhook-logs", (req, res) => {
   const db = loadDb();
   res.json({ logs: db.webhookLogs });
 });
+app.post("/api/admin/reset-database", (req, res) => {
+  const fresh = getInitialDatabase();
+  saveDb(fresh);
+  res.json({ success: true, message: "D\u1EEF li\u1EC7u \u0111\xE3 \u0111\u01B0\u1EE3c \u0111\u1EB7t l\u1EA1i tr\u1EA1ng th\xE1i tr\u1EAFng ho\xE0n to\xE0n" });
+});
 app.get("/api/stats", (req, res) => {
   const db = loadDb();
   const currentUser = db.users.find((u) => u.id === db.currentUserId) || db.users[0];
