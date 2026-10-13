@@ -74,9 +74,29 @@ export const DepartmentsTab: React.FC<DepartmentsTabProps> = ({
       </div>
 
       {/* Department Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {departments.map((dept) => {
-          const isSelected = dept.id === activeDept?.id;
+      {departments.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-slate-200/80 p-12 text-center shadow-xs">
+          <div className="w-12 h-12 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center mx-auto mb-3">
+            <Building className="w-6 h-6" />
+          </div>
+          <h3 className="text-sm font-bold text-slate-800">Chưa có Phòng ban nào</h3>
+          <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-4">
+            Tạo phòng ban đầu tiên để bắt đầu phân quyền Trưởng phòng và phân nhóm nhân sự.
+          </p>
+          {isHR && (
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-xs transition cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Thêm Phòng ban đầu tiên</span>
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {departments.map((dept) => {
+            const isSelected = dept.id === activeDept?.id;
           const memberCount = users.filter((u) => u.departmentId === dept.id).length;
           return (
             <button
@@ -116,6 +136,7 @@ export const DepartmentsTab: React.FC<DepartmentsTabProps> = ({
           );
         })}
       </div>
+      )}
 
       {/* Selected Department Members Table */}
       {activeDept && (

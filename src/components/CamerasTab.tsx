@@ -82,9 +82,29 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
       </div>
 
       {/* Camera Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-5">
-        {cameras.map((cam) => {
-          const isOnline = cam.status === 'online';
+      {cameras.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-slate-200/80 p-12 text-center shadow-xs">
+          <div className="w-12 h-12 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center mx-auto mb-3">
+            <Video className="w-6 h-6" />
+          </div>
+          <h3 className="text-sm font-bold text-slate-800">Chưa có Camera Hanet nào</h3>
+          <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-4">
+            Thêm thiết bị camera Hanet đầu tiên của công ty bạn bằng nút bên dưới hoặc quét mã thiết bị để bắt đầu nhận diện.
+          </p>
+          {isHR && (
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-xs transition cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Thêm Camera Hanet mới</span>
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-5">
+          {cameras.map((cam) => {
+            const isOnline = cam.status === 'online';
           return (
             <div
               key={cam.id}
@@ -162,6 +182,7 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
           );
         })}
       </div>
+      )}
 
       {/* Add Camera Modal */}
       {showAddModal && (

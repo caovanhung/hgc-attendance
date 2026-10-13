@@ -16,390 +16,37 @@ var defaultAvatar = (seed) => `https://images.unsplash.com/photo-1534528741775-5
 function getInitialDatabase() {
   const now = /* @__PURE__ */ new Date();
   const todayStr = now.toISOString().split("T")[0];
-  const departments = [
-    {
-      id: "dep-tech",
-      code: "TECH",
-      name: "Kh\u1ED1i C\xF4ng ngh\u1EC7 & Ph\u1EA7n m\u1EC1m",
-      description: "Ph\xE1t tri\u1EC3n ph\u1EA7n m\u1EC1m, h\u1EA1 t\u1EA7ng k\u1EF9 thu\u1EADt v\xE0 gi\u1EA3i ph\xE1p AI",
-      managerId: "usr-tech-lead",
-      managerName: "Tr\u1EA7n V\u0103n Minh",
-      createdAt: "2026-01-10"
-    },
-    {
-      id: "dep-hr",
-      code: "HR",
-      name: "Ph\xF2ng T\u1ED5 ch\u1EE9c - Nh\xE2n s\u1EF1",
-      description: "Tuy\u1EC3n d\u1EE5ng, \u0111\xE0o t\u1EA1o, ch\u1EBF \u0111\u1ED9 ch\xEDnh s\xE1ch v\xE0 ch\u1EA5m c\xF4ng",
-      managerId: "usr-hr-01",
-      managerName: "Nguy\u1EC5n Th\u1ECB H\u1ED3ng",
-      createdAt: "2026-01-10"
-    },
-    {
-      id: "dep-sales",
-      code: "SALES",
-      name: "Ph\xF2ng Kinh doanh & Ti\u1EBFp th\u1ECB",
-      description: "Kinh doanh B2B, b\xE1n l\u1EBB, \u0111\u1ED1i t\xE1c v\xE0 ph\xE1t tri\u1EC3n th\u1ECB tr\u01B0\u1EDDng",
-      managerId: "usr-sales-lead",
-      managerName: "V\u0169 \u0110\u1EE9c To\xE0n",
-      createdAt: "2026-01-10"
-    },
-    {
-      id: "dep-fin",
-      code: "FIN",
-      name: "Ph\xF2ng T\xE0i ch\xEDnh - K\u1EBF to\xE1n",
-      description: "K\u1EBF to\xE1n t\u1ED5ng h\u1EE3p, quy\u1EBFt to\xE1n thu chi v\xE0 ki\u1EC3m to\xE1n n\u1ED9i b\u1ED9",
-      managerId: "usr-fin-lead",
-      managerName: "Ho\xE0ng B\xEDch Ng\u1ECDc",
-      createdAt: "2026-01-10"
-    }
-  ];
+  const departments = [];
   const users = [
     {
-      id: "usr-hr-01",
-      code: "PLX-HR01",
-      name: "Nguy\u1EC5n Th\u1ECB H\u1ED3ng",
-      email: "hong.nt@petrolimexhanoi.vn",
-      phone: "0912345678",
+      id: "usr-admin",
+      code: "ADMIN",
+      name: "Qu\u1EA3n tr\u1ECB vi\xEAn H\u1EC7 th\u1ED1ng (HR)",
+      email: "admin@company.com",
+      phone: "",
       role: "hr",
-      departmentId: "dep-hr",
-      departmentName: "Ph\xF2ng T\u1ED5 ch\u1EE9c - Nh\xE2n s\u1EF1",
-      position: "Tr\u01B0\u1EDFng ph\xF2ng Nh\xE2n s\u1EF1 & Qu\u1EA3n tr\u1ECB vi\xEAn",
-      avatarUrl: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=256&q=80",
-      hanetPersonId: "HANET_P_001",
-      faceRegistered: true,
+      departmentId: "",
+      departmentName: "Ban Qu\u1EA3n tr\u1ECB",
+      position: "Qu\u1EA3n tr\u1ECB vi\xEAn",
+      avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80",
+      hanetPersonId: "",
+      faceRegistered: false,
       status: "active",
-      createdAt: "2026-01-10"
-    },
-    {
-      id: "usr-tech-lead",
-      code: "PLX-TC01",
-      name: "Tr\u1EA7n V\u0103n Minh",
-      email: "minh.tv@petrolimexhanoi.vn",
-      phone: "0988776655",
-      role: "dept_manager",
-      departmentId: "dep-tech",
-      departmentName: "Kh\u1ED1i C\xF4ng ngh\u1EC7 & Ph\u1EA7n m\u1EC1m",
-      position: "Tr\u01B0\u1EDFng ph\xF2ng K\u1EF9 thu\u1EADt",
-      avatarUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=256&q=80",
-      hanetPersonId: "HANET_P_002",
-      faceRegistered: true,
-      status: "active",
-      createdAt: "2026-01-12"
-    },
-    {
-      id: "usr-tech-02",
-      code: "PLX-TC02",
-      name: "L\xEA Ho\xE0ng Nam",
-      email: "nam.lh@petrolimexhanoi.vn",
-      phone: "0901234888",
-      role: "employee",
-      departmentId: "dep-tech",
-      departmentName: "Kh\u1ED1i C\xF4ng ngh\u1EC7 & Ph\u1EA7n m\u1EC1m",
-      position: "K\u1EF9 s\u01B0 Ph\u1EA7n m\u1EC1m Senior",
-      avatarUrl: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=256&q=80",
-      hanetPersonId: "HANET_P_003",
-      faceRegistered: true,
-      status: "active",
-      createdAt: "2026-01-15"
-    },
-    {
-      id: "usr-tech-03",
-      code: "PLX-TC03",
-      name: "Ph\u1EA1m Thu Trang",
-      email: "trang.pt@petrolimexhanoi.vn",
-      phone: "0934567890",
-      role: "employee",
-      departmentId: "dep-tech",
-      departmentName: "Kh\u1ED1i C\xF4ng ngh\u1EC7 & Ph\u1EA7n m\u1EC1m",
-      position: "Chuy\xEAn vi\xEAn Ki\u1EC3m th\u1EED QA",
-      avatarUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=256&q=80",
-      hanetPersonId: "HANET_P_004",
-      faceRegistered: true,
-      status: "active",
-      createdAt: "2026-01-20"
-    },
-    {
-      id: "usr-sales-lead",
-      code: "PLX-SL01",
-      name: "V\u0169 \u0110\u1EE9c To\xE0n",
-      email: "toan.vd@petrolimexhanoi.vn",
-      phone: "0977889900",
-      role: "dept_manager",
-      departmentId: "dep-sales",
-      departmentName: "Ph\xF2ng Kinh doanh & Ti\u1EBFp th\u1ECB",
-      position: "Tr\u01B0\u1EDFng ph\xF2ng Kinh doanh",
-      avatarUrl: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=256&q=80",
-      hanetPersonId: "HANET_P_005",
-      faceRegistered: true,
-      status: "active",
-      createdAt: "2026-01-15"
-    },
-    {
-      id: "usr-sales-02",
-      code: "PLX-SL02",
-      name: "\u0110\u1ED7 Qu\u1EF3nh Nga",
-      email: "nga.dq@petrolimexhanoi.vn",
-      phone: "0945671234",
-      role: "employee",
-      departmentId: "dep-sales",
-      departmentName: "Ph\xF2ng Kinh doanh & Ti\u1EBFp th\u1ECB",
-      position: "Chuy\xEAn vi\xEAn B\xE1n h\xE0ng Doanh nghi\u1EC7p",
-      avatarUrl: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=256&q=80",
-      hanetPersonId: "HANET_P_006",
-      faceRegistered: true,
-      status: "active",
-      createdAt: "2026-02-01"
-    },
-    {
-      id: "usr-fin-lead",
-      code: "PLX-FN01",
-      name: "Ho\xE0ng B\xEDch Ng\u1ECDc",
-      email: "ngoc.hb@petrolimexhanoi.vn",
-      phone: "0912233445",
-      role: "dept_manager",
-      departmentId: "dep-fin",
-      departmentName: "Ph\xF2ng T\xE0i ch\xEDnh - K\u1EBF to\xE1n",
-      position: "K\u1EBF to\xE1n tr\u01B0\u1EDFng",
-      avatarUrl: "https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=256&q=80",
-      hanetPersonId: "HANET_P_007",
-      faceRegistered: true,
-      status: "active",
-      createdAt: "2026-01-10"
+      createdAt: todayStr
     }
   ];
-  const cameras = [
-    {
-      id: "cam-01",
-      name: "Camera C\u1ED5ng ch\xEDnh - T\u1EA7ng 1 (Khu v\u1EF1c Ti\u1EBFp t\xE2n)",
-      deviceKey: "HN_GATE_T1_001",
-      placeId: 1042,
-      placeName: "Tr\u1EE5 s\u1EDF V\u0103n ph\xF2ng H\xE0 N\u1ED9i",
-      location: "C\u1EEDa xoay \u0111\u1EA1i s\u1EA3nh T\u1EA7ng 1",
-      status: "online",
-      lastPing: (/* @__PURE__ */ new Date()).toISOString(),
-      ipAddress: "192.168.1.101",
-      snapshotUrl: "https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=600&q=80"
-    },
-    {
-      id: "cam-02",
-      name: "Camera C\u1EEDa Kh\u1ED1i K\u1EF9 thu\u1EADt & Dev - T\u1EA7ng 3",
-      deviceKey: "HN_DEV_T3_002",
-      placeId: 1042,
-      placeName: "Tr\u1EE5 s\u1EDF V\u0103n ph\xF2ng H\xE0 N\u1ED9i",
-      location: "C\u1EEDa t\u1EEB T\u1EA7ng 3 Kh\u1ED1i C\xF4ng ngh\u1EC7",
-      status: "online",
-      lastPing: (/* @__PURE__ */ new Date()).toISOString(),
-      ipAddress: "192.168.1.102",
-      snapshotUrl: "https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=600&q=80"
-    },
-    {
-      id: "cam-03",
-      name: "Camera Kh\u1ED1i Kinh doanh & Marketing - T\u1EA7ng 4",
-      deviceKey: "HN_SALES_T4_003",
-      placeId: 1042,
-      placeName: "Tr\u1EE5 s\u1EDF V\u0103n ph\xF2ng H\xE0 N\u1ED9i",
-      location: "S\u1EA3nh thang m\xE1y T\u1EA7ng 4",
-      status: "online",
-      lastPing: (/* @__PURE__ */ new Date()).toISOString(),
-      ipAddress: "192.168.1.103",
-      snapshotUrl: "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=600&q=80"
-    },
-    {
-      id: "cam-04",
-      name: "Camera T\u1ED5ng kho \u0110\u1EE9c Giang - C\u1ED5ng Xu\u1EA5t h\xE0ng",
-      deviceKey: "HN_WAREHOUSE_004",
-      placeId: 1088,
-      placeName: "T\u1ED5ng kho \u0110\u1EE9c Giang Petrolimex",
-      location: "C\u1ED5ng ki\u1EC3m so\xE1t xe b\u1ED3n & ca k\xEDp",
-      status: "online",
-      lastPing: (/* @__PURE__ */ new Date()).toISOString(),
-      ipAddress: "10.20.5.15",
-      snapshotUrl: "https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=600&q=80"
-    }
-  ];
-  const attendanceEvents = [
-    {
-      id: "att-evt-01",
-      employeeId: "usr-hr-01",
-      employeeCode: "PLX-HR01",
-      employeeName: "Nguy\u1EC5n Th\u1ECB H\u1ED3ng",
-      departmentId: "dep-hr",
-      departmentName: "Ph\xF2ng T\u1ED5 ch\u1EE9c - Nh\xE2n s\u1EF1",
-      avatarUrl: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=256&q=80",
-      detectedImageUrl: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=256&q=80",
-      cameraId: "cam-01",
-      cameraName: "Camera C\u1ED5ng ch\xEDnh - T\u1EA7ng 1",
-      placeId: 1042,
-      placeName: "Tr\u1EE5 s\u1EDF V\u0103n ph\xF2ng H\xE0 N\u1ED9i",
-      timestamp: (/* @__PURE__ */ new Date(`${todayStr}T08:05:12`)).getTime(),
-      timeString: "08:05:12",
-      dateString: todayStr,
-      type: "check_in",
-      status: "on_time",
-      lateMinutes: 0,
-      mask: 0,
-      temperature: 36.4
-    },
-    {
-      id: "att-evt-02",
-      employeeId: "usr-tech-lead",
-      employeeCode: "PLX-TC01",
-      employeeName: "Tr\u1EA7n V\u0103n Minh",
-      departmentId: "dep-tech",
-      departmentName: "Kh\u1ED1i C\xF4ng ngh\u1EC7 & Ph\u1EA7n m\u1EC1m",
-      avatarUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=256&q=80",
-      detectedImageUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=256&q=80",
-      cameraId: "cam-02",
-      cameraName: "Camera C\u1EEDa Kh\u1ED1i K\u1EF9 thu\u1EADt & Dev - T\u1EA7ng 3",
-      placeId: 1042,
-      placeName: "Tr\u1EE5 s\u1EDF V\u0103n ph\xF2ng H\xE0 N\u1ED9i",
-      timestamp: (/* @__PURE__ */ new Date(`${todayStr}T08:14:45`)).getTime(),
-      timeString: "08:14:45",
-      dateString: todayStr,
-      type: "check_in",
-      status: "on_time",
-      lateMinutes: 0,
-      mask: 0,
-      temperature: 36.6
-    },
-    {
-      id: "att-evt-03",
-      employeeId: "usr-tech-02",
-      employeeCode: "PLX-TC02",
-      employeeName: "L\xEA Ho\xE0ng Nam",
-      departmentId: "dep-tech",
-      departmentName: "Kh\u1ED1i C\xF4ng ngh\u1EC7 & Ph\u1EA7n m\u1EC1m",
-      avatarUrl: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=256&q=80",
-      detectedImageUrl: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=256&q=80",
-      cameraId: "cam-01",
-      cameraName: "Camera C\u1ED5ng ch\xEDnh - T\u1EA7ng 1",
-      placeId: 1042,
-      placeName: "Tr\u1EE5 s\u1EDF V\u0103n ph\xF2ng H\xE0 N\u1ED9i",
-      timestamp: (/* @__PURE__ */ new Date(`${todayStr}T08:28:30`)).getTime(),
-      timeString: "08:28:30",
-      dateString: todayStr,
-      type: "check_in",
-      status: "late",
-      lateMinutes: 13,
-      // beyond 08:15 grace limit
-      mask: 0,
-      temperature: 36.5
-    },
-    {
-      id: "att-evt-04",
-      employeeId: "usr-sales-lead",
-      employeeCode: "PLX-SL01",
-      employeeName: "V\u0169 \u0110\u1EE9c To\xE0n",
-      departmentId: "dep-sales",
-      departmentName: "Ph\xF2ng Kinh doanh & Ti\u1EBFp th\u1ECB",
-      avatarUrl: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=256&q=80",
-      detectedImageUrl: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=256&q=80",
-      cameraId: "cam-03",
-      cameraName: "Camera Kh\u1ED1i Kinh doanh & Marketing - T\u1EA7ng 4",
-      placeId: 1042,
-      placeName: "Tr\u1EE5 s\u1EDF V\u0103n ph\xF2ng H\xE0 N\u1ED9i",
-      timestamp: (/* @__PURE__ */ new Date(`${todayStr}T08:08:19`)).getTime(),
-      timeString: "08:08:19",
-      dateString: todayStr,
-      type: "check_in",
-      status: "on_time",
-      lateMinutes: 0,
-      mask: 0,
-      temperature: 36.5
-    },
-    {
-      id: "att-evt-05",
-      employeeId: "usr-sales-02",
-      employeeCode: "PLX-SL02",
-      employeeName: "\u0110\u1ED7 Qu\u1EF3nh Nga",
-      departmentId: "dep-sales",
-      departmentName: "Ph\xF2ng Kinh doanh & Ti\u1EBFp th\u1ECB",
-      avatarUrl: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=256&q=80",
-      detectedImageUrl: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=256&q=80",
-      cameraId: "cam-01",
-      cameraName: "Camera C\u1ED5ng ch\xEDnh - T\u1EA7ng 1",
-      placeId: 1042,
-      placeName: "Tr\u1EE5 s\u1EDF V\u0103n ph\xF2ng H\xE0 N\u1ED9i",
-      timestamp: (/* @__PURE__ */ new Date(`${todayStr}T08:11:02`)).getTime(),
-      timeString: "08:11:02",
-      dateString: todayStr,
-      type: "check_in",
-      status: "on_time",
-      lateMinutes: 0,
-      mask: 0,
-      temperature: 36.3
-    },
-    {
-      id: "att-evt-06",
-      employeeId: "usr-fin-lead",
-      employeeCode: "PLX-FN01",
-      employeeName: "Ho\xE0ng B\xEDch Ng\u1ECDc",
-      departmentId: "dep-fin",
-      departmentName: "Ph\xF2ng T\xE0i ch\xEDnh - K\u1EBF to\xE1n",
-      avatarUrl: "https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=256&q=80",
-      detectedImageUrl: "https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=256&q=80",
-      cameraId: "cam-01",
-      cameraName: "Camera C\u1ED5ng ch\xEDnh - T\u1EA7ng 1",
-      placeId: 1042,
-      placeName: "Tr\u1EE5 s\u1EDF V\u0103n ph\xF2ng H\xE0 N\u1ED9i",
-      timestamp: (/* @__PURE__ */ new Date(`${todayStr}T08:02:18`)).getTime(),
-      timeString: "08:02:18",
-      dateString: todayStr,
-      type: "check_in",
-      status: "on_time",
-      lateMinutes: 0,
-      mask: 0,
-      temperature: 36.2
-    }
-  ];
-  const requests = [
-    {
-      id: "req-001",
-      employeeId: "usr-tech-02",
-      employeeName: "L\xEA Ho\xE0ng Nam",
-      departmentId: "dep-tech",
-      date: todayStr,
-      type: "late_explanation",
-      reason: "S\u1EF1 c\u1ED1 t\u1EAFc \u0111\u01B0\u1EDDng khu v\u1EF1c c\u1EA7u Nh\u1EADt T\xE2n do th\u1EDDi ti\u1EBFt m\u01B0a l\u1EDBn, \u0111\xE3 b\xE1o c\xE1o tr\u01B0\u1EDFng ph\xF2ng qua \u0111i\u1EC7n tho\u1EA1i.",
-      suggestedTime: "08:28:00",
-      status: "pending",
-      createdAt: (/* @__PURE__ */ new Date()).toISOString()
-    }
-  ];
-  const webhookLogs = [
-    {
-      id: "wh-001",
-      receivedAt: (/* @__PURE__ */ new Date(`${todayStr}T08:28:31`)).toISOString(),
-      action: "checkin",
-      deviceName: "Camera C\u1ED5ng ch\xEDnh - T\u1EA7ng 1",
-      personName: "L\xEA Ho\xE0ng Nam",
-      status: "success",
-      rawPayload: {
-        action: "checkin",
-        data: {
-          personID: "HANET_P_003",
-          personName: "L\xEA Ho\xE0ng Nam",
-          aliasID: "PLX-TC02",
-          title: "K\u1EF9 s\u01B0 Ph\u1EA7n m\u1EC1m Senior",
-          deviceID: "HN_GATE_T1_001",
-          deviceName: "Camera C\u1ED5ng ch\xEDnh - T\u1EA7ng 1",
-          placeID: 1042,
-          time: (/* @__PURE__ */ new Date(`${todayStr}T08:28:30`)).getTime(),
-          mask: 0,
-          temperature: 36.5
-        }
-      }
-    }
-  ];
+  const cameras = [];
+  const attendanceEvents = [];
+  const requests = [];
+  const webhookLogs = [];
   const config = {
-    clientId: "hanet_plx_client_8932",
-    clientSecret: "sec_89f02c918a2e7c10b2",
-    accessToken: "hnt_live_token_7182903746281903",
-    tokenExpiresAt: "2026-12-31T23:59:59Z",
-    webhookSecret: "whsec_hanet_plx_secure_key_2026",
-    masterPlaceId: 1042,
-    masterPlaceName: "Tr\u1EE5 s\u1EDF Petrolimex H\xE0 N\u1ED9i & T\u1ED5ng kho",
+    clientId: "",
+    clientSecret: "",
+    accessToken: "",
+    tokenExpiresAt: "",
+    webhookSecret: "",
+    masterPlaceId: 0,
+    masterPlaceName: "",
     autoSync: true
   };
   return {
@@ -410,8 +57,7 @@ function getInitialDatabase() {
     attendanceEvents,
     requests,
     webhookLogs,
-    currentUserId: "usr-hr-01"
-    // Default as HR for full initial control
+    currentUserId: "usr-admin"
   };
 }
 function loadDb() {
@@ -537,10 +183,12 @@ app.post("/api/users", (req, res) => {
     return res.status(403).json({ error: "Ch\u1EC9 HR m\u1EDBi c\xF3 quy\u1EC1n t\u1EA1o nh\xE2n s\u1EF1 m\u1EDBi" });
   }
   const { code, name, email, phone, role, departmentId, position, avatarUrl } = req.body;
-  if (!name || !code || !departmentId) {
-    return res.status(400).json({ error: "Thi\u1EBFu th\xF4ng tin b\u1EAFt bu\u1ED9c (M\xE3 NV, H\u1ECD t\xEAn, Ph\xF2ng ban)" });
+  if (!name || !code) {
+    return res.status(400).json({ error: "Thi\u1EBFu th\xF4ng tin b\u1EAFt bu\u1ED9c (M\xE3 NV, H\u1ECD t\xEAn)" });
   }
-  const dept = db.departments.find((d) => d.id === departmentId);
+  const dept = departmentId ? db.departments.find((d) => d.id === departmentId) : null;
+  const deptName = dept ? dept.name : db.departments[0]?.name || "Ch\u01B0a ph\xE2n ph\xF2ng";
+  const deptId = dept ? dept.id : db.departments[0]?.id || "";
   const newUser = {
     id: `usr-${Date.now().toString(36)}`,
     code: code.trim().toUpperCase(),
@@ -548,8 +196,8 @@ app.post("/api/users", (req, res) => {
     email: email || `${code.toLowerCase()}@petrolimexhanoi.vn`,
     phone: phone || "",
     role: role || "employee",
-    departmentId,
-    departmentName: dept ? dept.name : "Kh\xE1c",
+    departmentId: deptId,
+    departmentName: deptName,
     position: position || "Nh\xE2n vi\xEAn",
     avatarUrl: avatarUrl || defaultAvatar(name),
     hanetPersonId: `HANET_P_${Math.floor(1e3 + Math.random() * 9e3)}`,
