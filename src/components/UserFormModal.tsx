@@ -46,7 +46,8 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
 
   const pickFace = (f: RecentFace) => {
     if (!isEdit) {
-      setCode(f.aliasId ?? '');
+      // Người chưa có aliasID trên Hanet: giữ mã HR đã gõ.
+      if (f.aliasId) setCode(f.aliasId);
       if (f.personName) setName(f.personName);
     }
     setHanetPersonId(f.personId ?? '');

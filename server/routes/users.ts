@@ -8,7 +8,7 @@ import { backupNow } from '../backup';
 import { USER_SELECT, getUser, mapUser, type Row } from '../repo';
 import { deleteUserSessions, generateTempPassword, hashPassword, scopeFor, scopeWhere } from '../auth';
 import { toVnDate } from '../vntime';
-import { NOT_SYSTEM_ADMIN } from '../bootstrap';
+import { NOT_SYSTEM_ADMIN, SYSTEM_ADMIN_CODE } from '../bootstrap';
 import type { UserRole } from '../../shared/types';
 
 const ROLES: UserRole[] = ['hr', 'dept_manager', 'employee'];
@@ -40,6 +40,8 @@ export function userRoutes(ctx: AppContext): Router {
     const code = (str(b.code) ?? '').toUpperCase();
     const name = str(b.name) ?? '';
     if (!CODE_RE.test(code)) throw new HttpError(400, CODE_ERROR);
+    // Mã ADMIN mang quyền xóa dữ liệu: chỉ hệ thống được tạo, kể cả khi database chưa có tài khoản này.
+    if (code === SYSTEM_ADMIN_CODE) throw new HttpError(400, 'Mã ADMIN dành riêng cho tài khoản quản trị hệ thống');
     if (!name) throw new HttpError(400, 'Họ tên là bắt buộc');
     const role: UserRole = b.role === undefined ? 'employee' : b.role;
     if (!ROLES.includes(role)) throw new HttpError(400, 'Vai trò không hợp lệ');
@@ -51,7 +53,7 @@ export function userRoutes(ctx: AppContext): Router {
     db.prepare(
       `INSERT INTO users(id, code, name, email, phone, role, department_id, position, avatar_url, hanet_person_id,
          face_registered, status, password_hash, must_change_password, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'active', ?, 1, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 1, ?)`,
     ).run(
       id,
       code,
@@ -63,6 +65,7 @@ export function userRoutes(ctx: AppContext): Router {
       str(b.position) ?? '',
       str(b.avatarUrl) ?? '',
       str(b.hanetPersonId) || null,
+      b.faceRegistered ? 1 : 0,
       hashPassword(tempPassword),
       toVnDate(ctx.now()),
     );

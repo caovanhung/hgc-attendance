@@ -601,6 +601,7 @@ function userRoutes(ctx) {
     const code = (str(b.code) ?? "").toUpperCase();
     const name = str(b.name) ?? "";
     if (!CODE_RE.test(code)) throw new HttpError(400, CODE_ERROR);
+    if (code === SYSTEM_ADMIN_CODE) throw new HttpError(400, "M\xE3 ADMIN d\xE0nh ri\xEAng cho t\xE0i kho\u1EA3n qu\u1EA3n tr\u1ECB h\u1EC7 th\u1ED1ng");
     if (!name) throw new HttpError(400, "H\u1ECD t\xEAn l\xE0 b\u1EAFt bu\u1ED9c");
     const role = b.role === void 0 ? "employee" : b.role;
     if (!ROLES.includes(role)) throw new HttpError(400, "Vai tr\xF2 kh\xF4ng h\u1EE3p l\u1EC7");
@@ -611,7 +612,7 @@ function userRoutes(ctx) {
     db.prepare(
       `INSERT INTO users(id, code, name, email, phone, role, department_id, position, avatar_url, hanet_person_id,
          face_registered, status, password_hash, must_change_password, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'active', ?, 1, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 1, ?)`
     ).run(
       id,
       code,
@@ -623,6 +624,7 @@ function userRoutes(ctx) {
       str(b.position) ?? "",
       str(b.avatarUrl) ?? "",
       str(b.hanetPersonId) || null,
+      b.faceRegistered ? 1 : 0,
       hashPassword(tempPassword),
       toVnDate(ctx.now())
     );

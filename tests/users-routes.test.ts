@@ -230,3 +230,27 @@ test('thêm phòng ban không nhập mã → hệ thống tự sinh PB001, PB002
     await app.close();
   }
 });
+
+test('tạo nhân viên kèm faceRegistered (chọn từ camera) → lưu đúng', async () => {
+  const { app } = await setup();
+  try {
+    const hr = await loginAs(app, 'HR01');
+    const r = await hr.post('/api/users', { code: 'NV05', name: 'Từ camera', hanetPersonId: '2134589559210508288', faceRegistered: true });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.user.faceRegistered, true);
+    assert.equal(r.body.user.hanetPersonId, '2134589559210508288');
+  } finally {
+    await app.close();
+  }
+});
+
+test('không ai tạo được nhân sự mang mã ADMIN (kể cả khi chưa có tài khoản ADMIN)', async () => {
+  const { app } = await setup();
+  try {
+    const hr = await loginAs(app, 'HR01');
+    assert.equal((await hr.post('/api/users', { code: 'admin', name: 'Giả mạo', role: 'hr' })).status, 400);
+    assert.equal((app.db.prepare("SELECT COUNT(*) AS c FROM users WHERE code = 'ADMIN'").get() as { c: number }).c, 0);
+  } finally {
+    await app.close();
+  }
+});

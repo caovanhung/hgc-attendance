@@ -88,41 +88,43 @@ const StatsDetailModal: React.FC<{ type: StatsDetailType; title: string; onClose
       ) : rows.length === 0 ? (
         <p className="text-slate-500 text-center py-6">Không có ai.</p>
       ) : (
-        <table className="w-full text-left">
-          <thead className="text-[11px] text-slate-500 border-b border-slate-100">
-            <tr>
-              <th className="py-2 pr-2 font-semibold">Mã</th>
-              <th className="py-2 pr-2 font-semibold">Họ tên</th>
-              <th className="py-2 pr-2 font-semibold">Phòng ban</th>
-              {showTimes && <th className="py-2 pr-2 font-semibold">Giờ vào</th>}
-              {showTimes && <th className="py-2 pr-2 font-semibold">Giờ ra</th>}
-              {showTimes && <th className="py-2 font-semibold">Trạng thái</th>}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {rows.map((r) => (
-              <tr key={r.userId}>
-                <td className="py-2 pr-2 font-mono">{r.employeeCode}</td>
-                <td className="py-2 pr-2 font-semibold text-slate-900">{r.employeeName}</td>
-                <td className="py-2 pr-2 text-slate-600">{r.departmentName ?? '—'}</td>
-                {showTimes && <td className="py-2 pr-2 font-mono">{fmtTime(r.firstIn)}</td>}
-                {showTimes && <td className="py-2 pr-2 font-mono">{fmtTime(r.lastOut)}</td>}
-                {showTimes && (
-                  <td className="py-2">
-                    {r.status === null ? (
-                      <span className="text-slate-400">Chưa điểm danh</span>
-                    ) : (
-                      <>
-                        {DAY_STATUS_LABEL[r.status]}
-                        {r.lateMinutes > 0 && <span className="text-rose-600"> · muộn {r.lateMinutes} phút</span>}
-                      </>
-                    )}
-                  </td>
-                )}
+        <div className="overflow-x-auto">
+          <table className="w-full text-left whitespace-nowrap">
+            <thead className="text-[11px] text-slate-500 border-b border-slate-100">
+              <tr>
+                <th className="py-2 pr-2 font-semibold">Mã</th>
+                <th className="py-2 pr-2 font-semibold">Họ tên</th>
+                <th className="py-2 pr-2 font-semibold">Phòng ban</th>
+                {showTimes && <th className="py-2 pr-2 font-semibold">Giờ vào</th>}
+                {showTimes && <th className="py-2 pr-2 font-semibold">Giờ ra</th>}
+                {showTimes && <th className="py-2 font-semibold">Trạng thái</th>}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((r) => (
+                <tr key={r.userId}>
+                  <td className="py-2 pr-2 font-mono">{r.employeeCode}</td>
+                  <td className="py-2 pr-2 font-semibold text-slate-900">{r.employeeName}</td>
+                  <td className="py-2 pr-2 text-slate-600">{r.departmentName ?? '—'}</td>
+                  {showTimes && <td className="py-2 pr-2 font-mono">{fmtTime(r.firstIn)}</td>}
+                  {showTimes && <td className="py-2 pr-2 font-mono">{fmtTime(r.lastOut)}</td>}
+                  {showTimes && (
+                    <td className="py-2">
+                      {r.status === null ? (
+                        <span className="text-slate-400">Chưa điểm danh</span>
+                      ) : (
+                        <>
+                          {DAY_STATUS_LABEL[r.status]}
+                          {r.lateMinutes > 0 && <span className="text-rose-600"> · muộn {r.lateMinutes} phút</span>}
+                        </>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </Modal>
   );
