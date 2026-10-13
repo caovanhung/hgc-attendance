@@ -179,3 +179,29 @@ export interface MeResponse {
   mustChangePassword: boolean;
   simulatorEnabled: boolean;
 }
+
+export interface HanetPlace {
+  id: number;
+  name: string;
+  address: string;
+}
+
+export interface HanetDevice {
+  deviceID: string;
+  deviceName: string;
+  placeID?: number;
+  placeName?: string;
+}
+
+export interface HanetPerson {
+  aliasID: string;
+  name: string;
+  personID: string;
+  avatar: string;
+  title: string;
+}
+
+export interface HanetDepartment {
+  id: number;
+  name: string;
+}
