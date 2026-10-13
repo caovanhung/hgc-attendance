@@ -47,7 +47,7 @@ Mã trả về: `returnCode = 1` là thành công. Mã lỗi quan trọng: `-1` 
 | `device/getDeviceInfo`, `getListDevice` | Không | `ByPlace` đủ dùng |
 | `device/setDeviceMQTT` | Không | Đã có webhook |
 | `person/getListByPlace` | **Có** | Nhập nhân sự từ Hanet (phân trang `page`, `size`) |
-| `person/getUserInfoByAliasID` | **Có** | Lấy `personID` sau khi đăng ký; xử lý `-9005` |
+| `person/getUserInfoByAliasID` | **Có** | Lấy `personID` sau khi đăng ký |
 | `person/getUserInfoByPersonID`, `getListByAliasID(AllPlace)`, `getTotalPersonByPlaceID` | Không | Không cần cho luồng nào |
 | `person/registerByUrl` | **Có** | Đăng ký FaceID bằng ảnh camera (xem §6.4) |
 | `person/register` (multipart) | Dự phòng | Chỉ dùng nếu spike cho thấy cần xử lý ảnh (§6.4) |
@@ -193,7 +193,7 @@ Quy tắc:
   1. Lưu nhân sự trên web (nếu là tạo mới), commit.
   2. Gọi `person/registerByUrl {name, aliasID: code, placeID, url: image_url, title: position, type: 0}`.
   3. Thành công → `person/getUserInfoByAliasID` lấy `personID` → lưu `hanet_person_id`, `face_registered=1`, `face_error=NULL`; xóa sighting đã dùng; xếp lại các việc đang chờ FaceID.
-  4. `-9005` (đã tồn tại) → tra `getUserInfoByAliasID`; có thì liên kết như bước 3.
+  4. `-9005` (mã đã là aliasID của người khác trên Hanet) → báo lỗi, **không** tự liên kết (tránh chấm công/xóa nhầm người thật); HR dùng "Nhập từ Hanet" hoặc đổi mã.
   5. `-9006/-9007/-5010/-909/-9002` → `face_error` = lý do; nhân sự vẫn tồn tại, nhãn "Chưa có FaceID".
   6. `-9008` → `face_error` "Địa điểm đã hết số khuôn mặt miễn phí, cần mua gói cloud Hanet".
   7. Đổi ảnh khi người đã có FaceID: `person/updateByFaceUrlByAliasID` thay cho bước 2.
@@ -272,7 +272,7 @@ Quy tắc:
 - Mọi lời gọi Hanet: timeout 15 giây; `-103` làm mới token và gọi lại một lần; làm mới hỏng → mọi việc đến hạn được ghi lỗi "Kết nối Hanet hỏng, kiểm tra Client ID/Secret/Refresh Token" (lỗi tạm, vẫn thử lại), và `test-connection` báo đỏ.
 - Đổi địa điểm trong cấu hình khi đã có dữ liệu đồng bộ: cho phép, kèm cảnh báo trên giao diện "Nhân sự và phòng ban đã đồng bộ với địa điểm cũ sẽ không tự chuyển"; không tự di chuyển dữ liệu.
 - Ảnh trên CDN Hanet không còn tải được: Hanet trả lỗi ảnh → `face_error` "Ảnh không còn truy cập được, chọn lượt chụp mới hơn".
-- Hai HR cùng đăng ký FaceID cho một người: lần sau nhận `-9005` và liên kết, không lỗi.
+- Hai HR cùng đăng ký FaceID cho một người: lần sau thấy nhân sự đã có FaceID nên đi nhánh cập nhật ảnh, không nhận `-9005`.
 - Không log token, client secret; log lỗi đồng bộ dạng `[SYNC] op=... entity=... code=...`.
 
 ## 10. Kiểm thử
@@ -280,7 +280,7 @@ Quy tắc:
 - Hanet giả: một `fetch` giả nhận theo đường dẫn, trả kịch bản; kiểm tra tham số đã gửi.
 - `hanet-sync`: thứ tự theo đối tượng; gộp; xóa thắng; phụ thuộc hoãn không tính lần thử; lịch thử lại; dừng sau 20 lần; lỗi vĩnh viễn; `-5011` khi xóa = thành công; chưa cấu hình giữ pending; retry đưa về pending; trạng thái đối tượng cập nhật đúng.
 - Webhook: người lạ có ảnh → sighting `stranger`; người Hanet chưa liên kết → `unlinked`; không ảnh → không ghi; dọn sau 24 giờ.
-- FaceID: thành công lưu personID; `-9005` liên kết; `-9006` giữ nhân sự với `face_error`; `-9008`; đổi ảnh dùng `updateByFaceUrlByAliasID`.
+- FaceID: thành công lưu personID; `-9005` báo lỗi, không liên kết; `-9006` giữ nhân sự với `face_error`; `-9008`; đổi ảnh dùng `updateByFaceUrlByAliasID`.
 - Nhập: bỏ người đã có; aliasID không hợp lệ → mã `NV0001` + việc `user.alias`; server không tin dữ liệu client.
 - Camera: nhập không trùng; trạng thái online; đổi tên tạo việc.
 - Link video: HR và Trưởng phòng nhận `videoUrl` đúng định dạng (place, device, ngày giờ VN; lượt 00:30 giờ VN thuộc đúng ngày VN dù chạy `TZ=UTC`); nhân viên nhận `null`; chưa cấu hình địa điểm → `null`; lượt `simulator` → `null`.
