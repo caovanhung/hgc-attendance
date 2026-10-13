@@ -1,6 +1,7 @@
 import type { AppContext } from './context';
 import { backupNow } from './backup';
 import { purgeExpiredSessions } from './auth';
+import { refreshCameraStatus } from './cameras';
 import { reconcileEnabled } from './hanet';
 import { purgeSightings } from './sightings';
 import { purgeDoneJobs, runDueJobs } from './hanet-sync';
@@ -14,6 +15,7 @@ export interface DueJobs {
   reconcileYesterday: boolean;
   purgeSessions: boolean;
   purgeHourly: boolean;
+  cameraStatus: boolean;
 }
 
 export function dueJobs(now: number): DueJobs {
@@ -24,6 +26,7 @@ export function dueJobs(now: number): DueJobs {
     reconcileYesterday: m === 5,
     purgeSessions: m % 60 === 0,
     purgeHourly: m % 60 === 30,
+    cameraStatus: m % 5 === 0,
   };
 }
 
@@ -54,6 +57,7 @@ export function startJobs(ctx: AppContext): () => void {
     if (due.purgeHourly) run('purge-sync-jobs', () => purgeDoneJobs(ctx.db, now));
     run('sync', () => runDueJobs(deps, SYNC_HANDLERS));
     if (reconcileEnabled(ctx.db)) {
+      if (due.cameraStatus) run('camera-status', () => refreshCameraStatus(deps));
       if (due.reconcileToday) run('reconcile-today', () => reconcileDate(deps, today));
       if (due.reconcileYesterday) run('reconcile-yesterday', () => reconcileDate(deps, addDays(today, -1)));
     }

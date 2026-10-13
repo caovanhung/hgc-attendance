@@ -6,8 +6,9 @@ import { vnDateTimeToTs } from '../server/vntime';
 const at = (hhmm: string) => vnDateTimeToTs('2026-10-13', hhmm) + 30_000; // giữa phút
 
 test('dueJobs theo giờ VN', () => {
-  assert.deepEqual(dueJobs(at('02:00')), { backup: true, reconcileToday: true, reconcileYesterday: false, purgeSessions: true, purgeHourly: false });
-  assert.deepEqual(dueJobs(at('02:01')), { backup: false, reconcileToday: false, reconcileYesterday: false, purgeSessions: false, purgeHourly: false });
+  assert.deepEqual(dueJobs(at('02:00')), { backup: true, reconcileToday: true, reconcileYesterday: false, purgeSessions: true, purgeHourly: false, cameraStatus: true });
+  assert.deepEqual(dueJobs(at('02:01')), { backup: false, reconcileToday: false, reconcileYesterday: false, purgeSessions: false, purgeHourly: false, cameraStatus: false });
+  assert.equal(dueJobs(at('08:05')).cameraStatus, true);
   assert.equal(dueJobs(at('08:15')).reconcileToday, true);
   assert.equal(dueJobs(at('23:30')).reconcileToday, true);
   assert.equal(dueJobs(at('08:16')).reconcileToday, false);
