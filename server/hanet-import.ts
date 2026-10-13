@@ -9,6 +9,8 @@ import { toVnDate } from './vntime';
 import type { HanetPerson, ImportedUser } from '../shared/types';
 
 export const IMPORT_PAGE_SIZE = 100;
+/** Số người tối đa mỗi lần nhập (giới hạn thời gian một yêu cầu và số việc đồng bộ xếp cùng lúc). */
+export const IMPORT_MAX = 100;
 const MAX_PAGES = 50;
 
 /** Toàn bộ nhân viên (type 0) của địa điểm; dừng khi trang rỗng hoặc ít hơn kích thước trang. */

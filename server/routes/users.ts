@@ -11,8 +11,8 @@ import { toVnDate } from '../vntime';
 import { NOT_SYSTEM_ADMIN, SYSTEM_ADMIN_CODE } from '../bootstrap';
 import { deleteSighting, getSighting, listSightings, SIGHTING_TTL_MS } from '../sightings';
 import { registerFace } from '../hanet-face';
-import { dropEntityJobs, enqueue, kickEntity } from '../hanet-sync';
-import { fetchAllPersons, hanetAliases, importPersons, unlinkedPersons } from '../hanet-import';
+import { dropEntityJobs, enqueue, kickAll, kickEntity } from '../hanet-sync';
+import { fetchAllPersons, hanetAliases, IMPORT_MAX, importPersons, unlinkedPersons } from '../hanet-import';
 import { getPlaceIds, reconcileEnabled } from '../hanet';
 import { CODE_ERROR, CODE_RE } from '../validation';
 import type { FaceCandidates, FaceResult, UserRole } from '../../shared/types';
@@ -21,6 +21,18 @@ const ROLES: UserRole[] = ['hr', 'dept_manager', 'employee'];
 export { CODE_RE } from '../validation';
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' ? v.trim() : undefined);
+
+/** Một Person ID chỉ gắn với một nhân sự: webhook khớp theo Person ID sẽ ghi công nhầm người. */
+function assertPersonIdFree(db: Db, personId: string | null, userId: string | null): void {
+  if (!personId) return;
+  const holder = db.prepare('SELECT id FROM users WHERE hanet_person_id = ?').get(personId) as { id: string } | undefined;
+  if (holder && holder.id !== userId) throw new HttpError(409, 'Person ID này đã gắn với nhân sự khác');
+}
+
+/** Gắn Person ID thủ công: ghi mã nhân viên làm aliasID trên Hanet (cùng dạng việc như khi nhập), để webhook và các việc theo mã khớp đúng người. */
+function enqueueAlias(db: Db, userId: string, personId: string, code: string, now: number): void {
+  enqueue(db, 'user', userId, 'user.alias', { personId, code }, now);
+}
 
 function resolveDepartment(db: Db, departmentId: unknown): string | null {
   if (departmentId === undefined || departmentId === null || departmentId === '') return null;
@@ -67,7 +79,7 @@ export function userRoutes(ctx: AppContext): Router {
         (Array.isArray(b.persons) ? b.persons : []).map((p: { personId?: unknown }) => String(p?.personId ?? '')).filter(Boolean),
       );
       if (wanted.size === 0) throw new HttpError(400, 'Chưa chọn người nào để nhập');
-      if (wanted.size > 500) throw new HttpError(400, 'Mỗi lần nhập tối đa 500 người');
+      if (wanted.size > IMPORT_MAX) throw new HttpError(400, `Mỗi lần nhập tối đa ${IMPORT_MAX} người`);
       const departmentId = resolveDepartment(db, b.departmentId);
       const placeId = getPlaceIds(db)[0];
       if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, 'Chưa cấu hình kết nối Hanet (Client ID, Refresh Token, địa điểm)');
@@ -81,7 +93,8 @@ export function userRoutes(ctx: AppContext): Router {
       const chosen = unlinkedPersons(db, all).filter((p) => wanted.has(String(p.personID)));
       if (chosen.length === 0) throw new HttpError(400, 'Không có người hợp lệ để nhập (có thể đã được nhập trước đó)');
       const created = importPersons(db, chosen, departmentId, ctx.now(), hanetAliases(all));
-      for (const c of created) kickEntity(ctx, 'user', c.id);
+      // Một lượt chạy hàng đợi cho cả nhóm, không mở một lượt riêng cho từng người
+      kickAll(ctx);
       res.json({ created });
     }),
   );
@@ -103,6 +116,7 @@ export function userRoutes(ctx: AppContext): Router {
       if (db.prepare('SELECT 1 FROM users WHERE code = ?').get(code)) throw new HttpError(409, 'Mã nhân viên đã tồn tại');
       const image = resolveFaceImage(db, null, b, ctx.now());
       const hanetPersonId = str(b.hanetPersonId) || null;
+      assertPersonIdFree(db, hanetPersonId, null);
 
       const id = newId('usr');
       const tempPassword = generateTempPassword();
@@ -125,6 +139,8 @@ export function userRoutes(ctx: AppContext): Router {
         hashPassword(tempPassword),
         toVnDate(ctx.now()),
       );
+      // Việc gán aliasID phải đứng trước việc phòng ban/thông tin của người này
+      if (hanetPersonId) enqueueAlias(db, id, hanetPersonId, code, ctx.now());
       if (hanetPersonId && departmentId) {
         enqueue(db, 'user', id, 'user.department', { fromHanetDeptId: null, toDepartmentId: departmentId }, ctx.now());
       }
@@ -165,6 +181,7 @@ export function userRoutes(ctx: AppContext): Router {
     }
     if (b.hanetPersonId !== undefined) {
       const pid = str(b.hanetPersonId) || null;
+      assertPersonIdFree(db, pid, target.id);
       set('hanet_person_id', pid);
       set('face_registered', pid ? 1 : 0);
     }
@@ -182,6 +199,8 @@ export function userRoutes(ctx: AppContext): Router {
     if (b.status === 'inactive' && target.status !== 'inactive') deleteUserSessions(db, target.id);
     const after = getUser(db, target.id)!;
     const now = ctx.now();
+    // Person ID mới gắn: gán aliasID trước, các việc thông tin/phòng ban xếp sau
+    if (after.hanetPersonId && after.hanetPersonId !== target.hanetPersonId) enqueueAlias(db, target.id, after.hanetPersonId, after.code, now);
     if (after.faceRegistered && (after.name !== target.name || after.position !== target.position)) {
       enqueue(db, 'user', target.id, 'user.info', { code: after.code, name: after.name, title: after.position }, now);
     }

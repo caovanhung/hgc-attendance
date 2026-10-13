@@ -142,3 +142,14 @@ test('aliasID ADMIN không bao giờ thành mã nhân sự: tự sinh NV#### và
     await app.close();
   }
 });
+
+test('mỗi lần nhập tối đa 100 người', async () => {
+  const { app, hr } = await setup({ '/person/getListByPlace': pagesRoute([]) });
+  try {
+    const persons = Array.from({ length: 101 }, (_, i) => ({ personId: `P${i}` }));
+    const r = await hr.post('/api/users/import', { persons });
+    assert.deepEqual([r.status, r.body.error], [400, 'Mỗi lần nhập tối đa 100 người']);
+  } finally {
+    await app.close();
+  }
+});

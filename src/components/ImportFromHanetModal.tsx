@@ -10,6 +10,9 @@ interface Props {
   onImported: () => void;
 }
 
+/** Trùng giới hạn của server (IMPORT_MAX trong server/hanet-import.ts). */
+const IMPORT_MAX = 100;
+
 function downloadCsv(rows: ImportedUser[]) {
   const csv = ['Mã nhân viên,Họ tên,Mật khẩu tạm', ...rows.map((r) => [r.code, r.name, r.tempPassword].map((v) => `"${v.replace(/"/g, '""')}"`).join(','))].join('\n');
   const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
@@ -37,7 +40,8 @@ export const ImportFromHanetModal: React.FC<Props> = ({ departments, onClose, on
   const toggle = (id: string) => {
     const next = new Set(selected);
     if (next.has(id)) next.delete(id);
-    else next.add(id);
+    else if (next.size < IMPORT_MAX) next.add(id);
+    else return;
     setSelected(next);
   };
 
@@ -101,10 +105,10 @@ export const ImportFromHanetModal: React.FC<Props> = ({ departments, onClose, on
                 <label className="flex items-center gap-2">
                   <input
                     type="checkbox"
-                    checked={selected.size === persons.length}
-                    onChange={(e) => setSelected(e.target.checked ? new Set(persons.map((p) => p.personID)) : new Set())}
+                    checked={selected.size === Math.min(persons.length, IMPORT_MAX)}
+                    onChange={(e) => setSelected(e.target.checked ? new Set(persons.slice(0, IMPORT_MAX).map((p) => p.personID)) : new Set())}
                   />
-                  <span>Chọn tất cả ({persons.length})</span>
+                  <span>{persons.length > IMPORT_MAX ? `Chọn ${IMPORT_MAX} người đầu (trong ${persons.length})` : `Chọn tất cả (${persons.length})`}</span>
                 </label>
                 <select className={`${inputCls} w-auto`} value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}>
                   <option value="">— Phòng ban cho nhóm đã chọn —</option>
@@ -115,10 +119,18 @@ export const ImportFromHanetModal: React.FC<Props> = ({ departments, onClose, on
                   ))}
                 </select>
               </div>
+              <p className="text-[11px] text-slate-500">
+                Mỗi lần nhập tối đa {IMPORT_MAX} người{persons.length > IMPORT_MAX ? '; nhập xong nhóm này thì mở lại để nhập tiếp' : ''}.
+              </p>
               <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 border border-slate-100 rounded-xl">
                 {persons.map((p) => (
                   <label key={p.personID} className="flex items-center gap-3 p-2 cursor-pointer hover:bg-slate-50">
-                    <input type="checkbox" checked={selected.has(p.personID)} onChange={() => toggle(p.personID)} />
+                    <input
+                      type="checkbox"
+                      checked={selected.has(p.personID)}
+                      disabled={!selected.has(p.personID) && selected.size >= IMPORT_MAX}
+                      onChange={() => toggle(p.personID)}
+                    />
                     {p.avatar ? <img src={p.avatar} alt="" className="w-9 h-9 rounded-lg object-cover bg-slate-100" /> : <div className="w-9 h-9 rounded-lg bg-slate-100" />}
                     <div className="min-w-0">
                       <div className="font-semibold text-slate-900 truncate">{p.name || '(không tên)'}</div>

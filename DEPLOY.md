@@ -96,7 +96,7 @@ Sau khi khởi động, vì database mới hoàn toàn:
 2. Tab **Cấu hình**: nhập lại Client ID, Client Secret, Refresh Token → **Lưu** → **Kiểm tra kết nối** → chọn địa điểm (ví dụ HRINTER) → **Lưu** lần nữa.
 3. **Token webhook đã đổi**: chép URL webhook mới dán lên Hanet.
 4. Tab **Camera** → **Nhập camera từ Hanet**.
-5. Tab **Nhân sự** → **Nhập từ Hanet** để tạo nhân sự từ những người đã có trên Hanet; người mới thì **Thêm nhân sự → Lấy từ camera**.
+5. Tab **Nhân sự** → **Nhập từ Hanet** để tạo nhân sự từ những người đã có trên Hanet (mỗi lần nhập tối đa 100 người; đông hơn thì nhập nhiều lần); người mới thì **Thêm nhân sự → Lấy từ camera**.
 
 ## Kiểm tra sau khi nâng cấp (trên host)
 

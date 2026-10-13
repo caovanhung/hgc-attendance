@@ -182,3 +182,49 @@ test('Review Focus #5: đối tượng bị xóa trước khi việc chạy → 
     await app.close();
   }
 });
+
+const jobsOf = (db: Db, userId: string) =>
+  (db.prepare('SELECT op, payload FROM sync_jobs WHERE entity_id = ? ORDER BY id').all(userId) as { op: string; payload: string }[]).map((j) => [j.op, JSON.parse(j.payload)]);
+
+test('gắn Person ID thủ công (tạo/sửa) → xếp việc user.alias trước việc phòng ban/thông tin', async () => {
+  const { app, fake, deps, hr } = await setup({ '/person/updateAliasID': ok(), '/person/updateInfo': ok(), '/department/add-person': ok() });
+  try {
+    const d = seedDepartment(app.db, 'A');
+    app.db.prepare("UPDATE departments SET hanet_department_id = '11' WHERE id = ?").run(d);
+    const created = await hr.post('/api/users', { code: 'nv21', name: 'Người A', departmentId: d, hanetPersonId: 'P21' });
+    assert.equal(created.status, 200, JSON.stringify(created.body));
+    assert.deepEqual(jobsOf(app.db, created.body.user.id), [
+      ['user.alias', { personId: 'P21', code: 'NV21' }],
+      ['user.department', { fromHanetDeptId: null, toDepartmentId: d }],
+    ]);
+
+    const id = seedUser(app.db, { code: 'NV22', departmentId: d });
+    const r = await hr.put(`/api/users/${id}`, { hanetPersonId: 'P22', name: 'Tên mới' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual(jobsOf(app.db, id).map(([op]) => op), ['user.alias', 'user.info', 'user.department']);
+    assert.deepEqual(jobsOf(app.db, id)[0][1], { personId: 'P22', code: 'NV22' });
+    await hr.put(`/api/users/${id}`, { hanetPersonId: 'P22', phone: '090' });
+    assert.equal(jobsOf(app.db, id).filter(([op]) => op === 'user.alias').length, 1, 'Person ID không đổi thì không xếp lại');
+
+    await runDueJobs(deps, SYNC_HANDLERS);
+    const p = fake.last('/person/updateAliasID')!.params;
+    assert.deepEqual([p.get('personID'), p.get('aliasID')], ['P22', 'NV22']);
+  } finally {
+    await app.close();
+  }
+});
+
+test('Person ID đã gắn với nhân sự khác → 409 khi tạo và khi sửa', async () => {
+  const { app, hr } = await setup({});
+  try {
+    faceUser(app.db, 'NV31', 'P31');
+    const other = seedUser(app.db, { code: 'NV32' });
+    const c = await hr.post('/api/users', { code: 'NV33', name: 'X', hanetPersonId: 'P31' });
+    assert.deepEqual([c.status, c.body.error], [409, 'Person ID này đã gắn với nhân sự khác']);
+    const u = await hr.put(`/api/users/${other}`, { hanetPersonId: ' P31 ' });
+    assert.deepEqual([u.status, u.body.error], [409, 'Person ID này đã gắn với nhân sự khác']);
+    assert.equal(app.db.prepare("SELECT COUNT(*) AS n FROM users WHERE code = 'NV33'").get()!.n, 0);
+  } finally {
+    await app.close();
+  }
+});
