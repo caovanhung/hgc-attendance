@@ -8,9 +8,10 @@ import {
   getHanetConfigView, getWebhookToken, ingestCheckin, logWebhook, parseCheckin, rotateWebhookToken, updateHanetConfig,
   reconcileEnabled, recentUnmatchedFaces, type CheckinInput, type IngestResult,
 } from '../hanet';
-import { reconcileDate } from '../hanet-api';
+import { hanetApi, reconcileDate } from '../hanet-api';
+import { getSetting } from '../settings';
 import { isValidDate, toVnDate, vnDateTimeToTs } from '../vntime';
-import type { WebhookLog } from '../../shared/types';
+import type { HanetConnectionTest, WebhookLog } from '../../shared/types';
 
 export function hanetPublicRoutes(ctx: AppContext): Router {
   const { db } = ctx;
@@ -77,6 +78,32 @@ export function hanetRoutes(ctx: AppContext): Router {
     updateHanetConfig(db, req.body);
     res.json({ config: getHanetConfigView(db) });
   });
+
+  r.post(
+    '/hanet/test-connection',
+    hr,
+    ah(async (_req, res) => {
+      const fail = (message: string): HanetConnectionTest => ({ ok: false, account: null, places: [], message });
+      if (!getSetting(db, 'hanet.client_id') || !(getSetting(db, 'hanet.refresh_token') || getSetting(db, 'hanet.access_token'))) {
+        res.json(fail('Chưa nhập Client ID và Refresh Token (hoặc Access Token)'));
+        return;
+      }
+      const deps = { db, fetch: ctx.fetch, now: ctx.now };
+      try {
+        const account = await hanetApi.getProfile(deps);
+        const places = await hanetApi.getPlaces(deps);
+        const body: HanetConnectionTest = {
+          ok: true,
+          account,
+          places,
+          message: `Đã kết nối tài khoản ${account.name || account.email}, ${places.length} địa điểm`,
+        };
+        res.json(body);
+      } catch (err) {
+        res.json(fail((err as Error).message));
+      }
+    }),
+  );
 
   r.post('/hanet/webhook-token/rotate', hr, (req, res) => {
     rotateWebhookToken(db);

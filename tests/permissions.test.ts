@@ -38,6 +38,7 @@ const CASES: Case[] = [
   { method: 'PUT', path: () => '/api/settings/work', body: { workStart: '08:00', lateGraceMinutes: 15, workEnd: '17:00', minOutGapMinutes: 30 }, allowed: HR },
   { method: 'GET', path: () => '/api/hanet/config', allowed: HR },
   { method: 'PUT', path: () => '/api/hanet/config', body: {}, allowed: HR },
+  { method: 'POST', path: () => '/api/hanet/test-connection', body: {}, allowed: HR },
   { method: 'POST', path: () => '/api/hanet/webhook-token/rotate', allowed: HR },
   { method: 'GET', path: () => '/api/hanet/webhook-logs', allowed: HR },
   { method: 'GET', path: () => '/api/hanet/recent-faces', allowed: HR },

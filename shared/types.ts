@@ -205,3 +205,10 @@ export interface HanetDepartment {
   id: number;
   name: string;
 }
+
+export interface HanetConnectionTest {
+  ok: boolean;
+  account: { name: string; email: string } | null;
+  places: HanetPlace[];
+  message: string;
+}

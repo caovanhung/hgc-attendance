@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { ShieldCheck } from 'lucide-react';
-import type { HanetConfigView } from '../../types';
+import { PlugZap, ShieldCheck } from 'lucide-react';
+import type { HanetConfigView, HanetConnectionTest, HanetPlace } from '../../types';
 import { api, errorMessage } from '../../api';
 import { fmtDateTime, vnToday } from '../../format';
 import { Field, inputCls, primaryBtn, secondaryBtn } from '../ui';
@@ -10,12 +10,15 @@ export const HanetCredentialsCard: React.FC<{ config: HanetConfigView; onChange:
   onChange,
   onReconciled,
 }) => {
+  const savedPlace = config.placeIds[0] ? String(config.placeIds[0]) : '';
   const [clientId, setClientId] = useState(config.clientId);
   const [clientSecret, setClientSecret] = useState('');
   const [accessToken, setAccessToken] = useState('');
   const [refreshToken, setRefreshToken] = useState('');
   const [apiBase, setApiBase] = useState(config.apiBase);
-  const [placeIds, setPlaceIds] = useState(config.placeIds.join(', '));
+  const [placeId, setPlaceId] = useState(savedPlace);
+  const [places, setPlaces] = useState<HanetPlace[]>([]);
+  const [conn, setConn] = useState<HanetConnectionTest | null>(null);
   const [date, setDate] = useState(vnToday());
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -24,10 +27,9 @@ export const HanetCredentialsCard: React.FC<{ config: HanetConfigView; onChange:
     e.preventDefault();
     setBusy(true);
     try {
-      const ids = placeIds.split(',').map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0);
       const r = await api<{ config: HanetConfigView }>('/api/hanet/config', {
         method: 'PUT',
-        body: { clientId, clientSecret, accessToken, refreshToken, apiBase, placeIds: ids },
+        body: { clientId, clientSecret, accessToken, refreshToken, apiBase, placeIds: placeId ? [Number(placeId)] : [] },
       });
       onChange(r.config);
       setClientSecret('');
@@ -36,6 +38,19 @@ export const HanetCredentialsCard: React.FC<{ config: HanetConfigView; onChange:
       setMessage('Đã lưu cấu hình Hanet.');
     } catch (err) {
       setMessage(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const testConnection = async () => {
+    setBusy(true);
+    try {
+      const r = await api<HanetConnectionTest>('/api/hanet/test-connection', { method: 'POST', body: {} });
+      setConn(r);
+      setPlaces(r.places);
+    } catch (err) {
+      setConn({ ok: false, account: null, places: [], message: errorMessage(err) });
     } finally {
       setBusy(false);
     }
@@ -59,6 +74,7 @@ export const HanetCredentialsCard: React.FC<{ config: HanetConfigView; onChange:
   };
 
   const secretHint = (masked: string) => (masked ? `Đang lưu ${masked}. Để trống để giữ nguyên.` : 'Chưa có');
+  const placeChanged = savedPlace !== '' && placeId !== '' && placeId !== savedPlace;
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 text-xs space-y-4">
@@ -79,16 +95,37 @@ export const HanetCredentialsCard: React.FC<{ config: HanetConfigView; onChange:
           <input type="password" className={`${inputCls} font-mono`} value={refreshToken} onChange={(e) => setRefreshToken(e.target.value)} autoComplete="off" />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Place ID (cách nhau dấu phẩy)">
-            <input className={`${inputCls} font-mono`} value={placeIds} onChange={(e) => setPlaceIds(e.target.value)} />
+          <Field label="Địa điểm Hanet" hint={places.length ? undefined : 'Lưu thông tin trên rồi bấm "Kiểm tra kết nối" để nạp danh sách'}>
+            <select className={inputCls} value={placeId} onChange={(e) => setPlaceId(e.target.value)}>
+              <option value="">— Chưa chọn —</option>
+              {placeId && !places.some((p) => String(p.id) === placeId) && <option value={placeId}>ID {placeId}</option>}
+              {places.map((p) => (
+                <option key={p.id} value={String(p.id)}>
+                  {p.name} (ID {p.id})
+                </option>
+              ))}
+            </select>
           </Field>
           <Field label="Địa chỉ API Hanet">
             <input className={`${inputCls} font-mono`} value={apiBase} onChange={(e) => setApiBase(e.target.value)} />
           </Field>
         </div>
-        <button type="submit" disabled={busy} className={`${primaryBtn} w-full`}>
-          Lưu cấu hình Hanet
-        </button>
+        {placeChanged && (
+          <p className="text-amber-700 bg-amber-50 rounded-xl p-2">
+            Nhân sự và phòng ban đã đồng bộ với địa điểm cũ sẽ không tự chuyển sang địa điểm mới.
+          </p>
+        )}
+        <div className="flex gap-2">
+          <button type="button" onClick={testConnection} disabled={busy} className={`${secondaryBtn} flex-1`}>
+            <PlugZap className="w-3.5 h-3.5" /> Kiểm tra kết nối
+          </button>
+          <button type="submit" disabled={busy} className={`${primaryBtn} flex-1`}>
+            Lưu cấu hình Hanet
+          </button>
+        </div>
+        {conn && (
+          <p className={`rounded-xl p-2 ${conn.ok ? 'text-emerald-700 bg-emerald-50' : 'text-rose-700 bg-rose-50'}`}>{conn.message}</p>
+        )}
       </form>
 
       <div className="pt-3 border-t border-slate-100 space-y-2">
