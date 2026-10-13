@@ -249,6 +249,126 @@ var init_errors = __esm({
   }
 });
 
+// server/auth.ts
+import { randomBytes as randomBytes2, scryptSync, timingSafeEqual, createHash } from "node:crypto";
+function hashPassword(password) {
+  const salt = randomBytes2(SALT_BYTES);
+  const hash = scryptSync(password, salt, KEY_BYTES, SCRYPT_PARAMS);
+  return `scrypt$${salt.toString("hex")}$${hash.toString("hex")}`;
+}
+function verifyPassword(password, stored) {
+  if (!stored) return false;
+  const parts = stored.split("$");
+  if (parts.length !== 3 || parts[0] !== "scrypt") return false;
+  const salt = Buffer.from(parts[1], "hex");
+  const expected = Buffer.from(parts[2], "hex");
+  if (salt.length !== SALT_BYTES || expected.length !== KEY_BYTES) return false;
+  const actual = scryptSync(password, salt, KEY_BYTES, SCRYPT_PARAMS);
+  return timingSafeEqual(actual, expected);
+}
+function generateTempPassword(length = 10) {
+  let s = "";
+  for (const b of randomBytes2(length)) s += TEMP_ALPHABET[b % TEMP_ALPHABET.length];
+  return s;
+}
+function validateNewPassword(newPassword, currentPassword) {
+  if (typeof newPassword !== "string" || newPassword.length < 8) return "M\u1EADt kh\u1EA9u m\u1EDBi ph\u1EA3i c\xF3 \xEDt nh\u1EA5t 8 k\xFD t\u1EF1";
+  if (newPassword === currentPassword) return "M\u1EADt kh\u1EA9u m\u1EDBi ph\u1EA3i kh\xE1c m\u1EADt kh\u1EA9u hi\u1EC7n t\u1EA1i";
+  return null;
+}
+function sha256(s) {
+  return createHash("sha256").update(s).digest("hex");
+}
+function safeEqualStrings(a, b) {
+  return timingSafeEqual(Buffer.from(sha256(a), "hex"), Buffer.from(sha256(b), "hex"));
+}
+function createSession(db, userId, now) {
+  const token = randomBytes2(32).toString("base64url");
+  db.prepare("INSERT INTO sessions(token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)").run(
+    sha256(token),
+    userId,
+    now,
+    now + SESSION_TTL_MS
+  );
+  return token;
+}
+function findSessionUser(db, token, now) {
+  const row = db.prepare(
+    `SELECT u.id, u.code, u.name, u.role, u.department_id, u.must_change_password, u.status
+       FROM sessions s JOIN users u ON u.id = s.user_id
+       WHERE s.token_hash = ? AND s.expires_at > ?`
+  ).get(sha256(token), now);
+  if (!row || row.status !== "active") return null;
+  return {
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    role: row.role,
+    departmentId: row.department_id ?? null,
+    mustChangePassword: row.must_change_password === 1
+  };
+}
+function deleteSession(db, token) {
+  db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(sha256(token));
+}
+function deleteUserSessions(db, userId, exceptToken) {
+  if (exceptToken) {
+    db.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?").run(userId, sha256(exceptToken));
+  } else {
+    db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
+  }
+}
+function purgeExpiredSessions(db, now) {
+  return Number(db.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(now).changes);
+}
+function scopeFor(user) {
+  if (user.role === "hr") return { kind: "all" };
+  if (user.role === "dept_manager") return { kind: "department", departmentId: user.departmentId };
+  return { kind: "self", userId: user.id };
+}
+function scopeWhere(scope, userIdCol, deptCol) {
+  switch (scope.kind) {
+    case "all":
+      return { sql: "1=1", params: [] };
+    case "department":
+      return scope.departmentId ? { sql: `${deptCol} = ?`, params: [scope.departmentId] } : { sql: "0=1", params: [] };
+    case "self":
+      return { sql: `${userIdCol} = ?`, params: [scope.userId] };
+  }
+}
+var SCRYPT_PARAMS, SALT_BYTES, KEY_BYTES, TEMP_ALPHABET, SESSION_TTL_MS, LoginLimiter;
+var init_auth = __esm({
+  "server/auth.ts"() {
+    SCRYPT_PARAMS = { N: 16384, r: 8, p: 1 };
+    SALT_BYTES = 16;
+    KEY_BYTES = 64;
+    TEMP_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+    SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
+    LoginLimiter = class {
+      constructor(max = 5, windowMs = 15 * 60 * 1e3) {
+        this.max = max;
+        this.windowMs = windowMs;
+        this.failures = /* @__PURE__ */ new Map();
+      }
+      recent(key, now) {
+        const list = (this.failures.get(key) ?? []).filter((t) => now - t < this.windowMs);
+        if (list.length) this.failures.set(key, list);
+        else this.failures.delete(key);
+        return list;
+      }
+      isBlocked(key, now) {
+        return this.recent(key, now).length >= this.max;
+      }
+      recordFailure(key, now) {
+        this.failures.set(key, [...this.recent(key, now), now]);
+      }
+      reset(key) {
+        this.failures.delete(key);
+      }
+    };
+  }
+});
+
 // server/vntime.ts
 function toVnDate(ts) {
   return new Date(ts + VN_OFFSET_MS).toISOString().slice(0, 10);
@@ -285,6 +405,36 @@ var init_vntime = __esm({
   "server/vntime.ts"() {
     VN_OFFSET_MS = 7 * 60 * 60 * 1e3;
     DAY_MS = 24 * 60 * 60 * 1e3;
+  }
+});
+
+// server/bootstrap.ts
+function ensureAdminAccess(db, envPassword) {
+  const usable = db.prepare("SELECT 1 FROM users WHERE role = 'hr' AND status = 'active' AND password_hash IS NOT NULL LIMIT 1").get();
+  if (usable) return null;
+  const fromEnv = typeof envPassword === "string" && envPassword.length >= 8;
+  const password = fromEnv ? envPassword : DEFAULT_ADMIN_PASSWORD;
+  let hr = db.prepare("SELECT id, code FROM users WHERE role = 'hr' ORDER BY created_at, id LIMIT 1").get();
+  if (!hr) {
+    db.prepare(
+      `INSERT INTO users(id, code, name, role, status, must_change_password, created_at)
+       VALUES (?, ?, 'Qu\u1EA3n tr\u1ECB vi\xEAn H\u1EC7 th\u1ED1ng (HR)', 'hr', 'active', 1, ?)
+       ON CONFLICT(code) DO UPDATE SET role = 'hr', status = 'active'`
+    ).run(newId("usr"), SYSTEM_ADMIN_CODE, toVnDate(Date.now()));
+    hr = db.prepare("SELECT id, code FROM users WHERE code = ?").get(SYSTEM_ADMIN_CODE);
+  }
+  db.prepare("UPDATE users SET password_hash = ?, must_change_password = 1, status = 'active' WHERE id = ?").run(hashPassword(password), hr.id);
+  return { code: hr.code, password, fromEnv };
+}
+var DEFAULT_ADMIN_PASSWORD, SYSTEM_ADMIN_CODE, NOT_SYSTEM_ADMIN;
+var init_bootstrap = __esm({
+  "server/bootstrap.ts"() {
+    init_db();
+    init_auth();
+    init_vntime();
+    DEFAULT_ADMIN_PASSWORD = "Admin@123";
+    SYSTEM_ADMIN_CODE = "ADMIN";
+    NOT_SYSTEM_ADMIN = `u.code != '${SYSTEM_ADMIN_CODE}'`;
   }
 });
 
@@ -502,7 +652,8 @@ function parseStranger(body, now) {
 function ingestCheckin(db, input, source) {
   if (input.personType !== null && input.personType !== 0) return { status: "ignored", message: "Kh\xF4ng ph\u1EA3i nh\xE2n vi\xEAn" };
   let user;
-  if (input.aliasId) user = db.prepare("SELECT id, status FROM users WHERE code = ?").get(input.aliasId.toUpperCase());
+  const alias = input.aliasId?.toUpperCase();
+  if (alias && alias !== SYSTEM_ADMIN_CODE) user = db.prepare("SELECT id, status FROM users WHERE code = ?").get(alias);
   if (!user && input.personId) user = db.prepare("SELECT id, status FROM users WHERE hanet_person_id = ?").get(input.personId);
   if (!user) return { status: "ignored", message: UNMATCHED_MESSAGE };
   if (user.status !== "active") return { status: "ignored", message: "Nh\xE2n vi\xEAn \u0111\xE3 ng\u1EEBng ho\u1EA1t \u0111\u1ED9ng", userId: user.id };
@@ -586,6 +737,7 @@ var init_hanet = __esm({
     init_attendance();
     init_settings();
     init_vntime();
+    init_bootstrap();
     str = (v) => v === void 0 || v === null || String(v).trim() === "" ? null : String(v).trim();
     num = (v) => {
       const s = str(v);
@@ -630,27 +782,37 @@ async function postForm(deps, url, params) {
     throw new HanetApiError(0, `Hanet tr\u1EA3 d\u1EEF li\u1EC7u kh\xF4ng \u0111\u1ECDc \u0111\u01B0\u1EE3c t\u1EEB ${url}`, true);
   }
 }
-async function refreshAccessToken(deps) {
+async function doRefresh(deps) {
   const { db } = deps;
   const refreshToken = getSetting(db, "hanet.refresh_token");
   const clientId = getSetting(db, "hanet.client_id");
   const clientSecret = getSetting(db, "hanet.client_secret");
-  if (!refreshToken || !clientId || !clientSecret) {
-    throw new HanetApiError(0, "L\xE0m m\u1EDBi token th\u1EA5t b\u1EA1i: thi\u1EBFu Client ID, Client Secret ho\u1EB7c Refresh Token");
+  if (!refreshToken || !clientId || !clientSecret) throw refreshFailed("thi\u1EBFu Client ID, Client Secret ho\u1EB7c Refresh Token");
+  let body;
+  try {
+    body = await postForm(deps, OAUTH_TOKEN_URL, {
+      grant_type: "refresh_token",
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken
+    });
+  } catch (err) {
+    throw refreshFailed(`l\xE0m m\u1EDBi token th\u1EA5t b\u1EA1i: ${err.message}`, err instanceof HanetApiError ? err.returnCode : 0);
   }
-  const body = await postForm(deps, OAUTH_TOKEN_URL, {
-    grant_type: "refresh_token",
-    client_id: clientId,
-    client_secret: clientSecret,
-    refresh_token: refreshToken
-  });
   const token = body?.access_token;
   if (typeof token !== "string" || !token) {
-    throw new HanetApiError(Number(body?.returnCode ?? 0), `L\xE0m m\u1EDBi token th\u1EA5t b\u1EA1i: ${body?.returnMessage ?? body?.error ?? "kh\xF4ng r\xF5 l\xFD do"}`);
+    throw refreshFailed(`l\xE0m m\u1EDBi token th\u1EA5t b\u1EA1i: ${body?.returnMessage ?? body?.error ?? "kh\xF4ng r\xF5 l\xFD do"}`, Number(body?.returnCode ?? 0));
   }
   setSetting(db, "hanet.access_token", token);
   if (typeof body.refresh_token === "string" && body.refresh_token) setSetting(db, "hanet.refresh_token", body.refresh_token);
   return token;
+}
+function refreshAccessToken(deps) {
+  const pending = refreshing.get(deps.db);
+  if (pending) return pending;
+  const p = doRefresh(deps).finally(() => refreshing.delete(deps.db));
+  refreshing.set(deps.db, p);
+  return p;
 }
 async function callApi(deps, apiPath, params, retried = false) {
   const token = getSetting(deps.db, "hanet.access_token") ?? await refreshAccessToken(deps);
@@ -714,7 +876,7 @@ async function reconcileDate(deps, date) {
   const to = Math.min(vnDayStart(addDays(date, 1)) - 1, deps.now());
   return reconcileRange(deps, from, to);
 }
-var HANET_TIMEOUT_MS, PERMANENT_CODES, HANET_ERROR_TEXT, HanetApiError, OAUTH_TOKEN_URL, PAGE_SIZE, TOKEN_EXPIRED, MAX_PAGES, arr, hanetApi;
+var HANET_TIMEOUT_MS, PERMANENT_CODES, HANET_ERROR_TEXT, HanetApiError, OAUTH_TOKEN_URL, PAGE_SIZE, TOKEN_EXPIRED, MAX_PAGES, REFRESH_FAILED, refreshFailed, refreshing, arr, hanetApi;
 var init_hanet_api = __esm({
   "server/hanet-api.ts"() {
     init_settings();
@@ -750,6 +912,9 @@ var init_hanet_api = __esm({
     PAGE_SIZE = 500;
     TOKEN_EXPIRED = -103;
     MAX_PAGES = 200;
+    REFRESH_FAILED = "K\u1EBFt n\u1ED1i Hanet h\u1ECFng, ki\u1EC3m tra Client ID/Secret/Refresh Token";
+    refreshFailed = (detail, code = 0) => new HanetApiError(code, `${REFRESH_FAILED} (${detail})`, true);
+    refreshing = /* @__PURE__ */ new WeakMap();
     arr = (v) => Array.isArray(v) ? v : [];
     hanetApi = {
       async getProfile(deps) {
@@ -862,9 +1027,11 @@ var init_sync_handlers = __esm({
     norm = (s) => s.trim().toLocaleLowerCase("vi");
     SYNC_HANDLERS = {
       "camera.rename": async (deps, job) => {
+        if (!deps.db.prepare("SELECT 1 FROM cameras WHERE id = ?").get(job.entityId)) return;
         await hanetApi.updateDevice(deps, String(job.payload.deviceId), String(job.payload.name));
       },
       "user.alias": async (deps, job) => {
+        if (!userRow(deps, job.entityId)) return;
         await hanetApi.updateAliasId(deps, String(job.payload.personId), String(job.payload.code));
       },
       "user.info": async (deps, job) => {
@@ -1156,149 +1323,10 @@ import express2 from "express";
 init_errors();
 import express from "express";
 
-// server/auth.ts
-import { randomBytes as randomBytes2, scryptSync, timingSafeEqual, createHash } from "node:crypto";
-var SCRYPT_PARAMS = { N: 16384, r: 8, p: 1 };
-var SALT_BYTES = 16;
-var KEY_BYTES = 64;
-function hashPassword(password) {
-  const salt = randomBytes2(SALT_BYTES);
-  const hash = scryptSync(password, salt, KEY_BYTES, SCRYPT_PARAMS);
-  return `scrypt$${salt.toString("hex")}$${hash.toString("hex")}`;
-}
-function verifyPassword(password, stored) {
-  if (!stored) return false;
-  const parts = stored.split("$");
-  if (parts.length !== 3 || parts[0] !== "scrypt") return false;
-  const salt = Buffer.from(parts[1], "hex");
-  const expected = Buffer.from(parts[2], "hex");
-  if (salt.length !== SALT_BYTES || expected.length !== KEY_BYTES) return false;
-  const actual = scryptSync(password, salt, KEY_BYTES, SCRYPT_PARAMS);
-  return timingSafeEqual(actual, expected);
-}
-var TEMP_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
-function generateTempPassword(length = 10) {
-  let s = "";
-  for (const b of randomBytes2(length)) s += TEMP_ALPHABET[b % TEMP_ALPHABET.length];
-  return s;
-}
-function validateNewPassword(newPassword, currentPassword) {
-  if (typeof newPassword !== "string" || newPassword.length < 8) return "M\u1EADt kh\u1EA9u m\u1EDBi ph\u1EA3i c\xF3 \xEDt nh\u1EA5t 8 k\xFD t\u1EF1";
-  if (newPassword === currentPassword) return "M\u1EADt kh\u1EA9u m\u1EDBi ph\u1EA3i kh\xE1c m\u1EADt kh\u1EA9u hi\u1EC7n t\u1EA1i";
-  return null;
-}
-function sha256(s) {
-  return createHash("sha256").update(s).digest("hex");
-}
-function safeEqualStrings(a, b) {
-  return timingSafeEqual(Buffer.from(sha256(a), "hex"), Buffer.from(sha256(b), "hex"));
-}
-var SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
-function createSession(db, userId, now) {
-  const token = randomBytes2(32).toString("base64url");
-  db.prepare("INSERT INTO sessions(token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)").run(
-    sha256(token),
-    userId,
-    now,
-    now + SESSION_TTL_MS
-  );
-  return token;
-}
-function findSessionUser(db, token, now) {
-  const row = db.prepare(
-    `SELECT u.id, u.code, u.name, u.role, u.department_id, u.must_change_password, u.status
-       FROM sessions s JOIN users u ON u.id = s.user_id
-       WHERE s.token_hash = ? AND s.expires_at > ?`
-  ).get(sha256(token), now);
-  if (!row || row.status !== "active") return null;
-  return {
-    id: row.id,
-    code: row.code,
-    name: row.name,
-    role: row.role,
-    departmentId: row.department_id ?? null,
-    mustChangePassword: row.must_change_password === 1
-  };
-}
-function deleteSession(db, token) {
-  db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(sha256(token));
-}
-function deleteUserSessions(db, userId, exceptToken) {
-  if (exceptToken) {
-    db.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?").run(userId, sha256(exceptToken));
-  } else {
-    db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
-  }
-}
-function purgeExpiredSessions(db, now) {
-  return Number(db.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(now).changes);
-}
-var LoginLimiter = class {
-  constructor(max = 5, windowMs = 15 * 60 * 1e3) {
-    this.max = max;
-    this.windowMs = windowMs;
-    this.failures = /* @__PURE__ */ new Map();
-  }
-  recent(key, now) {
-    const list = (this.failures.get(key) ?? []).filter((t) => now - t < this.windowMs);
-    if (list.length) this.failures.set(key, list);
-    else this.failures.delete(key);
-    return list;
-  }
-  isBlocked(key, now) {
-    return this.recent(key, now).length >= this.max;
-  }
-  recordFailure(key, now) {
-    this.failures.set(key, [...this.recent(key, now), now]);
-  }
-  reset(key) {
-    this.failures.delete(key);
-  }
-};
-function scopeFor(user) {
-  if (user.role === "hr") return { kind: "all" };
-  if (user.role === "dept_manager") return { kind: "department", departmentId: user.departmentId };
-  return { kind: "self", userId: user.id };
-}
-function scopeWhere(scope, userIdCol, deptCol) {
-  switch (scope.kind) {
-    case "all":
-      return { sql: "1=1", params: [] };
-    case "department":
-      return scope.departmentId ? { sql: `${deptCol} = ?`, params: [scope.departmentId] } : { sql: "0=1", params: [] };
-    case "self":
-      return { sql: `${userIdCol} = ?`, params: [scope.userId] };
-  }
-}
-
 // server/middleware.ts
+init_auth();
 init_errors();
-
-// server/bootstrap.ts
-init_db();
-init_vntime();
-var DEFAULT_ADMIN_PASSWORD = "Admin@123";
-var SYSTEM_ADMIN_CODE = "ADMIN";
-var NOT_SYSTEM_ADMIN = `u.code != '${SYSTEM_ADMIN_CODE}'`;
-function ensureAdminAccess(db, envPassword) {
-  const usable = db.prepare("SELECT 1 FROM users WHERE role = 'hr' AND status = 'active' AND password_hash IS NOT NULL LIMIT 1").get();
-  if (usable) return null;
-  const fromEnv = typeof envPassword === "string" && envPassword.length >= 8;
-  const password = fromEnv ? envPassword : DEFAULT_ADMIN_PASSWORD;
-  let hr = db.prepare("SELECT id, code FROM users WHERE role = 'hr' ORDER BY created_at, id LIMIT 1").get();
-  if (!hr) {
-    db.prepare(
-      `INSERT INTO users(id, code, name, role, status, must_change_password, created_at)
-       VALUES (?, ?, 'Qu\u1EA3n tr\u1ECB vi\xEAn H\u1EC7 th\u1ED1ng (HR)', 'hr', 'active', 1, ?)
-       ON CONFLICT(code) DO UPDATE SET role = 'hr', status = 'active'`
-    ).run(newId("usr"), SYSTEM_ADMIN_CODE, toVnDate(Date.now()));
-    hr = db.prepare("SELECT id, code FROM users WHERE code = ?").get(SYSTEM_ADMIN_CODE);
-  }
-  db.prepare("UPDATE users SET password_hash = ?, must_change_password = 1, status = 'active' WHERE id = ?").run(hashPassword(password), hr.id);
-  return { code: hr.code, password, fromEnv };
-}
-
-// server/middleware.ts
+init_bootstrap();
 var SESSION_COOKIE = "sid";
 function readCookie(req, name) {
   const header = req.headers.cookie;
@@ -1376,8 +1404,10 @@ function currentUser(req) {
 // server/routes/auth.ts
 init_errors();
 import { Router } from "express";
+init_auth();
 
 // server/repo.ts
+init_auth();
 var USER_SELECT = `SELECT u.id, u.code, u.name, u.email, u.phone, u.role, u.department_id,
   d.name AS department_name, u.position, u.avatar_url, u.hanet_person_id, u.face_registered, u.status, u.hanet_sync_status, u.hanet_sync_error, u.face_error, u.created_at
   FROM users u LEFT JOIN departments d ON d.id = u.department_id`;
@@ -1520,7 +1550,9 @@ function latestBackup(dir) {
 }
 
 // server/routes/users.ts
+init_auth();
 init_vntime();
+init_bootstrap();
 
 // server/sightings.ts
 var SIGHTING_TTL_MS = 24 * 60 * 6e4;
@@ -1600,13 +1632,15 @@ async function registerFace(deps, userId, imageUrl) {
       db.prepare("UPDATE users SET face_error = NULL WHERE id = ?").run(userId);
       return { ok: true, message: "\u0110\xE3 c\u1EADp nh\u1EADt \u1EA3nh nh\u1EADn di\u1EC7n tr\xEAn Hanet" };
     }
-    let personId = null;
+    let personId;
     try {
       personId = await hanetApi.registerByUrl(deps, { name: u.name, aliasId: u.code, placeId, url: imageUrl, title: u.position ?? "" });
     } catch (err) {
-      if (!(err instanceof HanetApiError) || err.returnCode !== -9005) throw err;
+      if (err instanceof HanetApiError && err.returnCode === -9005) {
+        return fail(`M\xE3 ${u.code} \u0111\xE3 l\xE0 aliasID c\u1EE7a m\u1ED9t ng\u01B0\u1EDDi kh\xE1c tr\xEAn Hanet. D\xF9ng "Nh\u1EADp t\u1EEB Hanet" \u0111\u1EC3 li\xEAn k\u1EBFt ng\u01B0\u1EDDi \u0111\xF3, ho\u1EB7c \u0111\u1ED5i m\xE3 nh\xE2n vi\xEAn.`);
+      }
+      throw err;
     }
-    if (!personId) personId = (await hanetApi.personsByAlias(deps, u.code))[0]?.personID ?? null;
     if (!personId) return fail("Hanet kh\xF4ng tr\u1EA3 Person ID sau khi \u0111\u0103ng k\xFD");
     linkFace(db, userId, String(personId), u.department_id, deps.now());
     return { ok: true, message: "\u0110\xE3 \u0111\u0103ng k\xFD FaceID tr\xEAn Hanet" };
@@ -1622,6 +1656,8 @@ init_hanet_sync();
 init_db();
 init_hanet_api();
 init_hanet_sync();
+init_auth();
+init_bootstrap();
 
 // server/validation.ts
 var CODE_RE = /^[A-Z0-9._-]{1,32}$/;
@@ -1630,6 +1666,7 @@ var CODE_ERROR = "M\xE3 ch\u1EC9 g\u1ED3m ch\u1EEF kh\xF4ng d\u1EA5u, s\u1ED1, d
 // server/hanet-import.ts
 init_vntime();
 var IMPORT_PAGE_SIZE = 100;
+var IMPORT_MAX = 100;
 var MAX_PAGES2 = 50;
 async function fetchAllPersons(deps, placeId) {
   const all = [];
@@ -1689,6 +1726,14 @@ function importPersons(db, persons, departmentId, now, reserved = /* @__PURE__ *
 init_hanet();
 var ROLES = ["hr", "dept_manager", "employee"];
 var str2 = (v) => typeof v === "string" ? v.trim() : void 0;
+function assertPersonIdFree(db, personId, userId) {
+  if (!personId) return;
+  const holder = db.prepare("SELECT id FROM users WHERE hanet_person_id = ?").get(personId);
+  if (holder && holder.id !== userId) throw new HttpError(409, "Person ID n\xE0y \u0111\xE3 g\u1EAFn v\u1EDBi nh\xE2n s\u1EF1 kh\xE1c");
+}
+function enqueueAlias(db, userId, personId, code, now) {
+  enqueue(db, "user", userId, "user.alias", { personId, code }, now);
+}
 function resolveDepartment(db, departmentId) {
   if (departmentId === void 0 || departmentId === null || departmentId === "") return null;
   if (typeof departmentId !== "string" || !db.prepare("SELECT 1 FROM departments WHERE id = ?").get(departmentId)) {
@@ -1727,7 +1772,7 @@ function userRoutes(ctx) {
         (Array.isArray(b.persons) ? b.persons : []).map((p) => String(p?.personId ?? "")).filter(Boolean)
       );
       if (wanted.size === 0) throw new HttpError(400, "Ch\u01B0a ch\u1ECDn ng\u01B0\u1EDDi n\xE0o \u0111\u1EC3 nh\u1EADp");
-      if (wanted.size > 500) throw new HttpError(400, "M\u1ED7i l\u1EA7n nh\u1EADp t\u1ED1i \u0111a 500 ng\u01B0\u1EDDi");
+      if (wanted.size > IMPORT_MAX) throw new HttpError(400, `M\u1ED7i l\u1EA7n nh\u1EADp t\u1ED1i \u0111a ${IMPORT_MAX} ng\u01B0\u1EDDi`);
       const departmentId = resolveDepartment(db, b.departmentId);
       const placeId = getPlaceIds(db)[0];
       if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, "Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Hanet (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
@@ -1740,7 +1785,7 @@ function userRoutes(ctx) {
       const chosen = unlinkedPersons(db, all).filter((p) => wanted.has(String(p.personID)));
       if (chosen.length === 0) throw new HttpError(400, "Kh\xF4ng c\xF3 ng\u01B0\u1EDDi h\u1EE3p l\u1EC7 \u0111\u1EC3 nh\u1EADp (c\xF3 th\u1EC3 \u0111\xE3 \u0111\u01B0\u1EE3c nh\u1EADp tr\u01B0\u1EDBc \u0111\xF3)");
       const created = importPersons(db, chosen, departmentId, ctx.now(), hanetAliases(all));
-      for (const c of created) kickEntity(ctx, "user", c.id);
+      kickAll(ctx);
       res.json({ created });
     })
   );
@@ -1760,6 +1805,7 @@ function userRoutes(ctx) {
       if (db.prepare("SELECT 1 FROM users WHERE code = ?").get(code)) throw new HttpError(409, "M\xE3 nh\xE2n vi\xEAn \u0111\xE3 t\u1ED3n t\u1EA1i");
       const image = resolveFaceImage(db, null, b, ctx.now());
       const hanetPersonId = str2(b.hanetPersonId) || null;
+      assertPersonIdFree(db, hanetPersonId, null);
       const id = newId("usr");
       const tempPassword = generateTempPassword();
       db.prepare(
@@ -1781,6 +1827,7 @@ function userRoutes(ctx) {
         hashPassword(tempPassword),
         toVnDate(ctx.now())
       );
+      if (hanetPersonId) enqueueAlias(db, id, hanetPersonId, code, ctx.now());
       if (hanetPersonId && departmentId) {
         enqueue(db, "user", id, "user.department", { fromHanetDeptId: null, toDepartmentId: departmentId }, ctx.now());
       }
@@ -1819,6 +1866,7 @@ function userRoutes(ctx) {
     }
     if (b.hanetPersonId !== void 0) {
       const pid = str2(b.hanetPersonId) || null;
+      assertPersonIdFree(db, pid, target.id);
       set("hanet_person_id", pid);
       set("face_registered", pid ? 1 : 0);
     }
@@ -1835,6 +1883,7 @@ function userRoutes(ctx) {
     if (b.status === "inactive" && target.status !== "inactive") deleteUserSessions(db, target.id);
     const after = getUser(db, target.id);
     const now = ctx.now();
+    if (after.hanetPersonId && after.hanetPersonId !== target.hanetPersonId) enqueueAlias(db, target.id, after.hanetPersonId, after.code, now);
     if (after.faceRegistered && (after.name !== target.name || after.position !== target.position)) {
       enqueue(db, "user", target.id, "user.info", { code: after.code, name: after.name, title: after.position }, now);
     }
@@ -2147,7 +2196,9 @@ function cameraRoutes(ctx) {
 // server/routes/attendance.ts
 init_errors();
 import { Router as Router5 } from "express";
+init_auth();
 init_attendance();
+init_bootstrap();
 init_hanet();
 init_vntime();
 var DAY_SELECT = `SELECT a.*, u.code AS employee_code, u.name AS employee_name, u.avatar_url, u.department_id,
@@ -2310,6 +2361,7 @@ function settingsRoutes(ctx) {
 init_db();
 init_errors();
 import { Router as Router7 } from "express";
+init_auth();
 init_attendance();
 init_vntime();
 var TYPES = ["missed_punch", "late_explanation", "leave_request"];
@@ -2419,6 +2471,7 @@ function requestRoutes(ctx) {
 // server/routes/hanet.ts
 init_errors();
 import { Router as Router8 } from "express";
+init_auth();
 init_hanet();
 init_hanet_api();
 init_settings();
@@ -2632,6 +2685,7 @@ function hanetRoutes(ctx) {
 init_db();
 init_errors();
 import { Router as Router9 } from "express";
+init_auth();
 function adminRoutes(ctx) {
   const { db } = ctx;
   const dir = ctx.config.backupDir;
@@ -2657,7 +2711,7 @@ function adminRoutes(ctx) {
     }
     const backup = backupNow(db, dir, "pre-reset", ctx.now());
     tx(db, () => {
-      for (const table of ["detections", "attendance_days", "requests", "webhook_logs", "cameras"]) db.exec(`DELETE FROM ${table}`);
+      for (const table of ["detections", "attendance_days", "requests", "webhook_logs", "cameras", "sync_jobs", "face_sightings"]) db.exec(`DELETE FROM ${table}`);
       db.prepare("UPDATE users SET department_id = NULL WHERE id = ?").run(actor.id);
       db.exec("UPDATE departments SET manager_id = NULL");
       db.prepare("DELETE FROM users WHERE id != ?").run(actor.id);
@@ -2703,7 +2757,12 @@ function createApp(ctx) {
   return app;
 }
 
+// server/index.ts
+init_auth();
+init_bootstrap();
+
 // server/jobs.ts
+init_auth();
 init_hanet();
 init_hanet_sync();
 init_sync_handlers();
