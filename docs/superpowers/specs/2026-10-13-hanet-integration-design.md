@@ -14,6 +14,7 @@ Thành công nghĩa là HR có thể, không mở app Hanet:
 4. Đăng ký FaceID cho người mới bằng ảnh camera Hanet vừa chụp người đó (người lạ), rồi người đó được chấm công từ lượt quẹt sau.
 5. Đổi ảnh nhận diện của một nhân sự bằng một lượt camera chụp gần đây.
 6. Tạo, sửa, xóa nhân sự và phòng ban trên web, thay đổi tự sang Hanet; lỗi đồng bộ hiện rõ và thử lại được.
+7. Từ một lượt quẹt trong bảng công, bấm một nút để mở trang xem lại video của đúng camera, đúng ngày trên Hanet Connect.
 
 ## 2. Quyết định đã chốt với người dùng
 
@@ -23,6 +24,7 @@ Thành công nghĩa là HR có thể, không mở app Hanet:
 | Ảnh đăng ký FaceID | **Lấy từ camera Hanet** (ảnh `detected_image_url` trong webhook), không tải file, không webcam |
 | Phòng ban | **Đồng bộ lên Hanet** |
 | Số địa điểm | **Một** |
+| Xem video | **Không dùng API nội bộ của Hanet Connect.** Chỉ mở trang xem lại của Hanet Connect bằng liên kết (§6.8); HR tự đăng nhập Hanet Connect |
 | Cách đồng bộ | **B**: lưu trên web trước, đẩy sang Hanet ngay sau đó, lỗi thì vào hàng đợi thử lại. Riêng FaceID chạy ngay (đồng bộ) để báo lỗi ảnh |
 | Dữ liệu cũ | **Không viết migration.** Đổi schema trực tiếp; khi deploy được xóa `data/attendance.db` (sao lưu trước) |
 
@@ -220,6 +222,20 @@ Quy tắc:
 - `POST /api/hanet/test-connection` (HR): `profile/getProfile` + `place/getPlaces`; trả `{ok, account, places:[{id,name,address}], message}`. Lỗi trả `ok:false` với câu tiếng Việt, không 500.
 - Cấu hình địa điểm: `PUT /api/hanet/config {placeId}` (một số). Giữ khóa `hanet.place_ids` dạng mảng một phần tử để đối soát không đổi.
 
+### 6.8 Nút "Xem video lúc này"
+
+Đã khảo sát trang xem lại video của Hanet Connect (13/10/2026): danh sách đoạn ghi (~58 giây, theo chuyển động) do server Next.js của Hanet dựng sẵn; phát một đoạn thì trình duyệt gọi `POST connect.hanet.ai/api/video/get` bằng cookie phiên HttpOnly, nhận link MP4 ký sẵn trên `vcdn-z-video.hanet.ai` hạn 1 giờ. Đây là API nội bộ, không có trong tài liệu đối tác, cần phiên đăng nhập tài khoản chủ, nên **không tích hợp**. Thay vào đó:
+
+- Mỗi lượt quẹt trong chi tiết ngày công có nút **Xem video lúc này**, mở tab mới tới
+  `https://connect.hanet.ai/{placeId}/video?id_device={deviceId}&day={YYYY-MM-DD}`
+  - `placeId`: địa điểm đang cấu hình (`hanet.place_ids[0]`).
+  - `deviceId`: `detections.device_id` của lượt quẹt.
+  - `day`: ngày giờ Việt Nam của lượt quẹt (`work_date`), không phải ngày UTC.
+- Nhãn phụ dưới nút: "Mở Hanet Connect, chọn đoạn gần {HH:mm}" (trang Hanet không nhận tham số giờ, nên HR tự chọn đoạn ghi gần giờ quẹt).
+- Server dựng link, trả trong trường `videoUrl` của từng `Detection` ở `GET /api/attendance/:userId/:date/detections`; `null` khi người xem không phải HR/Trưởng phòng, khi chưa cấu hình địa điểm, hoặc khi lượt quẹt có nguồn `simulator`.
+- Gốc địa chỉ `https://connect.hanet.ai` là hằng `HANET_CONNECT_BASE` trong `server/hanet.ts`, để Hanet đổi đường dẫn thì chỉ sửa một chỗ.
+- Liên kết mở bằng `target="_blank" rel="noopener noreferrer"`. Không gửi kèm thông tin đăng nhập nào; nếu HR chưa đăng nhập Hanet Connect, Hanet tự hiện trang đăng nhập.
+
 ## 7. API mới / đổi (tất cả yêu cầu đăng nhập)
 
 | Method | Đường dẫn | Quyền |
@@ -238,7 +254,7 @@ Quy tắc:
 | DELETE | `/api/users/:id`, `/api/departments/:id` | chỉ `ADMIN` (như hiện tại), thêm việc xóa trên Hanet |
 | — | Bỏ `GET /api/hanet/recent-faces` | — |
 
-`User` thêm `hanetSyncStatus`, `hanetSyncError`, `faceError`; `Department` thêm `hanetSyncStatus`, `hanetSyncError`; `Camera` thêm `online: boolean | null`, `statusCheckedAt`.
+`Detection` thêm `videoUrl: string | null` (§6.8). `User` thêm `hanetSyncStatus`, `hanetSyncError`, `faceError`; `Department` thêm `hanetSyncStatus`, `hanetSyncError`; `Camera` thêm `online: boolean | null`, `statusCheckedAt`.
 
 ## 8. Giao diện
 
@@ -248,6 +264,7 @@ Quy tắc:
 - **Form Thêm nhân sự › Lấy từ camera:** hai nhóm "Người lạ" (ảnh lớn; chọn = dùng ảnh này đăng ký FaceID khi Tạo) và "Đã có trên Hanet" (chọn = liên kết, như hiện tại). Khoảng thời gian 30 phút, nút làm mới. Bỏ ô tick "Đã đăng ký khuôn mặt".
 - **Form Sửa nhân sự › Ảnh nhận diện:** lượt camera chụp người này trong 24 giờ + người lạ 30 phút; chọn → Cập nhật FaceID; hiện kết quả.
 - **Phòng ban:** nhãn đồng bộ trên mỗi thẻ.
+- **Bảng công › chi tiết lượt quẹt:** mỗi lượt có nút **Xem video lúc này** (biểu tượng video) kèm nhãn "Mở Hanet Connect, chọn đoạn gần HH:mm"; ẩn khi `videoUrl` là `null`.
 - Các nút cần Hanet bị vô hiệu kèm chú thích khi chưa cấu hình.
 
 ## 9. Lỗi và trường hợp biên (bổ sung §6)
@@ -266,6 +283,7 @@ Quy tắc:
 - FaceID: thành công lưu personID; `-9005` liên kết; `-9006` giữ nhân sự với `face_error`; `-9008`; đổi ảnh dùng `updateByFaceUrlByAliasID`.
 - Nhập: bỏ người đã có; aliasID không hợp lệ → mã `NV0001` + việc `user.alias`; server không tin dữ liệu client.
 - Camera: nhập không trùng; trạng thái online; đổi tên tạo việc.
+- Link video: HR và Trưởng phòng nhận `videoUrl` đúng định dạng (place, device, ngày giờ VN; lượt 00:30 giờ VN thuộc đúng ngày VN dù chạy `TZ=UTC`); nhân viên nhận `null`; chưa cấu hình địa điểm → `null`; lượt `simulator` → `null`.
 - Phân quyền: thêm mọi API mới vào ma trận `tests/permissions.test.ts`.
 - `TZ=UTC npm test` vẫn qua.
 
@@ -273,7 +291,7 @@ Quy tắc:
 
 1. `npm test`, `TZ=UTC npm test`, `npm run lint`, `npm run build` đều qua.
 2. Khởi động với DB v1 thì thoát kèm hướng dẫn; với DB mới thì chạy.
-3. Trên host, theo `DEPLOY.md`: sao lưu, xóa DB, deploy; Kiểm tra kết nối báo đúng tài khoản và địa điểm HRINTER; nhập camera C21272C952 và thấy online; nhập "Dương Đức Văn" từ Hanet; một người lạ đứng trước camera → tạo nhân sự bằng ảnh đó → người đó đứng lại trước camera và được chấm công; tạo phòng ban và thấy trên app Hanet; xóa người thử thì người đó biến mất khỏi Hanet.
+3. Trên host, theo `DEPLOY.md`: sao lưu, xóa DB, deploy; Kiểm tra kết nối báo đúng tài khoản và địa điểm HRINTER; nhập camera C21272C952 và thấy online; nhập "Dương Đức Văn" từ Hanet; một người lạ đứng trước camera → tạo nhân sự bằng ảnh đó → người đó đứng lại trước camera và được chấm công; tạo phòng ban và thấy trên app Hanet; xóa người thử thì người đó biến mất khỏi Hanet; bấm "Xem video lúc này" ở một lượt quẹt thì Hanet Connect mở đúng camera C21272C952 và đúng ngày.
 
 ## 12. Thứ tự triển khai
 
@@ -287,4 +305,5 @@ Quy tắc:
 7. FaceID từ ảnh camera.
 8. Nhập nhân sự từ Hanet.
 9. Đồng bộ nhân sự (thông tin, phòng ban, xóa) và phòng ban.
-10. Giao diện còn lại, `DEPLOY.md`, chạy thật trên host.
+10. Nút "Xem video lúc này" (§6.8). Không phụ thuộc hàng đợi, có thể làm sớm.
+11. Giao diện còn lại, `DEPLOY.md`, chạy thật trên host.
