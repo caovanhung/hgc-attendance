@@ -1,135 +1,101 @@
-# HƯỚNG DẪN TRIỂN KHAI HỆ THỐNG ĐIỂM DANH CAMERA HANET AI
+# Triển khai hệ thống điểm danh Camera Hanet
 
-Hệ thống được xây dựng theo kiến trúc **Full-stack Node.js (Express) + React (Vite)**, lưu trữ dữ liệu bền vững tại thư mục `data/` và hỗ trợ Webhook nhận diện khuôn mặt theo chuẩn **Hanet Open API**.
+Ứng dụng Node.js (Express + React). Dữ liệu lưu trong SQLite tại `data/attendance.db`, sao lưu tự động vào `data/backups/`.
 
----
+## Yêu cầu
 
-## 🌟 YÊU CẦU QUAN TRỌNG ĐỐI VỚI CAMERA HANET
-Camera AI Hanet gửi sự kiện điểm danh qua giao thức **HTTP POST Webhook**. Do đó, máy chủ của bạn cần:
-1. Có **IP tĩnh** hoặc **Tên miền (Domain)** công khai (Public Internet).
-2. Có chứng chỉ bảo mật **HTTPS** (Hanet Cloud yêu cầu Webhook gửi qua HTTPS an toàn).
-3. Đường dẫn Webhook endpoint: `https://ten-mien-cua-ban.com/api/hanet/webhook`
+- **Node.js ≥ 22.13** (dùng `node:sqlite` có sẵn trong Node). Kiểm tra: `node -v`.
+- Tên miền có **HTTPS**: Hanet chỉ gửi webhook qua HTTPS, và cookie đăng nhập dùng cờ `Secure`.
+- Chạy **một tiến trình** (PM2 `instances: 1`).
+- Không dùng các dịch vụ có ổ đĩa tạm (ví dụ gói Free của Render): dữ liệu sẽ mất mỗi lần deploy lại.
 
----
+## Cài mới trên VPS Ubuntu (PM2 + nginx)
 
-## CÁCH 1: TRIỂN KHAI TRÊN CLOUD MIỄN PHÍ (RENDER / RAILWAY) - NHANH NHẤT (5 PHÚT)
-Nếu bạn chưa có VPS và muốn chạy thử nghiệm ngay với Camera Hanet thực tế:
-
-### Dùng Render.com (Miễn phí có sẵn HTTPS):
-1. Đăng ký tài khoản tại [https://render.com](https://render.com) (đăng nhập bằng GitHub).
-2. Bấm **New +** -> Chọn **Web Service**.
-3. Chọn kho lưu trữ GitHub của bạn: `caovanhung/hgc-attendance`.
-4. Cấu hình các thông số:
-   - **Environment:** `Node`
-   - **Build Command:** `npm install && npm run build`
-   - **Start Command:** `npx tsx server.ts`
-   - **Instance Type:** `Free`
-5. Bấm **Deploy Web Service**.
-6. Sau 2-3 phút, Render sẽ cấp cho bạn một URL HTTPS miễn phí, ví dụ: `https://hgc-attendance.onrender.com`.
-7. Webhook Hanet của bạn sẽ là: `https://hgc-attendance.onrender.com/api/hanet/webhook`.
-
----
-
-## CÁCH 2: TRIỂN KHAI BẰNG DOCKER TRÊN VPS (KHUYÊN DÙNG CHO DOANH NGHIỆP)
-Nếu bạn có VPS Ubuntu / Debian đã cài sẵn Docker và Docker Compose:
-
-### Bước 1: Clone mã nguồn về VPS
 ```bash
-git clone https://github.com/caovanhung/hgc-attendance.git
-cd hgc-attendance
-```
-
-### Bước 2: Khởi chạy bằng Docker Compose
-```bash
-docker compose up -d --build
-```
-Hệ thống sẽ tự động build frontend, đóng gói và chạy ứng dụng ở port `3000`. Dữ liệu chấm công được lưu bền vững tại volume `attendance-data`.
-
-Để kiểm tra trạng thái:
-```bash
-docker ps
-docker logs -f hanet-attendance-app
-```
-
----
-
-## CÁCH 3: TRIỂN KHAI TRỰC TIẾP TRÊN VPS UBUNTU VỚI NGINX & PM2
-
-### Bước 1: Cài đặt môi trường trên VPS Ubuntu
-```bash
-sudo apt update && sudo apt upgrade -y
-# Cài đặt Node.js v20
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs nginx git
+sudo npm install -g pm2
 
-# Cài đặt công cụ quản lý tiến trình PM2 và tsx
-sudo npm install -g pm2 tsx
-```
-
-### Bước 2: Tải mã nguồn và cài đặt
-```bash
 cd /var/www
 git clone https://github.com/caovanhung/hgc-attendance.git
 cd hgc-attendance
-npm install
-npm run build
-```
-
-### Bước 3: Khởi chạy dịch vụ bằng PM2
-```bash
+npm install --omit=dev          # dist/ và server.js đã build sẵn trong repo
 pm2 start ecosystem.config.cjs
-pm2 save
-pm2 startup
+pm2 save && pm2 startup
 ```
 
-### Bước 4: Cấu hình Nginx làm Reverse Proxy và cấp SSL miễn phí
-Tạo file cấu hình Nginx:
-```bash
-sudo nano /etc/nginx/sites-available/attendance
-```
+**Ngay sau khi khởi động**, đăng nhập bằng tài khoản mặc định **`ADMIN` / `Admin@123`**; hệ thống bắt đổi mật khẩu ở lần đăng nhập đầu. Mật khẩu mặc định này ai đọc tài liệu cũng biết, nên đừng để server chạy public mà chưa đổi. Muốn tránh hẳn khoảng hở này thì đặt biến môi trường `ADMIN_INITIAL_PASSWORD` (≥ 8 ký tự) trước lần khởi động đầu tiên.
 
-Nội dung:
+### nginx
+
 ```nginx
 server {
     listen 80;
-    server_name diemdanh.tenmiencuaban.com; # Thay bằng tên miền của bạn
+    server_name diemdanh.tenmiencuaban.com;
 
     location / {
-        proxy_pass http://localhost:3000;
+        proxy_pass http://127.0.0.1:3001;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
     }
 }
 ```
 
-Kích hoạt và cài đặt SSL Let's Encrypt:
 ```bash
 sudo ln -s /etc/nginx/sites-available/attendance /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
-
-# Cài đặt chứng chỉ HTTPS miễn phí
+sudo nginx -t && sudo systemctl reload nginx
 sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d diemdanh.tenmiencuaban.com
 ```
 
----
+## Docker
 
-## CÁCH CẤU HÌNH TRÊN HANET CLOUD (https://developers.hanet.ai)
+```bash
+docker compose up -d --build
+```
 
-1. Đăng nhập vào [Hanet Developer Portal](https://developers.hanet.ai/) hoặc mở ứng dụng **Hanet Connect** trên điện thoại.
-2. Vào phần **Cài đặt Thiết bị / Webhook**.
-3. Điền đường dẫn Webhook:
-   ```
-   https://ten-mien-cua-ban.com/api/hanet/webhook
-   ```
-4. Khi nhân viên đứng trước bất kỳ camera Hanet nào được gắn vào tài khoản:
-   - Camera nhận diện khuôn mặt.
-   - Hanet Cloud gửi gói tin POST đến URL Webhook của bạn.
-   - Hệ thống tự động phân loại phòng ban, tính giờ vào, kiểm tra đi muộn (> 08:15) và hiển thị trực tiếp lên bảng chấm công!
+Dữ liệu nằm trong volume `attendance-data`. Đăng nhập `ADMIN` / `Admin@123` và đổi mật khẩu ngay như trên.
+
+## Nâng cấp từ bản cũ (lưu `data/database.json`)
+
+Bản mới **không dùng `data/database.json`** và **không chuyển dữ liệu cũ sang**: toàn bộ dữ liệu trong đó là dữ liệu thử nghiệm. Hệ thống mới bắt đầu trắng, chỉ có tài khoản `ADMIN`.
+
+```bash
+cd /var/www/hgc-attendance
+pm2 stop hanet-attendance
+git checkout -- data/database.json 2>/dev/null   # bỏ thay đổi cục bộ của file thử nghiệm để git pull không bị chặn
+git pull                                          # bản mới xóa data/database.json khỏi repo
+node -v                                           # phải >= 22.13; nếu chưa thì cài Node 22 như phần trên
+npm install --omit=dev
+pm2 delete hanet-attendance && pm2 start ecosystem.config.cjs && pm2 save
+pm2 logs hanet-attendance --lines 20              # thấy dòng [BOOTSTRAP] Đã tạo tài khoản ADMIN ...
+```
+
+Sau đó đăng nhập `ADMIN` / `Admin@123`, đổi mật khẩu, rồi tạo lại phòng ban, nhân sự (mỗi người nhận mật khẩu tạm từ HR) và camera. Cập nhật URL webhook mới (có token) trên Hanet theo phần dưới.
+
+## Cấu hình webhook trên Hanet
+
+1. Đăng nhập bằng tài khoản HR → tab **Cấu hình** → sao chép **URL webhook** (dạng `https://<tên miền>/api/hanet/webhook/<token>`).
+2. Dán URL vào phần cấu hình webhook trên Hanet (Hanet Developer / Hanet Connect).
+3. Mã nhân viên trong hệ thống phải trùng **aliasID** của người đó trên Hanet. Có thể nhập thêm Hanet Person ID ở tab Nhân sự.
+4. Nếu nghi URL bị lộ: bấm **Tạo token mới** rồi cập nhật lại URL trên Hanet.
+
+Đối soát (tùy chọn): nhập Client ID, Client Secret, Refresh Token và Place ID ở tab Cấu hình. Hệ thống sẽ kéo lịch sử điểm danh từ Hanet mỗi 15 phút để bù các lượt webhook bị lỡ.
+
+## Sao lưu
+
+- Tự động lúc 02:00 hằng ngày vào `data/backups/attendance-YYYY-MM-DD.db`, giữ 30 bản. Có bản sao lưu riêng trước mỗi lần xóa dữ liệu.
+- Nên chép định kỳ ra ngoài VPS, ví dụ thêm vào crontab:
+
+```bash
+30 2 * * * rsync -a /var/www/hgc-attendance/data/backups/ backup@may-khac:/srv/hgc-backups/
+```
+
+- Khôi phục: `pm2 stop hanet-attendance`, chép bản sao lưu đè lên `data/attendance.db` (xóa `attendance.db-wal`, `attendance.db-shm` nếu có), rồi `pm2 start hanet-attendance`.
+
+## Kiểm tra sức khỏe
+
+`curl https://<tên miền>/api/health` → `{"ok":true}`.

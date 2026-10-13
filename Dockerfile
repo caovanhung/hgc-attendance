@@ -1,23 +1,18 @@
-FROM node:20-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 
-ENV NODE_ENV=production
-ENV PORT=3000
-
-# Install dependencies (without dev audit overhead to save RAM)
-COPY package.json ./
+COPY package.json package-lock.json* ./
 RUN npm install --no-audit --no-fund
 
-# Copy code
 COPY . .
+RUN npm run build && npm prune --omit=dev
 
-# Build frontend
-RUN npm run build
+ENV NODE_ENV=production
+ENV PORT=3001
+ENV TRUST_PROXY=1
 
-# Expose port
-EXPOSE 3000
-
+EXPOSE 3001
 VOLUME ["/app/data"]
 
-CMD ["npx", "tsx", "server.ts"]
+CMD ["node", "server.js"]

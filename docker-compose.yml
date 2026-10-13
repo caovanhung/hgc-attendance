@@ -4,10 +4,12 @@ services:
     container_name: hanet-attendance-app
     restart: always
     ports:
-      - "3000:3000"
+      - "3001:3001"
     environment:
       - NODE_ENV=production
-      - PORT=3000
+      - PORT=3001
+      - TRUST_PROXY=1
+      # - ADMIN_INITIAL_PASSWORD=doi-ngay-sau-khi-dang-nhap
     volumes:
       - attendance-data:/app/data
 

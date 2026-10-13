@@ -7,3 +7,6 @@ coverage/
 !.env.example
 *.swp
 *.swo
+
+# Dữ liệu chạy thật (SQLite, sao lưu) — không commit
+data/
