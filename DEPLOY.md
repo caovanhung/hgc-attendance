@@ -105,6 +105,7 @@ Sau khi khởi động, vì database mới hoàn toàn:
 - [ ] Nhập "Dương Đức Văn" từ Hanet; người này quẹt mặt thì bảng công có dòng của họ.
 - [ ] Một người chưa đăng ký đứng trước camera → **Thêm nhân sự → Lấy từ camera** → chọn ảnh người lạ → **Tạo nhân sự** → thông báo "FaceID: Đã đăng ký FaceID trên Hanet". Người đó đứng lại trước camera và được chấm công. Nếu báo lỗi ảnh (ví dụ kích thước), ghi lại thông báo để xử lý ở bản sau.
 - [ ] Tạo phòng ban trên web, thấy phòng ban đó trên app Hanet; xếp người thử vào phòng.
+- [ ] Bảng công → chi tiết lượt quẹt → **Xem video lúc này** mở Hanet Connect đúng camera C21272C952, đúng ngày.
 - [ ] Xóa người thử bằng tài khoản ADMIN; người đó biến mất khỏi Hanet. Tab **Cấu hình › Đồng bộ Hanet** không còn việc lỗi.
 
 ## Cấu hình webhook trên Hanet

@@ -576,7 +576,10 @@ function updateHanetConfig(db, body) {
     setSetting(db, "hanet.place_ids", JSON.stringify(ids));
   }
 }
-var str, num, STRANGER_MESSAGE, UNMATCHED_MESSAGE, WEBHOOK_LOG_LIMIT, WEBHOOK_TOKEN_KEY, HANET_DEFAULT_API_BASE, TEXT_FIELDS;
+function hanetVideoUrl(placeId, deviceId, day) {
+  return `${HANET_CONNECT_BASE}/${placeId}/video?id_device=${encodeURIComponent(deviceId)}&day=${day}`;
+}
+var str, num, STRANGER_MESSAGE, UNMATCHED_MESSAGE, WEBHOOK_LOG_LIMIT, WEBHOOK_TOKEN_KEY, HANET_DEFAULT_API_BASE, TEXT_FIELDS, HANET_CONNECT_BASE;
 var init_hanet = __esm({
   "server/hanet.ts"() {
     init_db();
@@ -602,6 +605,7 @@ var init_hanet = __esm({
       ["refreshToken", "hanet.refresh_token"],
       ["apiBase", "hanet.api_base"]
     ];
+    HANET_CONNECT_BASE = "https://connect.hanet.ai";
   }
 });
 
@@ -887,13 +891,11 @@ var init_sync_handlers = __esm({
         if (toHanet) await hanetApi.addPersonsToDepartment(deps, toHanet, [personId]);
       },
       "user.remove": async (deps, job) => {
-        const placeId = placeOf(deps);
-        try {
-          await hanetApi.removeByPlace(deps, String(job.payload.code), placeId);
-        } catch (err) {
-          if (!(err instanceof HanetApiError) || err.returnCode !== -5011) throw err;
-          if (job.payload.personId) await ignoreNotFound(() => hanetApi.removeById(deps, String(job.payload.personId)));
+        if (job.payload.personId) {
+          await ignoreNotFound(() => hanetApi.removeById(deps, String(job.payload.personId)));
+          return;
         }
+        await hanetApi.removeByPlace(deps, String(job.payload.code), placeOf(deps));
       },
       "dept.create": async (deps, job) => {
         const d = deptRow(deps, job.entityId);
@@ -1650,12 +1652,16 @@ function unlinkedPersons(db, persons) {
     return !known.get(code === SYSTEM_ADMIN_CODE ? "" : code, String(p.personID));
   });
 }
-function nextEmployeeCode(db) {
-  const codes = db.prepare("SELECT code FROM users WHERE code GLOB 'NV[0-9][0-9][0-9][0-9]*'").all();
-  const max = codes.reduce((m, { code }) => /^NV\d{4,}$/.test(code) ? Math.max(m, Number(code.slice(2))) : m, 0);
-  return `NV${String(max + 1).padStart(4, "0")}`;
+function hanetAliases(persons) {
+  return new Set(persons.map((p) => String(p.aliasID ?? "").trim().toUpperCase()).filter(Boolean));
 }
-function importPersons(db, persons, departmentId, now) {
+function nextEmployeeCode(db, reserved = /* @__PURE__ */ new Set()) {
+  const codes = db.prepare("SELECT code FROM users WHERE code GLOB 'NV[0-9][0-9][0-9][0-9]*'").all();
+  let n = codes.reduce((m, { code }) => /^NV\d{4,}$/.test(code) ? Math.max(m, Number(code.slice(2))) : m, 0) + 1;
+  while (reserved.has(`NV${String(n).padStart(4, "0")}`)) n++;
+  return `NV${String(n).padStart(4, "0")}`;
+}
+function importPersons(db, persons, departmentId, now, reserved = /* @__PURE__ */ new Set()) {
   const exists = db.prepare("SELECT 1 FROM users WHERE code = ?");
   const insert = db.prepare(
     `INSERT INTO users(id, code, name, email, phone, role, department_id, position, avatar_url, hanet_person_id,
@@ -1667,7 +1673,7 @@ function importPersons(db, persons, departmentId, now) {
     () => persons.map((p) => {
       const alias = String(p.aliasID ?? "").trim();
       const fromAlias = aliasCode(p);
-      const code = fromAlias && !exists.get(fromAlias) ? fromAlias : nextEmployeeCode(db);
+      const code = fromAlias && !exists.get(fromAlias) ? fromAlias : nextEmployeeCode(db, reserved);
       const id = newId("usr");
       const tempPassword = generateTempPassword();
       const name = String(p.name ?? "").trim() || code;
@@ -1733,7 +1739,7 @@ function userRoutes(ctx) {
       }
       const chosen = unlinkedPersons(db, all).filter((p) => wanted.has(String(p.personID)));
       if (chosen.length === 0) throw new HttpError(400, "Kh\xF4ng c\xF3 ng\u01B0\u1EDDi h\u1EE3p l\u1EC7 \u0111\u1EC3 nh\u1EADp (c\xF3 th\u1EC3 \u0111\xE3 \u0111\u01B0\u1EE3c nh\u1EADp tr\u01B0\u1EDBc \u0111\xF3)");
-      const created = importPersons(db, chosen, departmentId, ctx.now());
+      const created = importPersons(db, chosen, departmentId, ctx.now(), hanetAliases(all));
       for (const c of created) kickEntity(ctx, "user", c.id);
       res.json({ created });
     })
@@ -2142,6 +2148,7 @@ function cameraRoutes(ctx) {
 init_errors();
 import { Router as Router5 } from "express";
 init_attendance();
+init_hanet();
 init_vntime();
 var DAY_SELECT = `SELECT a.*, u.code AS employee_code, u.name AS employee_name, u.avatar_url, u.department_id,
   d.name AS department_name
@@ -2204,7 +2211,10 @@ function attendanceRoutes(ctx) {
     if (!target) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y nh\xE2n s\u1EF1");
     if (!canSeeUser(currentUser(req), target)) throw new HttpError(403, "B\u1EA1n kh\xF4ng c\xF3 quy\u1EC1n xem d\u1EEF li\u1EC7u n\xE0y");
     if (!isValidDate(req.params.date)) throw new HttpError(400, "Ng\xE0y kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng YYYY-MM-DD)");
-    const rows = db.prepare("SELECT id, device_id, device_name, place_id, ts, image_url, source FROM detections WHERE user_id = ? AND work_date = ? ORDER BY ts").all(target.id, req.params.date);
+    const rows = db.prepare("SELECT id, device_id, device_name, place_id, ts, work_date, image_url, source FROM detections WHERE user_id = ? AND work_date = ? ORDER BY ts").all(target.id, req.params.date);
+    const viewer = currentUser(req);
+    const placeId = getPlaceIds(db)[0];
+    const canWatch = (viewer.role === "hr" || viewer.role === "dept_manager") && placeId !== void 0;
     const detections = rows.map((x) => ({
       id: x.id,
       deviceId: x.device_id,
@@ -2212,7 +2222,8 @@ function attendanceRoutes(ctx) {
       placeId: x.place_id ?? null,
       ts: x.ts,
       imageUrl: x.image_url ?? null,
-      source: x.source
+      source: x.source,
+      videoUrl: canWatch && x.source !== "simulator" ? hanetVideoUrl(placeId, x.device_id, x.work_date) : null
     }));
     res.json({ detections });
   });
