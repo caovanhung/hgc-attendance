@@ -89,6 +89,20 @@ test('nhập: mã theo aliasID, tự sinh NV0001 khi thiếu/không hợp lệ, 
   }
 });
 
+test('mã tự sinh bỏ qua aliasID đang dùng bởi người khác trên Hanet (người không được chọn)', async () => {
+  const { app, hr } = await setup({
+    '/person/getListByPlace': pagesRoute([[person('nv0001', 'PX'), person('', 'PY')]]),
+  });
+  try {
+    // PX giữ aliasID NV0001 nhưng không được chọn: PY không được lấy NV0001
+    const r = await hr.post('/api/users/import', { persons: [{ personId: 'PY' }] });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual(r.body.created.map((c: any) => c.code), ['NV0002']);
+  } finally {
+    await app.close();
+  }
+});
+
 test('handler user.alias gọi updateAliasID', async () => {
   const { app, fake, deps, hr } = await setup({ '/person/getListByPlace': pagesRoute([[person('', 'P6')]]), '/person/updateAliasID': ok() });
   try {

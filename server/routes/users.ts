@@ -12,7 +12,7 @@ import { NOT_SYSTEM_ADMIN, SYSTEM_ADMIN_CODE } from '../bootstrap';
 import { deleteSighting, getSighting, listSightings, SIGHTING_TTL_MS } from '../sightings';
 import { registerFace } from '../hanet-face';
 import { dropEntityJobs, enqueue, kickEntity } from '../hanet-sync';
-import { fetchAllPersons, importPersons, unlinkedPersons } from '../hanet-import';
+import { fetchAllPersons, hanetAliases, importPersons, unlinkedPersons } from '../hanet-import';
 import { getPlaceIds, reconcileEnabled } from '../hanet';
 import { CODE_ERROR, CODE_RE } from '../validation';
 import type { FaceCandidates, FaceResult, UserRole } from '../../shared/types';
@@ -80,7 +80,7 @@ export function userRoutes(ctx: AppContext): Router {
       // Không tin dữ liệu client: chỉ nhập người thật sự có trên Hanet và chưa liên kết
       const chosen = unlinkedPersons(db, all).filter((p) => wanted.has(String(p.personID)));
       if (chosen.length === 0) throw new HttpError(400, 'Không có người hợp lệ để nhập (có thể đã được nhập trước đó)');
-      const created = importPersons(db, chosen, departmentId, ctx.now());
+      const created = importPersons(db, chosen, departmentId, ctx.now(), hanetAliases(all));
       for (const c of created) kickEntity(ctx, 'user', c.id);
       res.json({ created });
     }),

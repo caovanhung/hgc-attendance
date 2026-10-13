@@ -62,14 +62,12 @@ export const SYNC_HANDLERS: SyncHandlers = {
   },
 
   'user.remove': async (deps, job) => {
-    const placeId = placeOf(deps);
-    try {
-      await hanetApi.removeByPlace(deps, String(job.payload.code), placeId);
-    } catch (err) {
-      if (!(err instanceof HanetApiError) || err.returnCode !== -5011) throw err;
-      // Người nhập từ Hanet mà việc gán mã chưa chạy: xóa theo Person ID
-      if (job.payload.personId) await ignoreNotFound(() => hanetApi.removeById(deps, String(job.payload.personId)));
+    // Đã biết Person ID thì xóa đúng người đó; xóa theo aliasID có thể trúng người khác trùng mã trên Hanet
+    if (job.payload.personId) {
+      await ignoreNotFound(() => hanetApi.removeById(deps, String(job.payload.personId)));
+      return;
     }
+    await hanetApi.removeByPlace(deps, String(job.payload.code), placeOf(deps));
   },
 
   'dept.create': async (deps, job) => {

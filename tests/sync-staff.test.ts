@@ -113,10 +113,10 @@ test('chuyển phòng: bỏ khỏi phòng cũ trên Hanet rồi thêm vào phòn
   }
 });
 
-test('ADMIN xóa nhân sự: removeByPlace; -5011 thì xóa theo Person ID; chưa có FaceID thì không xếp việc', async () => {
+test('ADMIN xóa nhân sự: có Person ID → xóa theo Person ID, không gọi removeByPlace; -5011 coi là xong; chưa có FaceID thì không xếp việc', async () => {
   const { app, fake, deps, admin } = await setup({
-    '/person/removeByPlace': (p: URLSearchParams) => (p.get('aliasID') === 'NV02' ? fail(-5011) : ok()),
-    '/person/removePersonByID': ok(),
+    '/person/removePersonByID': (p: URLSearchParams) => (p.get('personID') === 'P2' ? fail(-5011) : ok()),
+    '/person/removeByPlace': ok(),
   });
   try {
     const a = faceUser(app.db, 'NV01', 'P1');
@@ -125,9 +125,23 @@ test('ADMIN xóa nhân sự: removeByPlace; -5011 thì xóa theo Person ID; chư
     for (const id of [a, b, c]) assert.equal((await admin.del(`/api/users/${id}`)).status, 200);
     assert.deepEqual(ops(app.db), [['user.remove', a], ['user.remove', b]]);
     await runDueJobs(deps, SYNC_HANDLERS);
-    assert.equal(count(fake, '/person/removeByPlace'), 2);
-    assert.equal(fake.last('/person/removePersonByID')!.params.get('personID'), 'P2');
+    assert.deepEqual(fake.calls.filter((x) => x.path === '/person/removePersonByID').map((x) => x.params.get('personID')), ['P1', 'P2']);
+    assert.equal(count(fake, '/person/removeByPlace'), 0, 'không xóa theo aliasID khi đã biết Person ID');
     assert.deepEqual((app.db.prepare('SELECT status FROM sync_jobs').all() as { status: string }[]).map((r) => r.status), ['done', 'done']);
+  } finally {
+    await app.close();
+  }
+});
+
+test('xóa nhân sự không có Person ID (chỉ face_registered) → removeByPlace theo mã', async () => {
+  const { app, fake, deps, admin } = await setup({ '/person/removeByPlace': ok(), '/person/removePersonByID': ok() });
+  try {
+    const id = seedUser(app.db, { code: 'NV09' });
+    app.db.prepare('UPDATE users SET face_registered = 1 WHERE id = ?').run(id);
+    assert.equal((await admin.del(`/api/users/${id}`)).status, 200);
+    await runDueJobs(deps, SYNC_HANDLERS);
+    assert.equal(fake.last('/person/removeByPlace')!.params.get('aliasID'), 'NV09');
+    assert.equal(count(fake, '/person/removePersonByID'), 0);
   } finally {
     await app.close();
   }

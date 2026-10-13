@@ -39,18 +39,24 @@ export function unlinkedPersons(db: Db, persons: HanetPerson[]): HanetPerson[] {
   });
 }
 
-/** Mã tự sinh NV0001, NV0002... (tiếp sau số lớn nhất đang có). */
-export function nextEmployeeCode(db: Db): string {
+/** aliasID (rút gọn, in hoa) đang được người nào đó trên Hanet dùng: mã tự sinh không được trùng. */
+export function hanetAliases(persons: HanetPerson[]): Set<string> {
+  return new Set(persons.map((p) => String(p.aliasID ?? '').trim().toUpperCase()).filter(Boolean));
+}
+
+/** Mã tự sinh NV0001, NV0002... (tiếp sau số lớn nhất đang có), bỏ qua mã đã là aliasID của người khác trên Hanet. */
+export function nextEmployeeCode(db: Db, reserved: Set<string> = new Set()): string {
   const codes = db.prepare("SELECT code FROM users WHERE code GLOB 'NV[0-9][0-9][0-9][0-9]*'").all() as { code: string }[];
-  const max = codes.reduce((m, { code }) => (/^NV\d{4,}$/.test(code) ? Math.max(m, Number(code.slice(2))) : m), 0);
-  return `NV${String(max + 1).padStart(4, '0')}`;
+  let n = codes.reduce((m, { code }) => (/^NV\d{4,}$/.test(code) ? Math.max(m, Number(code.slice(2))) : m), 0) + 1;
+  while (reserved.has(`NV${String(n).padStart(4, '0')}`)) n++;
+  return `NV${String(n).padStart(4, '0')}`;
 }
 
 /**
  * Tạo nhân sự từ người trên Hanet (đã có FaceID). Mã = aliasID nếu hợp lệ, không phải ADMIN và chưa dùng;
- * ngược lại tự sinh và xếp việc ghi mã đó làm aliasID trên Hanet để webhook khớp được theo mã.
+ * ngược lại tự sinh (bỏ qua aliasID đang có trên Hanet, tham số reserved) và xếp việc ghi mã đó làm aliasID trên Hanet để webhook khớp được theo mã.
  */
-export function importPersons(db: Db, persons: HanetPerson[], departmentId: string | null, now: number): ImportedUser[] {
+export function importPersons(db: Db, persons: HanetPerson[], departmentId: string | null, now: number, reserved: Set<string> = new Set()): ImportedUser[] {
   const exists = db.prepare('SELECT 1 FROM users WHERE code = ?');
   const insert = db.prepare(
     `INSERT INTO users(id, code, name, email, phone, role, department_id, position, avatar_url, hanet_person_id,
@@ -61,7 +67,7 @@ export function importPersons(db: Db, persons: HanetPerson[], departmentId: stri
     persons.map((p) => {
       const alias = String(p.aliasID ?? '').trim();
       const fromAlias = aliasCode(p);
-      const code = fromAlias && !exists.get(fromAlias) ? fromAlias : nextEmployeeCode(db);
+      const code = fromAlias && !exists.get(fromAlias) ? fromAlias : nextEmployeeCode(db, reserved);
       const id = newId('usr');
       const tempPassword = generateTempPassword();
       const name = String(p.name ?? '').trim() || code;
