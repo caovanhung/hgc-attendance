@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  attendance-app:
+    build: .
+    container_name: hanet-attendance-app
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    volumes:
+      - attendance-data:/app/data
+
+volumes:
+  attendance-data:
+    driver: local
