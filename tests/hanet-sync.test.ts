@@ -4,7 +4,7 @@ import { freshDb, seedUser, startTestApp, loginAs } from './helpers';
 import { configureHanet } from './fake-hanet';
 import { HanetApiError, type HanetDeps } from '../server/hanet-api';
 import {
-  DEFER_MS, DONE_TTL_MS, MAX_ATTEMPTS, SyncDeferred, enqueue, purgeDoneJobs, retryDelayMs, retryJobs, runDueJobs, syncSummary,
+  DEFER_MS, DONE_TTL_MS, MAX_ATTEMPTS, SyncDeferred, enqueue, purgeDoneJobs, retryDelayMs, retryJobs, runDueJobs, runEntityJobs, syncSummary,
   type SyncHandlers, type SyncJob,
 } from '../server/hanet-sync';
 import { deleteSetting } from '../server/settings';
@@ -166,4 +166,48 @@ test('API tổng quan và thử lại: chỉ HR', async () => {
   } finally {
     await app.close();
   }
+});
+
+test('danh sách chụp cũ: việc đã được lượt chạy ngay xử lý xong thì lượt mỗi phút không chạy lại', async () => {
+  const { db, deps, userId, now } = setup();
+  const b = seedUser(db, { code: 'NV02' });
+  const calls: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const handlers: SyncHandlers = {
+    'user.info': async (_d, j) => {
+      calls.push(`${j.entityId === userId ? 'A' : 'B'}:info`);
+      if (j.entityId === userId) await gate;
+    },
+    'user.alias': async (_d, j) => void calls.push(`${j.entityId === userId ? 'A' : 'B'}:alias`),
+  };
+  enqueue(db, 'user', userId, 'user.info', {}, now());
+  enqueue(db, 'user', b, 'user.info', {}, now());
+  enqueue(db, 'user', b, 'user.alias', {}, now());
+  const minute = runDueJobs(deps, handlers);
+  await runEntityJobs(deps, handlers, 'user', b);
+  release();
+  await minute;
+  assert.deepEqual(calls, ['A:info', 'B:info', 'B:alias']);
+});
+
+test('xóa thắng không xóa việc đang chạy; việc xóa xếp sau nó', async () => {
+  const { db, deps, userId, now } = setup();
+  const calls: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const handlers: SyncHandlers = {
+    'user.info': async () => { calls.push('info'); await gate; calls.push('info-end'); },
+    'user.remove': async () => void calls.push('remove'),
+  };
+  enqueue(db, 'user', userId, 'user.info', {}, now());
+  const running = runDueJobs(deps, handlers);
+  enqueue(db, 'user', userId, 'user.remove', {}, now());
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM sync_jobs').get() as { n: number }).n, 2);
+  await runEntityJobs(deps, handlers, 'user', userId);
+  assert.deepEqual(calls, ['info'], 'việc xóa chưa được chạy khi việc trước còn dở');
+  release();
+  await running;
+  await runEntityJobs(deps, handlers, 'user', userId);
+  assert.deepEqual(calls, ['info', 'info-end', 'remove']);
 });

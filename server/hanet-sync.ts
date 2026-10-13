@@ -97,7 +97,14 @@ export function enqueue(db: Db, entityType: SyncEntity, entityId: string, op: Sy
 
 /** Bỏ mọi việc chưa xong của đối tượng (dùng khi xóa đối tượng chưa từng lên Hanet). */
 export function dropEntityJobs(db: Db, entityType: SyncEntity, entityId: string): void {
-  db.prepare("DELETE FROM sync_jobs WHERE entity_type = ? AND entity_id = ? AND status IN ('pending', 'error')").run(entityType, entityId);
+  // Không xóa việc đang chạy giữa chừng: việc xóa phải xếp sau nó.
+  const busy = [...claimSet(db)];
+  const notBusy = busy.length ? ` AND id NOT IN (${busy.map(() => '?').join(', ')})` : '';
+  db.prepare(`DELETE FROM sync_jobs WHERE entity_type = ? AND entity_id = ? AND status IN ('pending', 'error')${notBusy}`).run(
+    entityType,
+    entityId,
+    ...busy,
+  );
 }
 
 export function wakeEntity(db: Db, entityType: SyncEntity, entityId: string, now: number): void {
@@ -162,7 +169,10 @@ async function runClaimed(deps: HanetDeps, handlers: SyncHandlers, row: Record<s
   if (claims.has(row.id)) return null;
   claims.add(row.id);
   try {
-    return await runJob(deps, handlers, toJob(row));
+    // Đọc lại sau khi giữ chỗ: việc có thể đã chạy xong, bị xóa/gộp hoặc không còn đứng đầu hàng kể từ lúc chụp danh sách.
+    const fresh = deps.db.prepare(`${HEAD_SQL} AND j.id = ?`).get(deps.now(), row.id) as Record<string, any> | undefined;
+    if (!fresh) return null;
+    return await runJob(deps, handlers, toJob(fresh));
   } finally {
     claims.delete(row.id);
   }
