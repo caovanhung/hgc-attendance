@@ -29,10 +29,12 @@ const norm = (s: string) => s.trim().toLocaleLowerCase('vi');
 /** Xử lý từng thao tác đồng bộ sang Hanet. Bản ghi đã bị xóa trên web thì việc kết thúc êm. */
 export const SYNC_HANDLERS: SyncHandlers = {
   'camera.rename': async (deps, job) => {
+    if (!deps.db.prepare('SELECT 1 FROM cameras WHERE id = ?').get(job.entityId)) return;
     await hanetApi.updateDevice(deps, String(job.payload.deviceId), String(job.payload.name));
   },
 
   'user.alias': async (deps, job) => {
+    if (!userRow(deps, job.entityId)) return;
     await hanetApi.updateAliasId(deps, String(job.payload.personId), String(job.payload.code));
   },
 

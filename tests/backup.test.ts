@@ -8,6 +8,8 @@ import { openDb } from '../server/db';
 import { setSetting, getSetting } from '../server/settings';
 import { freshDb, seedUser, seedDepartment, startTestApp, loginAs, TEST_PASSWORD, addDetection } from './helpers';
 import { addDays, vnDateTimeToTs } from '../server/vntime';
+import { enqueue } from '../server/hanet-sync';
+import { recordSighting } from '../server/sightings';
 
 const NOW = vnDateTimeToTs('2026-10-13', '02:00');
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'hgc-bk-'));
@@ -81,6 +83,8 @@ test('xóa dữ liệu: sai mật khẩu 400; đúng thì sao lưu trước, gi�
     const hrId = seedUser(app.db, { code: 'HR01', role: 'hr', departmentId: dep });
     const nvId = seedUser(app.db, { code: 'NV01', departmentId: dep });
     addDetection(app.db, nvId, NOW);
+    enqueue(app.db, 'user', nvId, 'user.info', {}, NOW);
+    recordSighting(app.db, { kind: 'stranger', personId: null, aliasId: null, personName: null, deviceId: 'C1', deviceName: 'C1', ts: NOW, imageUrl: 'https://img/x.jpg' }, NOW);
     setSetting(app.db, 'hanet.webhook_token', 'giu-nguyen');
     const nv = await loginAs(app, 'NV01');
     assert.equal((await nv.post('/api/admin/reset-database', { password: TEST_PASSWORD })).status, 403);
@@ -94,7 +98,7 @@ test('xóa dữ liệu: sai mật khẩu 400; đúng thì sao lưu trước, gi�
     assert.match(r.body.backup, /-pre-reset\.db$/);
     const left = app.db.prepare('SELECT id, department_id FROM users').all() as { id: string; department_id: string | null }[];
     assert.deepEqual(left.map((u) => ({ ...u })), [{ id: hrId, department_id: null }]);
-    for (const t of ['departments', 'detections', 'attendance_days', 'requests', 'cameras', 'webhook_logs']) {
+    for (const t of ['departments', 'detections', 'attendance_days', 'requests', 'cameras', 'webhook_logs', 'sync_jobs', 'face_sightings']) {
       assert.equal((app.db.prepare(`SELECT COUNT(*) AS c FROM ${t}`).get() as { c: number }).c, 0, t);
     }
     assert.equal(getSetting(app.db, 'hanet.webhook_token'), 'giu-nguyen');

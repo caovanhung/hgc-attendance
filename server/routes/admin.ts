@@ -35,7 +35,7 @@ export function adminRoutes(ctx: AppContext): Router {
     }
     const backup = backupNow(db, dir, 'pre-reset', ctx.now());
     tx(db, () => {
-      for (const table of ['detections', 'attendance_days', 'requests', 'webhook_logs', 'cameras']) db.exec(`DELETE FROM ${table}`);
+      for (const table of ['detections', 'attendance_days', 'requests', 'webhook_logs', 'cameras', 'sync_jobs', 'face_sightings']) db.exec(`DELETE FROM ${table}`);
       db.prepare('UPDATE users SET department_id = NULL WHERE id = ?').run(actor.id);
       db.exec('UPDATE departments SET manager_id = NULL');
       db.prepare('DELETE FROM users WHERE id != ?').run(actor.id);

@@ -228,3 +228,18 @@ test('Person ID đã gắn với nhân sự khác → 409 khi tạo và khi sử
     await app.close();
   }
 });
+
+test('Review Focus #5: user.alias và camera.rename của đối tượng đã bị xóa → việc xong, không gọi Hanet', async () => {
+  const { app, fake, deps } = await setup({});
+  try {
+    const u = faceUser(app.db, 'NV41', 'P41');
+    enqueue(app.db, 'user', u, 'user.alias', { personId: 'P41', code: 'NV41' }, deps.now());
+    enqueue(app.db, 'camera', 'cam-da-xoa', 'camera.rename', { deviceId: 'C1', name: 'Cửa A' }, deps.now());
+    app.db.prepare('DELETE FROM users WHERE id = ?').run(u);
+    await runDueJobs(deps, SYNC_HANDLERS);
+    assert.deepEqual((app.db.prepare('SELECT status FROM sync_jobs ORDER BY id').all() as { status: string }[]).map((r) => r.status), ['done', 'done']);
+    assert.equal(fake.calls.length, 0);
+  } finally {
+    await app.close();
+  }
+});
