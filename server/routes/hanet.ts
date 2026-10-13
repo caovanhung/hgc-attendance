@@ -6,7 +6,7 @@ import { getUser, type Row } from '../repo';
 import { safeEqualStrings } from '../auth';
 import {
   getHanetConfigView, getWebhookToken, ingestCheckin, logWebhook, parseCheckin, rotateWebhookToken, updateHanetConfig,
-  reconcileEnabled, type CheckinInput, type IngestResult,
+  reconcileEnabled, recentUnmatchedFaces, type CheckinInput, type IngestResult,
 } from '../hanet';
 import { reconcileDate } from '../hanet-api';
 import { isValidDate, toVnDate, vnDateTimeToTs } from '../vntime';
@@ -82,6 +82,10 @@ export function hanetRoutes(ctx: AppContext): Router {
     rotateWebhookToken(db);
     console.warn(`[SECURITY] webhook_token_rotated by=${currentUser(req).code} ip=${req.ip}`);
     res.json({ config: getHanetConfigView(db) });
+  });
+
+  r.get('/hanet/recent-faces', hr, (_req, res) => {
+    res.json({ faces: recentUnmatchedFaces(db, ctx.now()) });
   });
 
   r.get('/hanet/webhook-logs', hr, (_req, res) => {

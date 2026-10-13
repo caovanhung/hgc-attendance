@@ -4,7 +4,7 @@ import { tx } from './db';
 import { recomputeDay } from './attendance';
 import { getSetting, setSetting } from './settings';
 import { toVnDate } from './vntime';
-import type { DetectionSource, HanetConfigView, WebhookLogStatus } from '../shared/types';
+import type { DetectionSource, HanetConfigView, RecentFace, WebhookLogStatus } from '../shared/types';
 
 export interface CheckinInput {
   personId: string | null;
@@ -67,13 +67,50 @@ export interface IngestResult {
   userId?: string;
 }
 
+/** Lời nhắn ghi vào nhật ký webhook khi người được nhận diện chưa có trong danh sách nhân sự. */
+export const UNMATCHED_MESSAGE = 'Không khớp nhân viên nào';
+export const RECENT_FACES_WINDOW_MS = 10 * 60_000;
+const RECENT_FACES_LIMIT = 20;
+
+/**
+ * Người camera vừa nhận diện (trong 10 phút) nhưng chưa khớp nhân sự nào, mới nhất trước, mỗi người một dòng.
+ * Dùng để gợi ý điền mã nhân viên (= aliasID), họ tên và Person ID khi thêm nhân sự.
+ */
+export function recentUnmatchedFaces(db: Db, now: number): RecentFace[] {
+  const since = new Date(now - RECENT_FACES_WINDOW_MS).toISOString();
+  const rows = db
+    .prepare("SELECT raw_payload FROM webhook_logs WHERE status = 'ignored' AND message LIKE ? AND received_at >= ? ORDER BY id DESC")
+    .all(`${UNMATCHED_MESSAGE}%`, since) as { raw_payload: string | null }[];
+  const known = db.prepare('SELECT 1 FROM users WHERE code = ? OR (hanet_person_id IS NOT NULL AND hanet_person_id = ?)');
+  const seen = new Set<string>();
+  const faces: RecentFace[] = [];
+  for (const row of rows) {
+    let body: unknown;
+    try {
+      body = row.raw_payload ? JSON.parse(row.raw_payload) : null;
+    } catch {
+      continue;
+    }
+    const parsed = parseCheckin(body, now);
+    if (!parsed) continue;
+    const { personId, aliasId, personName, deviceName, ts, imageUrl } = parsed.input;
+    const key = personId ?? `alias:${aliasId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (known.get(aliasId?.toUpperCase() ?? '', personId ?? '')) continue;
+    faces.push({ personId, aliasId, personName, deviceName, ts, imageUrl });
+    if (faces.length >= RECENT_FACES_LIMIT) break;
+  }
+  return faces;
+}
+
 export function ingestCheckin(db: Db, input: CheckinInput, source: DetectionSource): IngestResult {
   if (input.personType !== null && input.personType !== 0) return { status: 'ignored', message: 'Không phải nhân viên' };
   type Match = { id: string; status: string } | undefined;
   let user: Match;
   if (input.aliasId) user = db.prepare('SELECT id, status FROM users WHERE code = ?').get(input.aliasId.toUpperCase()) as Match;
   if (!user && input.personId) user = db.prepare('SELECT id, status FROM users WHERE hanet_person_id = ?').get(input.personId) as Match;
-  if (!user) return { status: 'ignored', message: 'Không khớp nhân viên nào' };
+  if (!user) return { status: 'ignored', message: UNMATCHED_MESSAGE };
   if (user.status !== 'active') return { status: 'ignored', message: 'Nhân viên đã ngừng hoạt động', userId: user.id };
 
   const userId = user.id;

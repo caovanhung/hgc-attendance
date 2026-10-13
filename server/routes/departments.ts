@@ -40,6 +40,13 @@ function resolveManager(db: Db, managerId: unknown): string | null {
   return managerId;
 }
 
+/** Mã tự sinh khi HR không nhập: PB001, PB002... (tiếp sau số lớn nhất đang có). */
+function nextDepartmentCode(db: Db): string {
+  const codes = db.prepare("SELECT code FROM departments WHERE code GLOB 'PB[0-9]*'").all() as { code: string }[];
+  const max = codes.reduce((m, { code }) => (/^PB\d+$/.test(code) ? Math.max(m, Number(code.slice(2))) : m), 0);
+  return `PB${String(max + 1).padStart(3, '0')}`;
+}
+
 export function departmentRoutes(ctx: AppContext): Router {
   const { db } = ctx;
   const r = Router();
@@ -51,7 +58,8 @@ export function departmentRoutes(ctx: AppContext): Router {
 
   r.post('/departments', requireRole('hr'), (req, res) => {
     const b = req.body ?? {};
-    const code = typeof b.code === 'string' ? b.code.trim().toUpperCase() : '';
+    const given = typeof b.code === 'string' ? b.code.trim().toUpperCase() : '';
+    const code = given || nextDepartmentCode(db);
     const name = typeof b.name === 'string' ? b.name.trim() : '';
     if (!CODE_RE.test(code)) throw new HttpError(400, 'Mã phòng ban không hợp lệ');
     if (!name) throw new HttpError(400, 'Tên phòng ban là bắt buộc');

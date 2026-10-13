@@ -206,3 +206,43 @@ test('mô phỏng: HR tạo lượt source=simulator; tắt thì 404', async () 
     await off.app.close();
   }
 });
+
+test('gợi ý từ camera: người vừa được nhận diện nhưng chưa có trong danh sách nhân sự', async () => {
+  const { app, url } = await setup();
+  try {
+    const c = new Client(app.baseUrl);
+    const now = Date.now();
+    // lượt cũ hơn 10 phút: không gợi ý
+    logWebhook(app.db, { status: 'ignored', message: 'Không khớp nhân viên nào', rawPayload: { aliasID: 'CU', personID: 'P0', deviceID: 'C1', time: now } }, now - 11 * 60_000);
+    const face = { aliasID: '002', personID: 'P1', personName: 'Cao Văn Hùng', personType: '0', deviceID: 'C1', deviceName: 'Cổng', detected_image_url: 'https://img/1.jpg' };
+    await c.post(url, { ...face, time: now - 60_000 });
+    await c.post(url, { ...face, time: now - 30_000 });
+    await c.post(url, { aliasID: '', personID: 'P2', personName: 'Chưa có alias', deviceID: 'C1', time: now - 20_000 });
+    await c.post(url, { aliasID: 'LA', personType: 2, deviceID: 'C1', time: now - 10_000 }); // người lạ
+    await c.post(url, { aliasID: 'PLX-NV01', deviceID: 'C1', time: now - 5_000 }); // đã là nhân sự
+
+    const hr = await loginAs(app, 'HR01');
+    const r = await hr.get('/api/hanet/recent-faces');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual(
+      r.body.faces.map((f: any) => [f.personId, f.aliasId, f.personName]),
+      [
+        ['P2', null, 'Chưa có alias'],
+        ['P1', '002', 'Cao Văn Hùng'],
+      ],
+    );
+    assert.equal(r.body.faces[1].imageUrl, 'https://img/1.jpg');
+    assert.equal(r.body.faces[1].deviceName, 'Cổng');
+    assert.equal(r.body.faces[1].ts, now - 30_000);
+
+    // tạo nhân sự rồi thì không gợi ý nữa (khớp mã hoặc Person ID)
+    seedUser(app.db, { code: '002' });
+    seedUser(app.db, { code: 'NV-KHAC', hanetPersonId: 'P2' });
+    assert.deepEqual((await hr.get('/api/hanet/recent-faces')).body.faces, []);
+
+    const nv = await loginAs(app, 'PLX-NV01');
+    assert.equal((await nv.get('/api/hanet/recent-faces')).status, 403);
+  } finally {
+    await app.close();
+  }
+});

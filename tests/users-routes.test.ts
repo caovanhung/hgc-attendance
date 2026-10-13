@@ -215,3 +215,18 @@ test('chỉ tài khoản ADMIN xóa được phòng ban; thành viên chuyển v
     await app.close();
   }
 });
+
+test('thêm phòng ban không nhập mã → hệ thống tự sinh PB001, PB002...', async () => {
+  const { app } = await setup();
+  try {
+    const hr = await loginAs(app, 'HR01');
+    const a = await hr.post('/api/departments', { name: 'Hành chính' });
+    assert.equal(a.status, 200, JSON.stringify(a.body));
+    assert.equal(a.body.department.code, 'PB001');
+    assert.equal((await hr.post('/api/departments', { name: 'Kỹ thuật', code: '' })).body.department.code, 'PB002');
+    assert.equal((await hr.post('/api/departments', { name: 'Tự đặt', code: 'pb007' })).body.department.code, 'PB007');
+    assert.equal((await hr.post('/api/departments', { name: 'Tiếp theo' })).body.department.code, 'PB008');
+  } finally {
+    await app.close();
+  }
+});

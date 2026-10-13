@@ -160,10 +160,12 @@ export const DepartmentsTab: React.FC<DepartmentsTabProps> = ({ departments, use
       {form && (
         <Modal title={form.id ? 'Sửa phòng ban' : 'Thêm phòng ban'} onClose={() => setForm(null)}>
           <form onSubmit={save} className="space-y-3.5">
-            <Field label="Mã phòng ban">
-              <input className={`${inputCls} font-mono uppercase`} value={form.code} disabled={Boolean(form.id)} onChange={(e) => setForm({ ...form, code: e.target.value })} required />
-            </Field>
-            <Field label="Tên phòng ban">
+            {form.id && (
+              <Field label="Mã phòng ban">
+                <input className={`${inputCls} font-mono`} value={form.code} disabled />
+              </Field>
+            )}
+            <Field label="Tên phòng ban" hint={form.id ? undefined : 'Mã phòng ban (PB001, PB002...) được hệ thống tự sinh'}>
               <input className={inputCls} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
             </Field>
             <Field label="Mô tả">

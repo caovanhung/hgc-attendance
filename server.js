@@ -718,6 +718,11 @@ function resolveManager(db, managerId) {
   }
   return managerId;
 }
+function nextDepartmentCode(db) {
+  const codes = db.prepare("SELECT code FROM departments WHERE code GLOB 'PB[0-9]*'").all();
+  const max = codes.reduce((m, { code }) => /^PB\d+$/.test(code) ? Math.max(m, Number(code.slice(2))) : m, 0);
+  return `PB${String(max + 1).padStart(3, "0")}`;
+}
 function departmentRoutes(ctx) {
   const { db } = ctx;
   const r = Router3();
@@ -727,7 +732,8 @@ function departmentRoutes(ctx) {
   });
   r.post("/departments", requireRole("hr"), (req, res) => {
     const b = req.body ?? {};
-    const code = typeof b.code === "string" ? b.code.trim().toUpperCase() : "";
+    const given = typeof b.code === "string" ? b.code.trim().toUpperCase() : "";
+    const code = given || nextDepartmentCode(db);
     const name = typeof b.name === "string" ? b.name.trim() : "";
     if (!CODE_RE.test(code)) throw new HttpError(400, "M\xE3 ph\xF2ng ban kh\xF4ng h\u1EE3p l\u1EC7");
     if (!name) throw new HttpError(400, "T\xEAn ph\xF2ng ban l\xE0 b\u1EAFt bu\u1ED9c");
@@ -1275,12 +1281,40 @@ function parseCheckin(body, now) {
     note: fromServer ? "Thi\u1EBFu th\u1EDDi gian t\u1EEB Hanet, d\xF9ng gi\u1EDD nh\u1EADn" : null
   };
 }
+var UNMATCHED_MESSAGE = "Kh\xF4ng kh\u1EDBp nh\xE2n vi\xEAn n\xE0o";
+var RECENT_FACES_WINDOW_MS = 10 * 6e4;
+var RECENT_FACES_LIMIT = 20;
+function recentUnmatchedFaces(db, now) {
+  const since = new Date(now - RECENT_FACES_WINDOW_MS).toISOString();
+  const rows = db.prepare("SELECT raw_payload FROM webhook_logs WHERE status = 'ignored' AND message LIKE ? AND received_at >= ? ORDER BY id DESC").all(`${UNMATCHED_MESSAGE}%`, since);
+  const known = db.prepare("SELECT 1 FROM users WHERE code = ? OR (hanet_person_id IS NOT NULL AND hanet_person_id = ?)");
+  const seen = /* @__PURE__ */ new Set();
+  const faces = [];
+  for (const row of rows) {
+    let body;
+    try {
+      body = row.raw_payload ? JSON.parse(row.raw_payload) : null;
+    } catch {
+      continue;
+    }
+    const parsed = parseCheckin(body, now);
+    if (!parsed) continue;
+    const { personId, aliasId, personName, deviceName, ts, imageUrl } = parsed.input;
+    const key = personId ?? `alias:${aliasId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (known.get(aliasId?.toUpperCase() ?? "", personId ?? "")) continue;
+    faces.push({ personId, aliasId, personName, deviceName, ts, imageUrl });
+    if (faces.length >= RECENT_FACES_LIMIT) break;
+  }
+  return faces;
+}
 function ingestCheckin(db, input, source) {
   if (input.personType !== null && input.personType !== 0) return { status: "ignored", message: "Kh\xF4ng ph\u1EA3i nh\xE2n vi\xEAn" };
   let user;
   if (input.aliasId) user = db.prepare("SELECT id, status FROM users WHERE code = ?").get(input.aliasId.toUpperCase());
   if (!user && input.personId) user = db.prepare("SELECT id, status FROM users WHERE hanet_person_id = ?").get(input.personId);
-  if (!user) return { status: "ignored", message: "Kh\xF4ng kh\u1EDBp nh\xE2n vi\xEAn n\xE0o" };
+  if (!user) return { status: "ignored", message: UNMATCHED_MESSAGE };
   if (user.status !== "active") return { status: "ignored", message: "Nh\xE2n vi\xEAn \u0111\xE3 ng\u1EEBng ho\u1EA1t \u0111\u1ED9ng", userId: user.id };
   const userId = user.id;
   const workDate = toVnDate(input.ts);
@@ -1528,6 +1562,9 @@ function hanetRoutes(ctx) {
     rotateWebhookToken(db);
     console.warn(`[SECURITY] webhook_token_rotated by=${currentUser(req).code} ip=${req.ip}`);
     res.json({ config: getHanetConfigView(db) });
+  });
+  r.get("/hanet/recent-faces", hr, (_req, res) => {
+    res.json({ faces: recentUnmatchedFaces(db, ctx.now()) });
   });
   r.get("/hanet/webhook-logs", hr, (_req, res) => {
     const rows = db.prepare("SELECT * FROM webhook_logs ORDER BY id DESC LIMIT 200").all();

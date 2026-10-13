@@ -138,6 +138,15 @@ export interface StatsData {
   totalCameras: number;
 }
 
+export interface RecentFace {
+  personId: string | null;
+  aliasId: string | null;
+  personName: string | null;
+  deviceName: string | null;
+  ts: number;
+  imageUrl: string | null;
+}
+
 export type StatsDetailType = 'total' | 'present' | 'on_time' | 'late' | 'missing_out' | 'not_checked_in';
 
 export interface StatsDetailRow {

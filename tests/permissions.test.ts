@@ -40,6 +40,7 @@ const CASES: Case[] = [
   { method: 'PUT', path: () => '/api/hanet/config', body: {}, allowed: HR },
   { method: 'POST', path: () => '/api/hanet/webhook-token/rotate', allowed: HR },
   { method: 'GET', path: () => '/api/hanet/webhook-logs', allowed: HR },
+  { method: 'GET', path: () => '/api/hanet/recent-faces', allowed: HR },
   { method: 'POST', path: () => '/api/hanet/simulate', body: { userId: 'usr-khong-co' }, allowed: HR },
   { method: 'POST', path: () => '/api/hanet/reconcile', body: {}, allowed: HR },
   { method: 'GET', path: () => '/api/admin/backups', allowed: HR },
