@@ -302,3 +302,33 @@ test('GET /detections/:id/video: chưa cấu hình / không có video → lỗi 
     },
     connectRoutes(() => reply(500, { code: 500000, error_code: 'VIDEO_INTERNAL_ERROR', message: 'Cannot retrieve video playback', data: null })),
   ));
+
+test('đăng nhập: nhận cả cookie phiên kiểu NextAuth v4 (next-auth.session-token, có chia mảnh)', async () => {
+  const db = configured();
+  const routes = connectRoutes((_p: URLSearchParams, c: FakeCall) =>
+    /__Secure-next-auth\.session-token\.0=n0/.test(c.headers.get('cookie') ?? '') ? reply(200, clip()) : reply(401, { message: 'Unauthenticated' }),
+  );
+  routes['/api/auth/callback/credentials'] = () =>
+    reply(302, null, ['__Secure-next-auth.session-token.0=n0; Path=/; HttpOnly; Secure', '__Secure-next-auth.session-token.1=n1; Path=/'], {
+      Location: 'https://connect.hanet.ai/',
+    });
+  const fake = fakeHanet(routes);
+  const v = await getVideoAt(deps(db, fake.fetchImpl), DEVICE, SWIPE);
+  assert.equal(v.url, MP4);
+  assert.equal(fake.paths().filter((p) => p === '/api/auth/callback/credentials').length, 1);
+});
+
+test('GET /detections/:id/video: duration lẻ (59.5, 59.4567) vẫn cho prevAt/nextAt nguyên, gọi đoạn sau được', () =>
+  withApp(
+    async ({ app, det }) => {
+      configured(app.db);
+      const hr = await loginAs(app, 'HR01');
+      const r = await hr.get(`/api/detections/${det.nv1}/video`);
+      assert.equal(r.status, 200);
+      assert.equal(r.body.prevAt, START - 1000);
+      assert.equal(r.body.nextAt, START + 60_457); // 59.4567 giây → làm tròn ms
+      assert.ok(Number.isInteger(r.body.nextAt));
+      assert.equal((await hr.get(`/api/detections/${det.nv1}/video?at=${r.body.nextAt}`)).status, 200);
+    },
+    connectRoutes(() => reply(200, { ...clip(), duration: 59.4567 })),
+  ));

@@ -83,7 +83,8 @@ function readCookies(res: Response, into: Map<string, string>): Map<string, stri
 }
 
 const cookieHeader = (jar: Map<string, string>) => [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
-const hasSessionToken = (jar: Map<string, string>) => [...jar.keys()].some((k) => /authjs\.session-token/.test(k));
+/** Auth.js (authjs.session-token) hoặc NextAuth v4 (next-auth.session-token), có thể kèm tiền tố __Secure- và chia mảnh .0, .1... */
+const hasSessionToken = (jar: Map<string, string>) => [...jar.keys()].some((k) => /(authjs|next-auth)\.session-token/.test(k));
 
 async function doLogin(deps: HanetDeps): Promise<Map<string, string>> {
   const email = getSetting(deps.db, EMAIL_KEY);
@@ -109,7 +110,7 @@ async function doLogin(deps: HanetDeps): Promise<Map<string, string>> {
     throw unavailable();
   }
   readCookies(res, jar);
-  // Thành công: Auth.js đặt cookie session-token (có thể chia .0, .1...). Thất bại: chuyển về trang lỗi, không có cookie đó.
+  // Thành công: Auth.js/NextAuth đặt cookie session-token (có thể chia .0, .1...). Thất bại: chuyển về trang lỗi, không có cookie đó.
   if (hasSessionToken(jar)) return jar;
   if (res.status >= 500) throw unavailable();
   throw loginFailed();

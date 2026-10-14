@@ -120,8 +120,9 @@ export function attendanceRoutes(ctx: AppContext): Router {
         duration: clip.duration,
         offsetSeconds: Math.min(Math.max((at - clip.startTs) / 1000, 0), clip.duration),
         deviceName: clip.deviceName,
-        prevAt: clip.startTs - 1000,
-        nextAt: clip.startTs + clip.duration * 1000 + 1000,
+        // Làm tròn: duration lẻ từ Hanet không được làm ?at= của nút đoạn trước/sau bị từ chối (400)
+        prevAt: Math.round(clip.startTs - 1000),
+        nextAt: Math.round(clip.startTs + clip.duration * 1000 + 1000),
       };
       res.json(body);
     }),

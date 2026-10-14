@@ -7,8 +7,14 @@ import { Modal, secondaryBtn } from './ui';
 /** Phát đoạn video camera chứa lượt quẹt, tua đúng lúc quẹt; chuyển được sang đoạn trước/sau. */
 export const VideoModal: React.FC<{ detection: Detection; onClose: () => void }> = ({ detection, onClose }) => {
   // at = null: đoạn chứa lượt quẹt (tua tới lúc quẹt); có giá trị: đoạn trước/sau (phát từ đầu)
-  const [at, setAt] = useState<number | null>(null);
-  const [video, setVideo] = useState<DetectionVideo | null>(null);
+  // seq tăng mỗi lần bấm: bấm lại cùng đoạn sau khi lỗi vẫn gửi lại request
+  const [req, setReq] = useState<{ at: number | null; seq: number }>({ at: null, seq: 0 });
+  const at = req.at;
+  const go = (next: number | null) => setReq((r) => ({ at: next, seq: r.seq + 1 }));
+  // Đoạn đang phát + vị trí tua + số lần tải (làm key cho <video>: Hanet trả trùng URL vẫn tua lại)
+  const [clip, setClip] = useState<{ video: DetectionVideo; at: number | null; seek: number; n: number } | null>(null);
+  const video = clip?.video ?? null;
+  const [playError, setPlayError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const ref = useRef<HTMLVideoElement>(null);
@@ -18,20 +24,23 @@ export const VideoModal: React.FC<{ detection: Detection; onClose: () => void }>
     setLoading(true);
     setError(null);
     api<DetectionVideo>(`/api/detections/${detection.id}/video${at === null ? '' : `?at=${at}`}`)
-      .then((v) => alive && setVideo(v))
-      .catch((err) => {
+      .then((v) => {
         if (!alive) return;
-        setVideo(null);
-        setError(errorMessage(err));
+        setPlayError(null);
+        setClip((c) => ({ video: v, at, seek: at === null ? v.offsetSeconds : 0, n: (c?.n ?? 0) + 1 }));
+      })
+      .catch((err) => {
+        // Giữ đoạn đang phát (và nút đoạn trước/sau), chỉ báo lỗi
+        if (alive) setError(errorMessage(err));
       })
       .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
     };
-  }, [detection.id, at]);
+  }, [detection.id, at, req.seq]);
 
   const onLoaded = () => {
-    if (ref.current && video) ref.current.currentTime = at === null ? video.offsetSeconds : 0;
+    if (ref.current && clip) ref.current.currentTime = clip.seek;
   };
 
   const camera = video?.deviceName ?? detection.deviceName ?? detection.deviceId;
@@ -40,23 +49,23 @@ export const VideoModal: React.FC<{ detection: Detection; onClose: () => void }>
     <Modal title={`Video · ${camera}`} onClose={onClose} wide>
       <div className="space-y-3">
         <div className="w-full aspect-video bg-slate-900 rounded-xl overflow-hidden flex items-center justify-center">
-          {video && !error ? (
+          {clip && !playError ? (
             <video
-              key={video.url}
+              key={clip.n}
               ref={ref}
-              src={video.url}
+              src={clip.video.url}
               controls
               autoPlay
               playsInline
               onLoadedMetadata={onLoaded}
-              onError={() => setError('Không phát được video, thử lại sau')}
+              onError={() => setPlayError('Không phát được video, thử lại sau')}
               className="w-full h-full"
             />
           ) : (
             <span className="text-slate-300">{loading ? 'Đang tải video...' : 'Không có video'}</span>
           )}
         </div>
-        {error && <p className="text-rose-600 bg-rose-50 rounded-xl p-2">{error}</p>}
+        {(error ?? playError) && <p className="text-rose-600 bg-rose-50 rounded-xl p-2">{error ?? playError}</p>}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-600">
           <span>
             Camera: <strong>{camera}</strong>
@@ -71,15 +80,15 @@ export const VideoModal: React.FC<{ detection: Detection; onClose: () => void }>
           </span>
         </div>
         <div className="flex gap-2">
-          <button type="button" className={`${secondaryBtn} flex-1`} disabled={loading || !video} onClick={() => video && setAt(video.prevAt)}>
+          <button type="button" className={`${secondaryBtn} flex-1`} disabled={loading || !video} onClick={() => video && go(video.prevAt)}>
             ◀ Đoạn trước
           </button>
-          <button type="button" className={`${secondaryBtn} flex-1`} disabled={loading || !video} onClick={() => video && setAt(video.nextAt)}>
+          <button type="button" className={`${secondaryBtn} flex-1`} disabled={loading || !video} onClick={() => video && go(video.nextAt)}>
             Đoạn sau ▶
           </button>
         </div>
-        {at !== null && (
-          <button type="button" className="text-[11px] text-blue-600 hover:underline cursor-pointer" onClick={() => setAt(null)} disabled={loading}>
+        {(at !== null || (clip !== null && clip.at !== null)) && (
+          <button type="button" className="text-[11px] text-blue-600 hover:underline cursor-pointer" onClick={() => go(null)} disabled={loading}>
             Về đoạn có lượt quẹt
           </button>
         )}
