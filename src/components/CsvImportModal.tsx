@@ -26,7 +26,13 @@ export const CsvImportModal: React.FC<{ onClose: () => void; onImported: () => v
     setPreview(null);
     setRows(null);
     if (!file) return;
-    const parsed = csvToRows(await file.text());
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      return setError('Không đọc được file, hãy chọn lại');
+    }
+    const parsed = csvToRows(text);
     if (parsed.error) return setError(parsed.error);
     if (parsed.rows.length === 0) return setError('File không có dòng nào');
     if (parsed.rows.length > CSV_MAX_ROWS) return setError(`Mỗi lần nhập tối đa ${CSV_MAX_ROWS} dòng — hãy chia file nhỏ hơn`);
@@ -82,7 +88,17 @@ export const CsvImportModal: React.FC<{ onClose: () => void; onImported: () => v
             </button>
             <label className={`${secondaryBtn} cursor-pointer`}>
               <Upload className="w-3.5 h-3.5" /> Chọn file CSV
-              <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => void onFile(e.target.files?.[0])} />
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  // Xóa lựa chọn để chọn lại đúng file đó (sau khi sửa) vẫn đọc lại được
+                  e.target.value = '';
+                  void onFile(file);
+                }}
+              />
             </label>
           </div>
           {busy && <p className="text-slate-500">Đang xử lý...</p>}

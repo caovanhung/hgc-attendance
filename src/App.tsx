@@ -48,6 +48,10 @@ export default function App() {
       return null;
     }
   });
+  // Đã giữ token trong state: bỏ ngay khỏi thanh địa chỉ (không lộ khi chia sẻ màn hình, không lưu vào lịch sử)
+  useEffect(() => {
+    if (resetToken) window.history.replaceState(null, '', window.location.pathname);
+  }, []); // chỉ chạy một lần khi mở trang
 
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -163,8 +167,6 @@ export default function App() {
       <ResetPasswordScreen
         token={resetToken}
         onDone={(notice) => {
-          // Bỏ token khỏi thanh địa chỉ để không dùng lại / không lộ khi chia sẻ màn hình
-          window.history.replaceState(null, '', window.location.pathname);
           setResetToken(null);
           setLoginNotice(notice);
           setAnonView('login');
