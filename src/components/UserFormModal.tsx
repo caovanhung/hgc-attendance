@@ -45,8 +45,9 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, me, isSystem
   // Quản trị khu: không đăng ký FaceID cho hr/area_admin hoặc cho chính mình (server vẫn kiểm tra)
   const faceAllowed = me.role !== 'area_admin' || (!isSelf && user?.role !== 'hr' && user?.role !== 'area_admin');
   const isManager = me.role === 'hr' || me.role === 'area_admin';
-  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [shifts, setShifts] = useState<Shift[] | null>(null);
   const [shiftId, setShiftId] = useState(user?.shiftId ?? '');
+  const [shiftTouched, setShiftTouched] = useState(false);
   const [code, setCode] = useState(user?.code ?? '');
   const [name, setName] = useState(user?.name ?? '');
   const [email, setEmail] = useState(user?.email ?? '');
@@ -110,6 +111,13 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, me, isSystem
     }
   };
 
+  // Ca chọn được: ca của khu phòng ban đang chọn. Ca riêng hiện tại không còn trong danh sách (phòng đã chuyển khu) ⇒ hiện "Theo phòng ban".
+  const deptAreaId = departments.find((d) => d.id === departmentId)?.areaId;
+  const shiftOptions = (shifts ?? []).filter((s) => s.areaId === deptAreaId);
+  const shownShiftId = shifts === null || shiftOptions.some((s) => s.id === shiftId) ? shiftId : '';
+  // Chỉ gửi ca khi người dùng đổi ca hoặc đổi phòng ban (sửa thông tin khác không đụng tới ca)
+  const sendShift = !user || shiftTouched || departmentId !== (user.departmentId ?? '');
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -125,7 +133,7 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, me, isSystem
             position,
             role,
             departmentId: departmentId || null,
-            shiftId: shiftId || null,
+            ...(sendShift ? { shiftId: shownShiftId || null } : {}),
             hanetPersonId,
             status,
             ...(role === 'area_admin' && !roleLocked ? { adminAreaIds } : {}),
@@ -297,15 +305,20 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, me, isSystem
           </Field>
           {isManager && !(isSelf && me.role === 'area_admin') && (
             <Field label="Ca riêng" hint="Để trống: theo ca của phòng ban">
-              <select className={inputCls} value={shiftId} onChange={(e) => setShiftId(e.target.value)}>
+              <select
+                className={inputCls}
+                value={shownShiftId}
+                onChange={(e) => {
+                  setShiftId(e.target.value);
+                  setShiftTouched(true);
+                }}
+              >
                 <option value="">Theo phòng ban</option>
-                {shifts
-                  .filter((s) => s.areaId === departments.find((d) => d.id === departmentId)?.areaId)
-                  .map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.workStart}–{s.workEnd})
-                    </option>
-                  ))}
+                {shiftOptions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({s.workStart}–{s.workEnd})
+                  </option>
+                ))}
               </select>
             </Field>
           )}
