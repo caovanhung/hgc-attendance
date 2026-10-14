@@ -210,6 +210,8 @@ export interface MeResponse {
   user: User;
   mustChangePassword: boolean;
   simulatorEnabled: boolean;
+  isSystemAdmin: boolean; // tài khoản ADMIN: được sửa cấu hình kỹ thuật
+  areas: Area[]; // khu người này được thấy (bộ chọn khu)
 }
 
 export interface HanetPlace {

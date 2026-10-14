@@ -4,6 +4,8 @@ import { HttpError } from '../errors';
 import { clearSessionCookie, currentUser, jsonOnly, setSessionCookie } from '../middleware';
 import { createSession, deleteSession, deleteUserSessions, hashPassword, validateNewPassword, verifyPassword } from '../auth';
 import { getUser } from '../repo';
+import { isSystemAdmin } from '../access';
+import { listAreasFor } from './areas';
 import type { MeResponse } from '../../shared/types';
 
 export function authPublicRoutes(ctx: AppContext): Router {
@@ -43,7 +45,13 @@ export function authRoutes(ctx: AppContext): Router {
     const auth = currentUser(req);
     const user = getUser(db, auth.id);
     if (!user) throw new HttpError(401, 'Vui lòng đăng nhập');
-    const body: MeResponse = { user, mustChangePassword: auth.mustChangePassword, simulatorEnabled: ctx.config.simulatorEnabled };
+    const body: MeResponse = {
+      user,
+      mustChangePassword: auth.mustChangePassword,
+      simulatorEnabled: ctx.config.simulatorEnabled,
+      isSystemAdmin: isSystemAdmin(auth),
+      areas: listAreasFor(db, auth),
+    };
     res.json(body);
   });
 
