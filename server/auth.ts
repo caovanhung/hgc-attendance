@@ -141,13 +141,13 @@ export class LoginLimiter {
 
 export type Scope =
   | { kind: 'all' }
-  | { kind: 'areas'; areaIds: string[] }
+  | { kind: 'areas'; areaIds: string[]; userId: string }
   | { kind: 'department'; departmentId: string | null }
   | { kind: 'self'; userId: string };
 
 export function scopeFor(user: AuthUser): Scope {
   if (user.role === 'hr') return { kind: 'all' };
-  if (user.role === 'area_admin') return { kind: 'areas', areaIds: user.areaIds };
+  if (user.role === 'area_admin') return { kind: 'areas', areaIds: user.areaIds, userId: user.id };
   if (user.role === 'dept_manager') return { kind: 'department', departmentId: user.departmentId };
   return { kind: 'self', userId: user.id };
 }
@@ -157,9 +157,13 @@ export function scopeWhere(scope: Scope, userIdCol: string, deptCol: string): { 
     case 'all':
       return { sql: '1=1', params: [] };
     case 'areas':
+      // Luôn thấy chính mình, kể cả khi phòng của mình nằm ngoài các khu mình quản lý
       return scope.areaIds.length
-        ? { sql: `${deptCol} IN (SELECT id FROM departments WHERE area_id IN (${scope.areaIds.map(() => '?').join(', ')}))`, params: [...scope.areaIds] }
-        : { sql: '0=1', params: [] };
+        ? {
+            sql: `(${userIdCol} = ? OR ${deptCol} IN (SELECT id FROM departments WHERE area_id IN (${scope.areaIds.map(() => '?').join(', ')})))`,
+            params: [scope.userId, ...scope.areaIds],
+          }
+        : { sql: `${userIdCol} = ?`, params: [scope.userId] };
     case 'department':
       return scope.departmentId ? { sql: `${deptCol} = ?`, params: [scope.departmentId] } : { sql: '0=1', params: [] };
     case 'self':

@@ -47,6 +47,6 @@ export function canSeeUser(viewer: AuthUser, target: { id: string; departmentId:
   const scope = scopeFor(viewer);
   if (scope.kind === 'all') return true;
   if (scope.kind === 'self') return target.id === scope.userId;
-  if (scope.kind === 'areas') return target.areaId !== null && scope.areaIds.includes(target.areaId);
+  if (scope.kind === 'areas') return target.id === scope.userId || (target.areaId !== null && scope.areaIds.includes(target.areaId));
   return scope.departmentId !== null && target.departmentId === scope.departmentId;
 }

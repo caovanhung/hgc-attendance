@@ -40,14 +40,15 @@ test('danh sách nhân sự, phòng ban, camera theo khu; bộ lọc ?area=', as
   const { app, ids } = await setup();
   try {
     const qkA = await loginAs(app, 'QKA');
-    assert.deepEqual(codes((await qkA.get('/api/users')).body.users), ['NVA', 'TPA']);
+    // Luôn thấy chính mình (QKA chưa thuộc phòng nào)
+    assert.deepEqual(codes((await qkA.get('/api/users')).body.users), ['NVA', 'QKA', 'TPA']);
     assert.deepEqual(codes((await qkA.get('/api/departments')).body.departments), ['PA']);
     assert.deepEqual((await qkA.get('/api/cameras')).body.cameras.map((c: { deviceKey: string }) => c.deviceKey), ['DEVA']);
     assert.equal((await qkA.get(`/api/users?area=${ids.B}`)).status, 404);
     assert.equal((await qkA.get('/api/users?area=none')).status, 404);
 
     const qkAB = await loginAs(app, 'QKAB');
-    assert.deepEqual(codes((await qkAB.get('/api/users')).body.users), ['NVA', 'NVB', 'TPA']);
+    assert.deepEqual(codes((await qkAB.get('/api/users')).body.users), ['NVA', 'NVB', 'QKAB', 'TPA']);
     assert.deepEqual(codes((await qkAB.get(`/api/users?area=${ids.B}`)).body.users), ['NVB']);
 
     const hr = await loginAs(app, 'HR01');
@@ -71,7 +72,8 @@ test('bảng công, thống kê, đơn: tính theo khu của nhân sự, kể c�
     const qkA = await loginAs(app, 'QKA');
     assert.deepEqual(codes((await qkA.get('/api/attendance')).body.records), ['NVA']);
     const stats = (await qkA.get('/api/stats')).body;
-    assert.deepEqual([stats.totalEmployees, stats.presentCount, stats.pendingRequests, stats.totalCameras], [2, 1, 1, 1]);
+    // Tổng nhân sự gồm cả chính QKA (luôn trong phạm vi của mình)
+    assert.deepEqual([stats.totalEmployees, stats.presentCount, stats.pendingRequests, stats.totalCameras], [3, 1, 1, 1]);
     assert.deepEqual(codes((await qkA.get('/api/stats/details?type=present')).body.rows), ['NVA']);
     assert.deepEqual((await qkA.get('/api/requests')).body.requests.map((r: { employeeCode: string }) => r.employeeCode), ['NVA']);
     const hr = await loginAs(app, 'HR01');
@@ -110,6 +112,26 @@ test('ảnh người lạ: quản trị khu chỉ thấy ảnh từ camera thu�
     assert.deepEqual((await qkA.get('/api/hanet/sightings')).body.sightings.map((s: { deviceId: string }) => s.deviceId), ['DEVA']);
     const hr = await loginAs(app, 'HR01');
     assert.equal((await hr.get('/api/hanet/sightings')).body.sightings.length, 3);
+  } finally {
+    await app.close();
+  }
+});
+
+test('quản trị khu thuộc phòng ngoài khu mình quản lý vẫn thấy chấm công và đơn của chính mình', async () => {
+  const { app, ids } = await setup();
+  try {
+    // QKX quản lý khu A nhưng thuộc Phòng B (khu B)
+    const qkX = seedUser(app.db, { code: 'QKX', role: 'area_admin', adminAreaIds: [ids.A], departmentId: ids.pb });
+    const now = Date.now();
+    addDetection(app.db, qkX, now, { deviceId: 'DEVB' });
+    const c = await loginAs(app, 'QKX');
+    assert.equal((await c.post('/api/requests', { workDate: '2026-10-02', type: 'leave_request', reason: 'nghỉ' })).status, 200);
+    const day = new Date(now + 7 * 3_600_000).toISOString().slice(0, 10);
+    assert.deepEqual(codes((await c.get(`/api/attendance?date=${day}`)).body.records), ['NVA', 'QKX']);
+    assert.deepEqual((await c.get('/api/requests')).body.requests.map((r: { userId: string }) => r.userId).sort(), [ids.nvA, qkX].sort());
+    assert.equal((await c.get(`/api/attendance/${qkX}/${day}/detections`)).status, 200);
+    // Người khác cùng phòng (ngoài khu) vẫn không thấy
+    assert.equal((await c.get(`/api/attendance/${ids.nvB}/${day}/detections`)).status, 404);
   } finally {
     await app.close();
   }

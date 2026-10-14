@@ -22,12 +22,13 @@ test('findSessionUser nạp khu được giao của quản trị khu vực, mỗ
   assert.deepEqual(findSessionUser(db, createSession(db, hr, 1000), 2000)!.areaIds, []);
 });
 
-test('scopeWhere phạm vi khu: lọc theo khu của phòng ban; không có khu nào thì rỗng', () => {
+test('scopeWhere phạm vi khu: lọc theo khu của phòng ban, luôn gồm chính mình; không có khu nào thì chỉ chính mình', () => {
   assert.deepEqual(scopeWhere(scopeFor({ ...base, role: 'area_admin', areaIds: ['a1', 'a2'] }), 'u.id', 'u.department_id'), {
-    sql: 'u.department_id IN (SELECT id FROM departments WHERE area_id IN (?, ?))',
-    params: ['a1', 'a2'],
+    sql: '(u.id = ? OR u.department_id IN (SELECT id FROM departments WHERE area_id IN (?, ?)))',
+    params: ['x', 'a1', 'a2'],
   });
-  assert.deepEqual(scopeWhere(scopeFor({ ...base, role: 'area_admin', areaIds: [] }), 'u.id', 'u.department_id'), { sql: '0=1', params: [] });
+  // Không có khu nào: chỉ thấy chính mình
+  assert.deepEqual(scopeWhere(scopeFor({ ...base, role: 'area_admin', areaIds: [] }), 'u.id', 'u.department_id'), { sql: 'u.id = ?', params: ['x'] });
 });
 
 test('canSeeUser: quản trị khu chỉ thấy người thuộc khu được giao; người chưa có khu chỉ HR thấy', () => {
@@ -35,6 +36,7 @@ test('canSeeUser: quản trị khu chỉ thấy người thuộc khu được gi
   assert.equal(canSeeUser(qk, { id: 'u', departmentId: 'd', areaId: 'a1' }), true);
   assert.equal(canSeeUser(qk, { id: 'u', departmentId: 'd', areaId: 'a2' }), false);
   assert.equal(canSeeUser(qk, { id: 'u', departmentId: null, areaId: null }), false);
+  assert.equal(canSeeUser(qk, { id: 'x', departmentId: 'd', areaId: 'a2' }), true, 'chính mình luôn thấy');
   assert.equal(canSeeUser({ ...base, role: 'hr' }, { id: 'u', departmentId: null, areaId: null }), true);
 });
 
