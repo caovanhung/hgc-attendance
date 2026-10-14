@@ -316,7 +316,10 @@ function backupNow(db, dir, reason, now) {
 function backupPreMigrate(db, dir, from) {
   fs.mkdirSync(dir, { recursive: true });
   const name = `attendance-pre-migrate-v${from}.db`;
-  if (!fs.existsSync(path.join(dir, name))) db.prepare("VACUUM INTO ?").run(path.join(dir, name));
+  const tmp = path.join(dir, `${name}.tmp`);
+  fs.rmSync(tmp, { force: true });
+  db.prepare("VACUUM INTO ?").run(tmp);
+  fs.renameSync(tmp, path.join(dir, name));
   return name;
 }
 function listBackups(dir) {
@@ -1767,6 +1770,7 @@ if (major < 22 || major === 22 && minor < 13) {
 init_db();
 init_migrations();
 import "dotenv/config";
+import fs3 from "node:fs";
 import path3 from "node:path";
 import express2 from "express";
 
@@ -4506,6 +4510,10 @@ function migrateOnly() {
     process.exit(1);
   }
   const file = path3.resolve(process.env.DB_FILE);
+  if (!fs3.existsSync(file)) {
+    console.error(`[MIGRATE] Kh\xF4ng t\xECm th\u1EA5y file database: ${file}`);
+    process.exit(1);
+  }
   const db = openDb(file, { backupDir: path3.join(path3.dirname(file), "backups") });
   const { version } = db.prepare("SELECT version FROM schema_version").get();
   db.close();
