@@ -7,8 +7,8 @@ async function setup(routes: Record<string, Reply>, configured = true) {
   const fake = fakeHanet(routes);
   const app = await startTestApp({ fetch: fake.fetchImpl });
   if (configured) configureHanet(app.db);
-  seedUser(app.db, { code: 'HR01', role: 'hr' });
-  return { app, fake, hr: await loginAs(app, 'HR01') };
+  seedUser(app.db, { code: 'ADMIN', role: 'hr' });
+  return { app, fake, hr: await loginAs(app, 'ADMIN') };
 }
 
 test('kiểm tra kết nối: trả tài khoản và danh sách địa điểm', async () => {

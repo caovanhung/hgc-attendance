@@ -153,11 +153,11 @@ test('thử lại việc lỗi, tổng quan đồng bộ, dọn việc "done" c�
 test('API tổng quan và thử lại: chỉ HR', async () => {
   const app = await startTestApp();
   try {
-    seedUser(app.db, { code: 'HR01', role: 'hr' });
+    seedUser(app.db, { code: 'ADMIN', role: 'hr' });
     const nv = seedUser(app.db, { code: 'NV01' });
     enqueue(app.db, 'user', nv, 'user.info', {}, Date.now());
     app.db.prepare("UPDATE sync_jobs SET status = 'error', last_error = 'x'").run();
-    const hr = await loginAs(app, 'HR01');
+    const hr = await loginAs(app, 'ADMIN');
     assert.deepEqual((await hr.get('/api/hanet/sync')).body.error, 1);
     const r = await hr.post('/api/hanet/sync/retry', {});
     assert.equal(r.body.error, 0);

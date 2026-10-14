@@ -187,6 +187,7 @@ async function setupApp(routes: Record<string, Reply> = connectRoutes()) {
   const kd = seedDepartment(app.db, 'KD');
   const ids = {
     hr: seedUser(app.db, { code: 'HR01', role: 'hr' }),
+    admin: seedUser(app.db, { code: 'ADMIN', role: 'hr' }),
     tp: seedUser(app.db, { code: 'TP01', role: 'dept_manager', departmentId: kt }),
     nv1: seedUser(app.db, { code: 'NV01', departmentId: kt }),
     nv2: seedUser(app.db, { code: 'NV02', departmentId: kd }),
@@ -215,7 +216,7 @@ async function withApp(fn: (s: Awaited<ReturnType<typeof setupApp>>) => Promise<
 
 test('GET/PUT /hanet/connect: không trả mật khẩu, để trống thì giữ mật khẩu cũ, email rỗng xóa cả hai', () =>
   withApp(async ({ app }) => {
-    const hr = await loginAs(app, 'HR01');
+    const hr = await loginAs(app, 'ADMIN');
     assert.deepEqual((await hr.get('/api/hanet/connect')).body, { email: null, hasPassword: false });
 
     let r = await hr.put('/api/hanet/connect', { email: ' xem@hgc.vn ', password: 'dung' });
@@ -238,7 +239,7 @@ test('GET/PUT /hanet/connect: không trả mật khẩu, để trống thì gi�
 
 test('POST /hanet/connect/test: trả ok và thông báo', () =>
   withApp(async ({ app }) => {
-    const hr = await loginAs(app, 'HR01');
+    const hr = await loginAs(app, 'ADMIN');
     assert.equal((await hr.post('/api/hanet/connect/test')).body.ok, false);
     await hr.put('/api/hanet/connect', { email: 'xem@hgc.vn', password: 'dung' });
     const r = await hr.post('/api/hanet/connect/test');

@@ -143,7 +143,8 @@ test('cấu hình Hanet: chỉ HR, che secret, ô trống giữ giá trị cũ, 
   const { app, url } = await setup();
   try {
     assert.equal((await (await loginAs(app, 'PLX-NV01')).get('/api/hanet/config')).status, 403);
-    const hr = await loginAs(app, 'HR01');
+    seedUser(app.db, { code: 'ADMIN', role: 'hr' });
+    const hr = await loginAs(app, 'ADMIN');
     const saved = await hr.put('/api/hanet/config', { clientId: 'cid', clientSecret: 'secret-1234', accessToken: 'token-abcd', placeIds: [143, '200', 'x'] });
     assert.equal(saved.status, 200);
     const cfg = (await hr.get('/api/hanet/config')).body.config;

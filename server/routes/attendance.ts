@@ -4,7 +4,7 @@ import { HttpError, ah } from '../errors';
 import { currentUser, requireRole } from '../middleware';
 import { canSeeUser, getUser, type Row } from '../repo';
 import { scopeFor, scopeWhere, type AuthUser } from '../auth';
-import { areaColumnSql, areaFilterSql, cameraScopeSql, notFound, parseAreaFilter } from '../access';
+import { requireGlobalHr, areaColumnSql, areaFilterSql, cameraScopeSql, notFound, parseAreaFilter } from '../access';
 import { recomputeRange } from '../attendance';
 import { NOT_SYSTEM_ADMIN } from '../bootstrap';
 import { getVideoAt } from '../hanet-connect';
@@ -137,7 +137,7 @@ export function attendanceRoutes(ctx: AppContext): Router {
     }),
   );
 
-  r.post('/attendance/recompute', requireRole('hr'), (req, res) => {
+  r.post('/attendance/recompute', requireGlobalHr, (req, res) => {
     const { from, to } = req.body ?? {};
     if (!isValidDate(from) || !isValidDate(to)) throw new HttpError(400, 'Ngày không hợp lệ (định dạng YYYY-MM-DD)');
     const span = daysBetween(from, to);

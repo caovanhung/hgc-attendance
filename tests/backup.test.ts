@@ -6,7 +6,7 @@ import path from 'node:path';
 import { backupNow, listBackups, pruneBackups, latestBackup, BACKUP_KEEP } from '../server/backup';
 import { openDb } from '../server/db';
 import { setSetting, getSetting } from '../server/settings';
-import { freshDb, seedUser, seedDepartment, startTestApp, loginAs, TEST_PASSWORD, addDetection } from './helpers';
+import { freshDb, seedUser, seedDepartment, seedArea, startTestApp, loginAs, TEST_PASSWORD, addDetection } from './helpers';
 import { addDays, vnDateTimeToTs } from '../server/vntime';
 import { enqueue } from '../server/hanet-sync';
 import { recordSighting } from '../server/sightings';
@@ -56,12 +56,12 @@ test('pruneBackups giữ 30 bản hằng ngày và 30 bản khác', () => {
 test('API sao lưu: chỉ HR; tạo, liệt kê, tải về', async () => {
   const app = await startTestApp({ now: () => NOW });
   try {
-    seedUser(app.db, { code: 'HR01', role: 'hr' });
+    seedUser(app.db, { code: 'ADMIN', role: 'hr' });
     seedUser(app.db, { code: 'NV01' });
     const nv = await loginAs(app, 'NV01');
     assert.equal((await nv.get('/api/admin/backups')).status, 403);
     assert.equal((await nv.post('/api/admin/backups')).status, 403);
-    const hr = await loginAs(app, 'HR01');
+    const hr = await loginAs(app, 'ADMIN');
     assert.equal((await hr.get('/api/admin/backups/latest')).status, 404);
     const created = await hr.post('/api/admin/backups');
     assert.equal(created.status, 200);
@@ -80,7 +80,8 @@ test('xóa dữ liệu: sai mật khẩu 400; đúng thì sao lưu trước, gi�
   const app = await startTestApp({ now: () => NOW });
   try {
     const dep = seedDepartment(app.db, 'KT');
-    const hrId = seedUser(app.db, { code: 'HR01', role: 'hr', departmentId: dep });
+    seedArea(app.db, 'KV01');
+    const hrId = seedUser(app.db, { code: 'ADMIN', role: 'hr', departmentId: dep });
     const nvId = seedUser(app.db, { code: 'NV01', departmentId: dep });
     addDetection(app.db, nvId, NOW);
     enqueue(app.db, 'user', nvId, 'user.info', {}, NOW);
@@ -89,7 +90,7 @@ test('xóa dữ liệu: sai mật khẩu 400; đúng thì sao lưu trước, gi�
     const nv = await loginAs(app, 'NV01');
     assert.equal((await nv.post('/api/admin/reset-database', { password: TEST_PASSWORD })).status, 403);
 
-    const hr = await loginAs(app, 'HR01');
+    const hr = await loginAs(app, 'ADMIN');
     assert.equal((await hr.post('/api/admin/reset-database', { password: 'sai' })).status, 400);
     assert.equal((app.db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number }).c, 2, 'chưa xóa gì');
 
@@ -98,7 +99,7 @@ test('xóa dữ liệu: sai mật khẩu 400; đúng thì sao lưu trước, gi�
     assert.match(r.body.backup, /-pre-reset\.db$/);
     const left = app.db.prepare('SELECT id, department_id FROM users').all() as { id: string; department_id: string | null }[];
     assert.deepEqual(left.map((u) => ({ ...u })), [{ id: hrId, department_id: null }]);
-    for (const t of ['departments', 'detections', 'attendance_days', 'requests', 'cameras', 'webhook_logs', 'sync_jobs', 'face_sightings']) {
+    for (const t of ['departments', 'detections', 'attendance_days', 'requests', 'cameras', 'webhook_logs', 'sync_jobs', 'face_sightings', 'areas', 'email_jobs']) {
       assert.equal((app.db.prepare(`SELECT COUNT(*) AS c FROM ${t}`).get() as { c: number }).c, 0, t);
     }
     assert.equal(getSetting(app.db, 'hanet.webhook_token'), 'giu-nguyen');

@@ -105,11 +105,11 @@ test('lượt đã có từ webhook không bị ghi trùng khi đối soát', as
   try {
     configure(app.db);
     seedUser(app.db, { code: 'NV01', password: null });
-    seedUser(app.db, { code: 'HR01', role: 'hr' });
+    seedUser(app.db, { code: 'ADMIN', role: 'hr' });
     await new Client(app.baseUrl).post(`/api/hanet/webhook/${getWebhookToken(app.db)}`, { aliasID: 'NV01', deviceID: 'C20371B239', time: T('08:00') });
     const fake = fakeHanet({ pages: [[item('NV01', T('08:00')), item('NV01', T('17:30'))]] });
     app.ctx.fetch = fake.fetchImpl;
-    const hr = await loginAs(app, 'HR01');
+    const hr = await loginAs(app, 'ADMIN');
     const r = await hr.post('/api/hanet/reconcile', { date: D });
     assert.equal(r.status, 200);
     assert.deepEqual(r.body.summary, { inserted: 1, duplicates: 1, ignored: 0 });
@@ -123,10 +123,10 @@ test('lượt đã có từ webhook không bị ghi trùng khi đối soát', as
 test('route đối soát: nhân viên 403, chưa cấu hình 400, Hanet lỗi 502', async () => {
   const app = await startTestApp({ now: () => NOW });
   try {
-    seedUser(app.db, { code: 'HR01', role: 'hr' });
+    seedUser(app.db, { code: 'ADMIN', role: 'hr' });
     seedUser(app.db, { code: 'NV01' });
     assert.equal((await (await loginAs(app, 'NV01')).post('/api/hanet/reconcile', {})).status, 403);
-    const hr = await loginAs(app, 'HR01');
+    const hr = await loginAs(app, 'ADMIN');
     assert.equal((await hr.post('/api/hanet/reconcile', {})).status, 400);
     configure(app.db);
     app.ctx.fetch = fakeHanet({ pages: [], expireFirst: true, refreshFails: true }).fetchImpl;

@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import type { AppContext } from '../context';
 import { HttpError, ah } from '../errors';
-import { currentUser, requireRole } from '../middleware';
+import { currentUser, requireSystemAdmin } from '../middleware';
 import { getUser, type Row } from '../repo';
-import { safeEqualStrings } from '../auth';
-import { deviceAreaId, isGlobalHr, managesArea, requireManager } from '../access';
+import { safeEqualStrings, type AuthUser } from '../auth';
+import type { Db } from '../db';
+import { deptAreaId, deviceAreaId, isGlobalHr, isSystemAdmin, managesArea, notFound, requireGlobalHr, requireManager } from '../access';
 import {
   getHanetConfigView, getWebhookToken, ingestCheckin, logWebhook, parseCheckin, rotateWebhookToken, updateHanetConfig,
   reconcileEnabled, getPlaceIds, parseStranger, STRANGER_MESSAGE, UNMATCHED_MESSAGE, type CheckinInput, type IngestResult,
@@ -84,16 +85,30 @@ export function hanetPublicRoutes(ctx: AppContext): Router {
   return r;
 }
 
+/** Đối tượng đồng bộ thuộc phạm vi người gọi (HR toàn hệ thống: mọi đối tượng). */
+function syncEntityInScope(db: Db, actor: AuthUser, type: SyncEntity, id: string): boolean {
+  if (isGlobalHr(actor)) return true;
+  if (type === 'user') {
+    const u = getUser(db, id);
+    return Boolean(u) && managesArea(actor, u!.areaId);
+  }
+  if (type === 'department') {
+    const area = deptAreaId(db, id);
+    return area !== undefined && managesArea(actor, area);
+  }
+  const cam = db.prepare('SELECT area_id FROM cameras WHERE id = ?').get(id) as { area_id: string | null } | undefined;
+  return Boolean(cam) && managesArea(actor, cam!.area_id);
+}
+
 export function hanetRoutes(ctx: AppContext): Router {
   const { db } = ctx;
   const r = Router();
-  const hr = requireRole('hr');
 
-  r.get('/hanet/config', hr, (_req, res) => {
+  r.get('/hanet/config', requireGlobalHr, (_req, res) => {
     res.json({ config: getHanetConfigView(db) });
   });
 
-  r.put('/hanet/config', hr, (req, res) => {
+  r.put('/hanet/config', requireSystemAdmin, (req, res) => {
     updateHanetConfig(db, req.body);
     kickAll(ctx);
     res.json({ config: getHanetConfigView(db) });
@@ -101,7 +116,7 @@ export function hanetRoutes(ctx: AppContext): Router {
 
   r.post(
     '/hanet/test-connection',
-    hr,
+    requireSystemAdmin,
     ah(async (_req, res) => {
       const fail = (message: string): HanetConnectionTest => ({ ok: false, account: null, places: [], message });
       if (!getSetting(db, 'hanet.client_id') || !(getSetting(db, 'hanet.refresh_token') || getSetting(db, 'hanet.access_token'))) {
@@ -125,24 +140,24 @@ export function hanetRoutes(ctx: AppContext): Router {
     }),
   );
 
-  r.get('/hanet/connect', hr, (_req, res) => {
+  r.get('/hanet/connect', requireGlobalHr, (_req, res) => {
     res.json(getConnectConfig(db));
   });
 
-  r.put('/hanet/connect', hr, (req, res) => {
+  r.put('/hanet/connect', requireSystemAdmin, (req, res) => {
     const b = req.body ?? {};
     res.json(saveConnectConfig(db, { email: b.email, password: b.password }));
   });
 
   r.post(
     '/hanet/connect/test',
-    hr,
+    requireSystemAdmin,
     ah(async (_req, res) => {
       res.json(await testConnectLogin({ db, fetch: ctx.fetch, now: ctx.now }));
     }),
   );
 
-  r.post('/hanet/webhook-token/rotate', hr, (req, res) => {
+  r.post('/hanet/webhook-token/rotate', requireSystemAdmin, (req, res) => {
     rotateWebhookToken(db);
     console.warn(`[SECURITY] webhook_token_rotated by=${currentUser(req).code} ip=${req.ip}`);
     res.json({ config: getHanetConfigView(db) });
@@ -160,7 +175,7 @@ export function hanetRoutes(ctx: AppContext): Router {
 
   r.get(
     '/hanet/persons/unlinked',
-    hr,
+    requireManager,
     ah(async (_req, res) => {
       const placeId = getPlaceIds(db)[0];
       if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, 'Chưa cấu hình kết nối Camera AI (Client ID, Refresh Token, địa điểm)');
@@ -174,11 +189,12 @@ export function hanetRoutes(ctx: AppContext): Router {
     }),
   );
 
-  r.get('/hanet/sync', hr, (_req, res) => {
+  r.get('/hanet/sync', requireGlobalHr, (_req, res) => {
     res.json(syncSummary(db));
   });
 
-  r.post('/hanet/sync/retry', hr, (req, res) => {
+  r.post('/hanet/sync/retry', requireManager, (req, res) => {
+    const actor = currentUser(req);
     const b = req.body ?? {};
     const filter: { jobId?: number; entityType?: SyncEntity; entityId?: string } = {};
     if (b.jobId !== undefined) {
@@ -190,12 +206,18 @@ export function hanetRoutes(ctx: AppContext): Router {
       filter.entityType = b.entityType;
       filter.entityId = b.entityId;
     }
+    if (filter.entityType === undefined) {
+      // Đồng bộ lại toàn bộ hoặc theo mã việc: thao tác cấu hình, chỉ ADMIN
+      if (!isSystemAdmin(actor)) throw new HttpError(403, 'Chỉ tài khoản ADMIN được đồng bộ lại toàn bộ');
+    } else if (!syncEntityInScope(db, actor, filter.entityType, filter.entityId!)) {
+      throw notFound('đối tượng');
+    }
     retryJobs(db, filter, ctx.now());
     kickAll(ctx);
-    res.json(syncSummary(db));
+    res.json(isGlobalHr(actor) ? syncSummary(db) : { success: true });
   });
 
-  r.get('/hanet/webhook-logs', hr, (_req, res) => {
+  r.get('/hanet/webhook-logs', requireGlobalHr, (_req, res) => {
     const rows = db.prepare('SELECT * FROM webhook_logs ORDER BY id DESC LIMIT 200').all() as Row[];
     const logs: WebhookLog[] = rows.map((x) => {
       let rawPayload: unknown = null;
@@ -209,7 +231,7 @@ export function hanetRoutes(ctx: AppContext): Router {
     res.json({ logs });
   });
 
-  r.post('/hanet/simulate', hr, (req, res) => {
+  r.post('/hanet/simulate', requireGlobalHr, (req, res) => {
     if (!ctx.config.simulatorEnabled) throw new HttpError(404, 'Không tìm thấy');
     const b = req.body ?? {};
     const target = typeof b.userId === 'string' ? getUser(db, b.userId) : null;
@@ -243,7 +265,7 @@ export function hanetRoutes(ctx: AppContext): Router {
 
   r.post(
     '/hanet/reconcile',
-    hr,
+    requireSystemAdmin,
     ah(async (req, res) => {
       if (!reconcileEnabled(db)) throw new HttpError(400, 'Chưa cấu hình đủ Client ID, token và Place ID để đối soát');
       const date = typeof req.body?.date === 'string' && req.body.date ? req.body.date : toVnDate(ctx.now());
