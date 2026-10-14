@@ -54,3 +54,13 @@ export const SYNC_STATUS_LABEL: Record<SyncStatus, string> = {
   pending: 'Đang chờ đồng bộ',
   error: 'Lỗi đồng bộ',
 };
+
+export const WEEKDAY_LABEL: Record<number, string> = { 1: 'T2', 2: 'T3', 3: 'T4', 4: 'T5', 5: 'T6', 6: 'T7', 7: 'CN' };
+
+/** "T2–T6" khi là dãy liên tiếp từ 3 ngày, ngược lại liệt kê "T2, T4, CN". */
+export function formatWorkDays(days: number[]): string {
+  const d = [...days].sort((a, b) => a - b);
+  if (d.length === 7) return 'Cả tuần';
+  const consecutive = d.length >= 3 && d.every((n, i) => i === 0 || n === d[i - 1] + 1);
+  return consecutive ? `${WEEKDAY_LABEL[d[0]]}–${WEEKDAY_LABEL[d[d.length - 1]]}` : d.map((n) => WEEKDAY_LABEL[n]).join(', ');
+}

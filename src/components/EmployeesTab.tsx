@@ -159,6 +159,7 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
               </div>
               {u.emailStatus === 'error' && u.emailError && <p className="text-[10px] text-rose-600">{u.emailError}</p>}
               <div className="flex justify-between"><span className="text-slate-400">Phòng ban</span><span>{u.departmentName ?? '—'}</span></div>
+              <div className="flex justify-between"><span className="text-slate-400">Ca</span><span>{u.shiftName ?? departments.find((d) => d.id === u.departmentId)?.shiftName ?? 'Ca mặc định công ty'}</span></div>
               <div className="flex justify-between"><span className="text-slate-400">Person ID (Camera AI)</span><span className="font-mono">{u.hanetPersonId ?? '—'}</span></div>
               <div className="flex justify-between">
                 <span className="text-slate-400">FaceID</span>

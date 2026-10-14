@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Camera, RefreshCw, ScanFace } from 'lucide-react';
-import type { Area, Department, FaceCandidates, FaceResult, FaceSighting, User, UserRole, UserStatus } from '../types';
+import type { Area, Department, FaceCandidates, FaceResult, FaceSighting, Shift, User, UserRole, UserStatus } from '../types';
 import { api, errorMessage } from '../api';
 import { ROLE_LABEL, fmtTime } from '../format';
 import { assignableRoles } from '../permissions';
@@ -44,6 +44,9 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, me, isSystem
   const roleLocked = isSelf || (user !== undefined && !roles.includes(user.role));
   // Quản trị khu: không đăng ký FaceID cho hr/area_admin hoặc cho chính mình (server vẫn kiểm tra)
   const faceAllowed = me.role !== 'area_admin' || (!isSelf && user?.role !== 'hr' && user?.role !== 'area_admin');
+  const isManager = me.role === 'hr' || me.role === 'area_admin';
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [shiftId, setShiftId] = useState(user?.shiftId ?? '');
   const [code, setCode] = useState(user?.code ?? '');
   const [name, setName] = useState(user?.name ?? '');
   const [email, setEmail] = useState(user?.email ?? '');
@@ -54,6 +57,14 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, me, isSystem
   const [adminAreaIds, setAdminAreaIds] = useState<string[]>(user?.adminAreaIds ?? []);
   const [hanetPersonId, setHanetPersonId] = useState(user?.hanetPersonId ?? '');
   const [status, setStatus] = useState<UserStatus>(user?.status ?? 'active');
+
+  useEffect(() => {
+    if (isManager) {
+      api<{ shifts: Shift[] }>('/api/shifts')
+        .then((d) => setShifts(d.shifts))
+        .catch(() => undefined);
+    }
+  }, [isManager]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sightings, setSightings] = useState<FaceSighting[] | null>(null);
@@ -114,6 +125,7 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, me, isSystem
             position,
             role,
             departmentId: departmentId || null,
+            shiftId: shiftId || null,
             hanetPersonId,
             status,
             ...(role === 'area_admin' && !roleLocked ? { adminAreaIds } : {}),
@@ -265,7 +277,16 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, me, isSystem
             <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} required />
           </Field>
           <Field label="Phòng ban">
-            <select className={inputCls} value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} required={me.role === 'area_admin'} disabled={isSelf && me.role === 'area_admin'}>
+            <select
+              className={inputCls}
+              value={departmentId}
+              onChange={(e) => {
+                setDepartmentId(e.target.value);
+                setShiftId('');
+              }}
+              required={me.role === 'area_admin'}
+              disabled={isSelf && me.role === 'area_admin'}
+            >
               {me.role === 'hr' && <option value="">— Chưa phân phòng —</option>}
               {departments.map((d) => (
                 <option key={d.id} value={d.id}>
@@ -274,6 +295,20 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, me, isSystem
               ))}
             </select>
           </Field>
+          {isManager && !(isSelf && me.role === 'area_admin') && (
+            <Field label="Ca riêng" hint="Để trống: theo ca của phòng ban">
+              <select className={inputCls} value={shiftId} onChange={(e) => setShiftId(e.target.value)}>
+                <option value="">Theo phòng ban</option>
+                {shifts
+                  .filter((s) => s.areaId === departments.find((d) => d.id === departmentId)?.areaId)
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.workStart}–{s.workEnd})
+                    </option>
+                  ))}
+              </select>
+            </Field>
+          )}
           <Field label="Vai trò">
             <select className={inputCls} value={role} onChange={(e) => setRole(e.target.value as UserRole)} disabled={roleLocked}>
               {(roleLocked ? [role] : roles).map((r) => (

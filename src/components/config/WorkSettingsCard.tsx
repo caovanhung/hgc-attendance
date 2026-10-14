@@ -3,7 +3,7 @@ import { Clock } from 'lucide-react';
 import type { WorkSettings } from '../../types';
 import { api, errorMessage } from '../../api';
 import { vnToday } from '../../format';
-import { Field, inputCls, primaryBtn, secondaryBtn } from '../ui';
+import { Field, WeekdayPicker, inputCls, primaryBtn, secondaryBtn } from '../ui';
 
 export const WorkSettingsCard: React.FC<{ onRecomputed: () => void }> = ({ onRecomputed }) => {
   const [ws, setWs] = useState<WorkSettings | null>(null);
@@ -23,8 +23,10 @@ export const WorkSettingsCard: React.FC<{ onRecomputed: () => void }> = ({ onRec
     if (!ws) return;
     setBusy(true);
     try {
-      setWs((await api<{ settings: WorkSettings }>('/api/settings/work', { method: 'PUT', body: ws })).settings);
-      setMessage('Đã lưu. Giờ mới áp dụng cho các lượt nhận diện từ bây giờ; bấm "Tính lại" để áp dụng cho các ngày đã qua.');
+      const r = await api<{ settings: WorkSettings; recomputed: number }>('/api/settings/work', { method: 'PUT', body: ws });
+      setWs(r.settings);
+      setMessage(`Đã lưu. Đã tính lại ${r.recomputed} ngày công từ đầu tháng.`);
+      onRecomputed();
     } catch (err) {
       setMessage(errorMessage(err));
     } finally {
@@ -48,7 +50,7 @@ export const WorkSettingsCard: React.FC<{ onRecomputed: () => void }> = ({ onRec
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 text-xs space-y-4">
       <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-        <Clock className="w-4 h-4 text-orange-500" /> Giờ làm việc
+        <Clock className="w-4 h-4 text-orange-500" /> Ca mặc định công ty
       </h3>
       {ws && (
         <form onSubmit={save} className="grid grid-cols-2 gap-3">
@@ -64,8 +66,18 @@ export const WorkSettingsCard: React.FC<{ onRecomputed: () => void }> = ({ onRec
           <Field label="Ngưỡng giờ ra (phút)" hint="Lượt cuối phải cách lượt đầu ít nhất chừng này mới tính là giờ ra">
             <input type="number" min={1} max={720} className={inputCls} value={ws.minOutGapMinutes} onChange={(e) => setWs({ ...ws, minOutGapMinutes: Number(e.target.value) })} />
           </Field>
+          <Field label="Ngưỡng đi sớm (phút)" hint="Vào trước giờ vào quá chừng này thì ghi Đi sớm">
+            <input type="number" min={0} max={120} className={inputCls} value={ws.earlyArrivalMinutes} onChange={(e) => setWs({ ...ws, earlyArrivalMinutes: Number(e.target.value) })} />
+          </Field>
+          <Field label="Cho phép về sớm (phút)" hint="Ra trước giờ ra quá chừng này mới tính về sớm (xét sau giờ ra)">
+            <input type="number" min={0} max={120} className={inputCls} value={ws.earlyLeaveMinutes} onChange={(e) => setWs({ ...ws, earlyLeaveMinutes: Number(e.target.value) })} />
+          </Field>
+          <div className="col-span-2">
+            <span className="block font-semibold text-slate-700 mb-1 text-xs">Ngày làm trong tuần</span>
+            <WeekdayPicker value={ws.workDays} onChange={(workDays) => setWs({ ...ws, workDays })} />
+          </div>
           <button type="submit" disabled={busy} className={`${primaryBtn} col-span-2`}>
-            Lưu giờ làm việc
+            Lưu ca mặc định
           </button>
         </form>
       )}

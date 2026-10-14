@@ -39,6 +39,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'requests', label: '📝 Đơn giải trình / Xin phép', visible: true },
     { id: 'cameras', label: `📹 Camera AI (${totalCameraCount})`, visible: currentUser.role !== 'employee' },
     { id: 'departments', label: '🏢 Phòng ban', visible: currentUser.role !== 'employee' },
+    { id: 'shifts', label: '🕘 Ca làm việc', visible: isManager },
     { id: 'employees', label: '👤 Nhân sự', visible: isManager },
     { id: 'areas', label: '🗺️ Khu vực', visible: currentUser.role === 'hr' },
     { id: 'hanet_config', label: '⚡ Cấu hình', visible: currentUser.role === 'hr' },

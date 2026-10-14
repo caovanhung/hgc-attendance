@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { startTestApp, seedDepartment, seedUser, loginAs } from './helpers';
+import { startTestApp, seedDepartment, seedUser, loginAs, type TestApp } from './helpers';
 import { addDays } from '../server/vntime';
 
 const NOW = Date.UTC(2026, 9, 14, 3, 0); // thứ 4 14/10/2026, 10:00 giờ VN
@@ -12,7 +12,7 @@ async function setup() {
   const nv = seedUser(app.db, { code: 'NV01', departmentId: kt });
   return { app, nv, tp: await loginAs(app, 'TP01'), me: await loginAs(app, 'NV01') };
 }
-const statuses = (app: { db: { prepare: (s: string) => { all: (...a: unknown[]) => unknown[] } } }, id: string) =>
+const statuses = (app: TestApp, id: string) =>
   (app.db.prepare('SELECT work_date, status FROM attendance_days WHERE user_id = ? ORDER BY work_date').all(id) as { work_date: string; status: string }[]).map((x) => `${x.work_date}:${x.status}`);
 
 test('gửi đơn theo khoảng: kiểm tra khoảng, tối đa 31 ngày, trước tối đa 7 ngày; loại khác không cho tương lai', async () => {

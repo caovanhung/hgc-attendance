@@ -74,3 +74,25 @@ export const ConfirmDeleteDialog: React.FC<{
     </Modal>
   );
 };
+
+export const WeekdayPicker: React.FC<{ value: number[]; onChange: (v: number[]) => void }> = ({ value, onChange }) => {
+  const WEEKDAY_LABEL: Record<number, string> = { 1: 'T2', 2: 'T3', 3: 'T4', 4: 'T5', 5: 'T6', 6: 'T7', 7: 'CN' };
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {[1, 2, 3, 4, 5, 6, 7].map((d) => {
+        const on = value.includes(d);
+        return (
+          <button
+            key={d}
+            type="button"
+            onClick={() => onChange(on ? value.filter((x) => x !== d) : [...value, d].sort((a, b) => a - b))}
+            className={`w-9 py-1 rounded-lg border text-[11px] font-semibold cursor-pointer ${on ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200'}`}
+            aria-pressed={on}
+          >
+            {WEEKDAY_LABEL[d]}
+          </button>
+        );
+      })}
+    </div>
+  );
+};

@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import type { HanetConfigView } from '../types';
 import { api, errorMessage } from '../api';
 import { WebhookCard } from './config/WebhookCard';
-import { WorkSettingsCard } from './config/WorkSettingsCard';
 import { SyncStatusCard } from './config/SyncStatusCard';
 import { MailCard } from './config/MailCard';
 import { HanetCredentialsCard } from './config/HanetCredentialsCard';
@@ -33,7 +32,7 @@ export const HanetConfigTab: React.FC<HanetConfigTabProps> = ({ isSystemAdmin, o
     <div className="space-y-6">
       {!isSystemAdmin && (
         <p className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-xl p-3">
-          Chỉ tài khoản ADMIN được thay đổi cấu hình kỹ thuật (kết nối Camera AI, webhook, đồng bộ, sao lưu). Bạn đang xem ở chế độ chỉ đọc; riêng giờ làm việc bạn vẫn sửa được.
+          Chỉ tài khoản ADMIN được thay đổi cấu hình kỹ thuật (kết nối Camera AI, webhook, đồng bộ, sao lưu). Bạn đang xem ở chế độ chỉ đọc.
         </p>
       )}
       <fieldset disabled={!isSystemAdmin} className="contents">
@@ -46,7 +45,6 @@ export const HanetConfigTab: React.FC<HanetConfigTabProps> = ({ isSystemAdmin, o
           <SyncStatusCard />
           <MailCard />
         </fieldset>
-        <WorkSettingsCard onRecomputed={onRefresh} />
         <BackupsCard canWrite={isSystemAdmin} />
         <WebhookLogsCard />
       </div>
