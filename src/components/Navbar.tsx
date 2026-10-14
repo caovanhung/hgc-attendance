@@ -1,5 +1,18 @@
 import React from 'react';
-import { Camera as CameraIcon, KeyRound, LogOut, Video } from 'lucide-react';
+import {
+  Camera,
+  KeyRound,
+  LogOut,
+  Video,
+  ClipboardList,
+  LayoutDashboard,
+  Building2,
+  Users,
+  MapPinned,
+  Settings,
+  CalendarClock,
+} from 'lucide-react';
+
 import type { User } from '../types';
 import { ROLE_LABEL } from '../format';
 
@@ -16,10 +29,10 @@ interface NavbarProps {
 }
 
 const ROLE_BADGE: Record<User['role'], string> = {
-  hr: 'bg-rose-100 text-rose-700 border-rose-200',
-  area_admin: 'bg-violet-100 text-violet-800 border-violet-200',
-  dept_manager: 'bg-amber-100 text-amber-800 border-amber-200',
-  employee: 'bg-sky-100 text-sky-800 border-sky-200',
+  hr: 'bg-blue-50 text-blue-700 ring-blue-200',
+  area_admin: 'bg-violet-50 text-violet-700 ring-violet-200',
+  dept_manager: 'bg-amber-50 text-amber-700 ring-amber-200',
+  employee: 'bg-slate-100 text-slate-700 ring-slate-200',
 };
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -33,72 +46,190 @@ export const Navbar: React.FC<NavbarProps> = ({
   setActiveTab,
   extra,
 }) => {
-  const isManager = currentUser.role === 'hr' || currentUser.role === 'area_admin';
-  const tabs: { id: string; label: string; visible: boolean }[] = [
-    { id: 'attendance', label: '📊 Bảng công', visible: true },
-    { id: 'requests', label: '📝 Đơn giải trình / Xin phép', visible: true },
-    { id: 'cameras', label: `📹 Camera AI (${totalCameraCount})`, visible: currentUser.role !== 'employee' },
-    { id: 'departments', label: '🏢 Phòng ban', visible: currentUser.role !== 'employee' },
-    { id: 'shifts', label: '🕘 Ca làm việc', visible: isManager },
-    { id: 'employees', label: '👤 Nhân sự', visible: isManager },
-    { id: 'areas', label: '🗺️ Khu vực', visible: currentUser.role === 'hr' },
-    { id: 'hanet_config', label: '⚡ Cấu hình', visible: currentUser.role === 'hr' },
+  const isManager =
+    currentUser.role === 'hr' ||
+    currentUser.role === 'area_admin';
+
+  const tabs = [
+    {
+      id: 'attendance',
+      label: 'Bảng công',
+      icon: LayoutDashboard,
+      visible: true,
+    },
+    {
+      id: 'requests',
+      label: 'Giải trình / Xin phép',
+      icon: ClipboardList,
+      visible: true,
+    },
+    {
+      id: 'cameras',
+      label: 'Camera AI',
+      icon: Camera,
+      visible: currentUser.role !== 'employee',
+      count: totalCameraCount,
+    },
+    {
+      id: 'departments',
+      label: 'Phòng ban',
+      icon: Building2,
+      visible: currentUser.role !== 'employee',
+    },
+    {
+      id: 'shifts',
+      label: 'Ca làm việc',
+      icon: CalendarClock,
+      visible: isManager,
+    },
+    {
+      id: 'employees',
+      label: 'Nhân sự',
+      icon: Users,
+      visible: isManager,
+    },
+    {
+      id: 'areas',
+      label: 'Khu vực',
+      icon: MapPinned,
+      visible: currentUser.role === 'hr',
+    },
+    {
+      id: 'hanet_config',
+      label: 'Cấu hình',
+      icon: Settings,
+      visible: currentUser.role === 'hr',
+    },
   ];
 
+  const iconButtonClass =
+    'inline-flex size-9 shrink-0 items-center justify-center rounded-lg ' +
+    'border border-border bg-surface text-text-secondary ' +
+    'transition-colors hover:bg-surface-muted hover:text-text-primary ' +
+    'focus-visible:outline-2 focus-visible:outline-brand-600';
+
   return (
-    <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-600 to-orange-500 flex items-center justify-center text-white shrink-0">
-              <CameraIcon className="w-6 h-6" />
+    <header className="sticky top-0 z-40 border-b border-border bg-surface/95 shadow-[0_1px_3px_rgb(15_23_42/4%)] backdrop-blur-md">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        {/* Brand and account toolbar */}
+        <div className="flex min-h-16 items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-navy text-white shadow-sm">
+              <Camera className="size-5" strokeWidth={2} />
             </div>
-            <span className="font-bold text-lg text-slate-900 tracking-tight truncate">Petrolimex Attendance</span>
+
+            <div className="min-w-0">
+              <div className="truncate text-base font-bold tracking-tight text-text-primary sm:text-lg">
+                Petrolimex Attendance
+              </div>
+              <div className="hidden text-xs text-text-secondary sm:block">
+                Hệ thống quản lý chấm công
+              </div>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {extra}
+
             {showSimulator && (
               <button
+                type="button"
                 onClick={onOpenSimulator}
-                className="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-orange-500 text-white hover:bg-orange-600 cursor-pointer"
+                className="hidden h-9 items-center gap-2 rounded-lg bg-brand-600 px-3 text-sm font-semibold text-white transition-colors hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-brand-600 sm:inline-flex"
               >
-                <Video className="w-4 h-4" />
+                <Video className="size-4" />
                 <span>Mô phỏng</span>
               </button>
             )}
-            <div className="hidden md:block text-right">
-              <div className="text-xs font-semibold text-slate-800 leading-tight">
-                {currentUser.name} <span className="font-mono text-slate-400">({currentUser.code})</span>
+
+            <div className="hidden min-w-0 max-w-64 text-right md:block">
+              <div className="truncate text-sm font-semibold text-text-primary">
+                {currentUser.name}
+                <span className="ml-1.5 font-mono text-xs font-normal text-text-muted">
+                  ({currentUser.code})
+                </span>
               </div>
-              <span className={`text-[10px] font-medium px-2 py-0.5 rounded-md border ${ROLE_BADGE[currentUser.role]}`}>
-                {ROLE_LABEL[currentUser.role]}
-                {currentUser.departmentName ? ` · ${currentUser.departmentName}` : ''}
-              </span>
+
+              <div className="mt-1 flex items-center justify-end gap-1.5">
+                <span
+                  className={`inline-flex max-w-full items-center truncate rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${ROLE_BADGE[currentUser.role]}`}
+                >
+                  {ROLE_LABEL[currentUser.role]}
+                </span>
+
+                {currentUser.departmentName && (
+                  <span className="max-w-32 truncate text-xs text-text-secondary">
+                    {currentUser.departmentName}
+                  </span>
+                )}
+              </div>
             </div>
-            <button onClick={onChangePassword} title="Đổi mật khẩu" className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 cursor-pointer">
-              <KeyRound className="w-4 h-4 text-slate-600" />
+
+            <div className="mx-0.5 hidden h-8 w-px bg-border md:block" />
+
+            <button
+              type="button"
+              onClick={onChangePassword}
+              title="Đổi mật khẩu"
+              aria-label="Đổi mật khẩu"
+              className={iconButtonClass}
+            >
+              <KeyRound className="size-4" />
             </button>
-            <button onClick={onLogout} title="Đăng xuất" className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 cursor-pointer">
-              <LogOut className="w-4 h-4 text-slate-600" />
+
+            <button
+              type="button"
+              onClick={onLogout}
+              title="Đăng xuất"
+              aria-label="Đăng xuất"
+              className={`${iconButtonClass} hover:border-red-200 hover:bg-red-50 hover:text-red-700`}
+            >
+              <LogOut className="size-4" />
             </button>
           </div>
         </div>
 
-        <nav className="flex items-center gap-1 overflow-x-auto py-2 -mb-px border-t border-slate-100 text-xs font-medium">
+        {/* Primary navigation */}
+        <nav
+          aria-label="Điều hướng chính"
+          className="-mb-px flex items-center gap-1 overflow-x-auto border-t border-slate-100 py-2"
+        >
           {tabs
-            .filter((t) => t.visible)
-            .map((t) => (
-              <button
-                key={t.id}
-                onClick={() => setActiveTab(t.id)}
-                className={`px-3 py-1.5 rounded-lg transition whitespace-nowrap cursor-pointer ${
-                  activeTab === t.id ? 'bg-slate-900 text-white font-semibold shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
+            .filter((tab) => tab.visible)
+            .map((tab) => {
+              const isActive = activeTab === tab.id;
+              const Icon = tab.icon;
+
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  aria-current={isActive ? 'page' : undefined}
+                  className={`inline-flex min-h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-brand-600 ${
+                    isActive
+                      ? 'bg-brand-navy font-semibold text-white shadow-sm'
+                      : 'font-medium text-text-secondary hover:bg-surface-muted hover:text-text-primary'
+                  }`}
+                >
+                  <Icon className="size-4 shrink-0" strokeWidth={1.8} />
+
+                  <span>{tab.label}</span>
+
+                  {'count' in tab && (
+                    <span
+                      className={`rounded-md px-1.5 py-0.5 text-xs tabular-nums ${
+                        isActive
+                          ? 'bg-white/15 text-white'
+                          : 'bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
         </nav>
       </div>
     </header>
