@@ -78,14 +78,18 @@ Sau đó đăng nhập `ADMIN` / `Admin@123`, đổi mật khẩu, rồi tạo l
 
 ## Nâng cấp lên bản ca làm việc (database v4)
 
-Bản này **tự nâng cấp database v3 lên v4 và giữ nguyên dữ liệu** (khu vực, phòng ban, nhân sự, ngày công, đơn). Server tự sao lưu trước khi nâng cấp vào `data/backups/attendance-pre-migrate-v3.db` (nếu file này đã có từ lần thử trước thì giữ nguyên bản đó; bản này không bao giờ bị tự xóa). **Không xóa database.**
+Bản này **tự nâng cấp database v3 lên v4 và giữ nguyên dữ liệu** (khu vực, phòng ban, nhân sự, ngày công, đơn). Server tự sao lưu trước khi nâng cấp vào `data/backups/attendance-pre-migrate-v3.db` (mỗi lần khởi động nâng cấp đều làm mới file này; file này không bao giờ bị tự xóa). **Không xóa database.**
 
 ```bash
 cd /home/ubuntu/hgc-attendance
 pm2 stop hanet-attendance
+# Sao lưu tay ra ngoài thư mục dự án (gồm cả file -wal/-shm nếu có)
+mkdir -p ~/hgc-backup && cp data/attendance.db* ~/hgc-backup/
 git pull && npm ci --omit=dev
-# Chạy thử nâng cấp trên một bản sao (không đụng database thật, không khởi động server)
-cp data/attendance.db /tmp/try-v4.db && MIGRATE_ONLY=1 DB_FILE=/tmp/try-v4.db NODE_ENV=production node server.js
+# Chạy thử nâng cấp trên một bản sao (không đụng database thật, không khởi động server); chép kèm file WAL để bản sao đủ dữ liệu
+rm -f /tmp/try-v4.db /tmp/try-v4.db-wal /tmp/try-v4.db-shm
+cp data/attendance.db /tmp/try-v4.db; cp data/attendance.db-wal /tmp/try-v4.db-wal 2>/dev/null; cp data/attendance.db-shm /tmp/try-v4.db-shm 2>/dev/null
+MIGRATE_ONLY=1 DB_FILE=/tmp/try-v4.db NODE_ENV=production node server.js
 # Phải thấy dòng: [MIGRATE] Chạy thử xong: database v4 — chỉ khi đó mới chạy tiếp
 pm2 restart hanet-attendance
 pm2 logs hanet-attendance --lines 20 --nostream    # thấy: [MIGRATE] v3 → v4 xong (sao lưu: attendance-pre-migrate-v3.db)

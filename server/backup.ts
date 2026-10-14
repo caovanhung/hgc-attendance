@@ -35,13 +35,17 @@ export function backupNow(db: Db, dir: string, reason: BackupReason, now: number
 }
 
 /**
- * Sao lưu trước khi nâng cấp từ v<from>: `attendance-pre-migrate-v<from>.db`.
- * Nếu file đó đã có (lần nâng cấp trước thất bại) thì giữ nguyên bản cũ — đó là bản gốc trước mọi lần thử.
+ * Sao lưu trước khi nâng cấp từ v<from>: `attendance-pre-migrate-v<from>.db` — đúng một file mỗi phiên bản.
+ * Mỗi lần thử đều làm mới (dữ liệu có thể đã đổi từ lần thử lỗi trước): VACUUM INTO file tạm rồi đổi tên đè lên,
+ * nên bản cũ chỉ bị thay khi bản mới đã ghi xong.
  */
 export function backupPreMigrate(db: Db, dir: string, from: number): string {
   fs.mkdirSync(dir, { recursive: true });
   const name = `attendance-pre-migrate-v${from}.db`;
-  if (!fs.existsSync(path.join(dir, name))) db.prepare('VACUUM INTO ?').run(path.join(dir, name));
+  const tmp = path.join(dir, `${name}.tmp`);
+  fs.rmSync(tmp, { force: true });
+  db.prepare('VACUUM INTO ?').run(tmp);
+  fs.renameSync(tmp, path.join(dir, name));
   return name;
 }
 

@@ -90,17 +90,31 @@ test('nâng cấp lỗi (dữ liệu khóa ngoại hỏng) ⇒ hoàn tác, DB gi
   raw.close();
 });
 
-test('nâng cấp lỗi hai lần ⇒ chỉ một file sao lưu pre-migrate, dùng lại tên đó trong thông báo', () => {
+test('nâng cấp lỗi hai lần ⇒ vẫn một file sao lưu pre-migrate, được làm mới mỗi lần thử', () => {
   const { file, backupDir } = makeV3((raw) => {
     raw.exec("PRAGMA foreign_keys = OFF; INSERT INTO attendance_days(user_id, work_date, first_in, status, detection_count) VALUES ('khong-co', '2026-10-10', 1, 'on_time', 1);");
   });
-  for (let i = 0; i < 2; i++) {
+  const attempt = (i: number) =>
     assert.throws(
       () => openDb(file, { backupDir, now: () => NOW + i * 60_000 }),
       (e: unknown) => e instanceof MigrationError && e.backup === 'attendance-pre-migrate-v3.db' && e.message.includes('attendance-pre-migrate-v3.db'),
     );
-  }
-  assert.deepEqual(fs.readdirSync(backupDir), ['attendance-pre-migrate-v3.db']);
+  const areasInBackup = () => {
+    const b = new DatabaseSync(path.join(backupDir, 'attendance-pre-migrate-v3.db'));
+    const n = (b.prepare('SELECT COUNT(*) AS c FROM areas').get() as { c: number }).c;
+    b.close();
+    return n;
+  };
+  attempt(0);
+  assert.equal(areasInBackup(), 1);
+  // Dữ liệu đổi giữa hai lần thử (vd. chạy lại bản cũ vài ngày) ⇒ lần sau phải làm mới bản sao lưu
+  const raw = new DatabaseSync(file);
+  raw.exec("INSERT INTO areas(id, code, name, created_at) VALUES ('ar2', 'KV02', 'Kho', '2026-10-02')");
+  raw.close();
+  fs.writeFileSync(path.join(backupDir, 'attendance-pre-migrate-v3.db.tmp'), 'rác từ lần trước');
+  attempt(1);
+  assert.equal(areasInBackup(), 2, 'bản sao lưu được làm mới');
+  assert.deepEqual(fs.readdirSync(backupDir), ['attendance-pre-migrate-v3.db'], 'một file, không còn .tmp');
 });
 
 test('DB phiên bản mới hơn (v5) ⇒ SchemaTooNewError, không đụng vào', () => {
@@ -143,4 +157,12 @@ test('MIGRATE_ONLY=1 mà thiếu DB_FILE ⇒ thoát 1', () => {
   const r = runServer({ MIGRATE_ONLY: '1', DB_FILE: undefined });
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stderr, /DB_FILE/);
+});
+
+test('MIGRATE_ONLY=1 với DB_FILE không tồn tại ⇒ thoát 1, không tạo DB mới', () => {
+  const missing = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'hgc-mig-')), 'khong-co.db');
+  const r = runServer({ MIGRATE_ONLY: '1', DB_FILE: missing });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.ok(r.stderr.includes(`[MIGRATE] Không tìm thấy file database: ${missing}`), r.stderr);
+  assert.equal(fs.existsSync(missing), false);
 });

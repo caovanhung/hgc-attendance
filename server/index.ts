@@ -1,5 +1,6 @@
 import './check-node';
 import 'dotenv/config';
+import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import { openDb, SchemaTooNewError, SchemaVersionError } from './db';
@@ -24,6 +25,10 @@ function migrateOnly(): void {
     process.exit(1);
   }
   const file = path.resolve(process.env.DB_FILE);
+  if (!fs.existsSync(file)) {
+    console.error(`[MIGRATE] Không tìm thấy file database: ${file}`);
+    process.exit(1);
+  }
   const db = openDb(file, { backupDir: path.join(path.dirname(file), 'backups') });
   const { version } = db.prepare('SELECT version FROM schema_version').get() as { version: number };
   db.close();
