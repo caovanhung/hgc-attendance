@@ -155,7 +155,7 @@ CREATE TABLE IF NOT EXISTS webhook_logs (
 );
 
 CREATE TABLE IF NOT EXISTS sync_jobs (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   entity_type TEXT NOT NULL CHECK (entity_type IN ('user', 'department', 'camera')),
   entity_id TEXT NOT NULL,
   op TEXT NOT NULL,
@@ -185,7 +185,7 @@ CREATE TABLE IF NOT EXISTS face_sightings (
 CREATE INDEX IF NOT EXISTS idx_sightings_created ON face_sightings(created_at);
 
 CREATE TABLE IF NOT EXISTS email_jobs (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   kind TEXT NOT NULL CHECK (kind IN ('welcome', 'reset_temp', 'reset_link')),
   to_email TEXT NOT NULL,

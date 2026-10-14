@@ -79,7 +79,7 @@ function setUserMailStatus(db: Db, userId: string, status: 'sent' | 'error', err
 
 /** Kết thúc thư ở trạng thái lỗi: xóa dữ liệu nhạy cảm (token) khỏi hàng đợi. */
 function failJob(db: Db, job: JobRow, attempts: number, message: string): void {
-  db.prepare("UPDATE email_jobs SET status = 'error', attempts = ?, last_error = ?, payload = '{}' WHERE id = ?").run(attempts, message, job.id);
+  db.prepare("UPDATE email_jobs SET status = 'error', attempts = ?, last_error = ?, payload = '{}' WHERE id = ? AND user_id = ?").run(attempts, message, job.id, job.user_id);
   setUserMailStatus(db, job.user_id, 'error', message);
 }
 
@@ -108,17 +108,19 @@ export async function runMailJobs(deps: MailDeps, limit = 20): Promise<{ sent: n
       }
       const ids = inFlightIds(db);
       ids.add(job.id);
-      let ok: boolean;
+      let outcome: SendOutcome;
       try {
-        ok = await sendOne(deps, cfg, job);
+        outcome = await sendOne(deps, cfg, job);
       } finally {
         ids.delete(job.id);
       }
-      if (ok) {
+      if (outcome === 'sent') {
         result.sent++;
         budget--;
       } else {
         result.failed++;
+        // Sai tài khoản SMTP: các thư sau cũng sẽ hỏng — dừng lượt này, để chúng chờ lượt sau (sau khi sửa cấu hình)
+        if (outcome === 'stop') break;
       }
     }
   } finally {
@@ -127,20 +129,23 @@ export async function runMailJobs(deps: MailDeps, limit = 20): Promise<{ sent: n
   return result;
 }
 
-async function sendOne(deps: MailDeps, cfg: NonNullable<ReturnType<typeof getSmtpConfig>>, job: JobRow): Promise<boolean> {
+/** Kết quả gửi một thư: 'stop' = lỗi cấu hình SMTP (sai tài khoản), dừng cả lượt gửi. */
+type SendOutcome = 'sent' | 'failed' | 'stop';
+
+async function sendOne(deps: MailDeps, cfg: NonNullable<ReturnType<typeof getSmtpConfig>>, job: JobRow): Promise<SendOutcome> {
   const { db } = deps;
   const now = deps.now();
   const u = db.prepare('SELECT id, code, name, email, status, password_hash, must_change_password FROM users WHERE id = ?').get(job.user_id) as UserRow | undefined;
   if (!u || u.status !== 'active' || !u.email) {
     failJob(db, job, job.attempts + 1, 'Nhân sự không còn hoạt động hoặc không có email');
-    return false;
+    return 'failed';
   }
   // Link đặt lại chỉ sống 30 phút: quá hạn thì không gửi nữa
   const resetExpiresAt = job.created_at + RESET_TTL_MS;
   if (job.kind === 'reset_link' && now > resetExpiresAt) {
     failJob(db, job, job.attempts + 1, RESET_EXPIRED);
     console.warn(`[MAIL] kind=${job.kind} user=${u.code} status=error code=EXPIRED`);
-    return false;
+    return 'failed';
   }
   const mailUser = { name: u.name, code: u.code, email: u.email };
   const appUrl = getAppUrl(db);
@@ -164,7 +169,7 @@ async function sendOne(deps: MailDeps, cfg: NonNullable<ReturnType<typeof getSmt
     }
     failJob(db, job, job.attempts + 1, 'Không tạo được nội dung thư (dữ liệu thư không hợp lệ)');
     console.warn(`[MAIL] kind=${job.kind} user=${u.code} status=error code=BUILD`);
-    return false;
+    return 'failed';
   }
   try {
     await deps.sendMail(cfg, msg);
@@ -182,15 +187,15 @@ async function sendOne(deps: MailDeps, cfg: NonNullable<ReturnType<typeof getSmt
       // Lần thử lại sẽ quá hạn link: dừng luôn, không giữ token trong hàng đợi
       failJob(db, job, attempts, RESET_EXPIRED);
     } else {
-      db.prepare('UPDATE email_jobs SET attempts = ?, last_error = ?, next_run_at = ? WHERE id = ?').run(attempts, me.message, now + delay, job.id);
+      db.prepare('UPDATE email_jobs SET attempts = ?, last_error = ?, next_run_at = ? WHERE id = ? AND user_id = ?').run(attempts, me.message, now + delay, job.id, job.user_id);
     }
     console.warn(`[MAIL] kind=${job.kind} user=${u.code} status=error code=${me.code}`);
-    return false;
+    return me.code === 'EAUTH' ? 'stop' : 'failed';
   }
   // Thư đã rời đi: luôn tính là đã gửi (kể cả khi dòng hàng đợi không còn)
-  db.prepare("UPDATE email_jobs SET status = 'sent', attempts = attempts + 1, last_error = NULL, payload = '{}', sent_at = ? WHERE id = ?").run(now, job.id);
+  db.prepare("UPDATE email_jobs SET status = 'sent', attempts = attempts + 1, last_error = NULL, payload = '{}', sent_at = ? WHERE id = ? AND user_id = ?").run(now, job.id, job.user_id);
   setUserMailStatus(db, u.id, 'sent', null);
   if (job.kind === 'reset_temp') deleteUserSessions(db, u.id);
   console.log(`[MAIL] kind=${job.kind} user=${u.code} status=sent`);
-  return true;
+  return 'sent';
 }

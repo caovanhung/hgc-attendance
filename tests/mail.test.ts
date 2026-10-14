@@ -253,3 +253,48 @@ test('thư bị thay trong lúc thư khác cùng lượt đang gửi → không 
   assert.equal(sentToday(db, T0), 3, 'mọi thư đã gửi đều được tính vào hạn mức');
   assert.equal(user(db, b).email_status, 'sent');
 });
+
+test('xóa nhân sự trong lúc thư của họ đang gửi: id thư không bị dùng lại, thư của người mới vẫn chờ và được gửi lượt sau', async () => {
+  const db = freshDb();
+  saveMailConfig(db, GMAIL);
+  const u = seedUser(db, { code: 'NV01', email: 'nv01@test.vn', password: null });
+  enqueueMail(db, u, 'welcome', {}, T0);
+  const mails: MailMessage[] = [];
+  let v = '';
+  let first = true;
+  const send: SendMail = async (_cfg, msg) => {
+    if (first) {
+      first = false;
+      // HR xóa nhân sự U (thư của U bị xóa theo), rồi thêm nhân sự V ngay lúc thư của U đang gửi
+      db.prepare('DELETE FROM users WHERE id = ?').run(u);
+      v = seedUser(db, { code: 'NV02', email: 'nv02@test.vn', password: null });
+      enqueueMail(db, v, 'welcome', {}, T0);
+    }
+    mails.push(msg);
+  };
+  await runMailJobs({ db, sendMail: send, now: () => T0 }, 1);
+  assert.equal(job(db, v).status, 'pending', 'thư của người mới không bị đánh dấu đã gửi');
+  assert.equal(user(db, v).email_status, 'pending');
+  assert.equal(sentToday(db, T0), 0);
+  await runMailJobs({ db, sendMail: send, now: () => T0 });
+  assert.equal(mails.length, 2);
+  assert.equal(mails[1].to, 'nv02@test.vn');
+  assert.equal(job(db, v).status, 'sent');
+  assert.equal(user(db, v).email_status, 'sent');
+});
+
+test('sai tài khoản SMTP (EAUTH): chỉ thư đang gửi bị lỗi, dừng lượt, các thư còn lại vẫn chờ', async () => {
+  const db = freshDb();
+  saveMailConfig(db, GMAIL);
+  const ids = ['A', 'B', 'C'].map((c) => seedUser(db, { code: c, email: `${c.toLowerCase()}@test.vn`, password: null }));
+  for (const id of ids) enqueueMail(db, id, 'welcome', {}, T0);
+  let calls = 0;
+  const send: SendMail = async () => {
+    calls++;
+    throw Object.assign(new Error('Invalid login'), { code: 'EAUTH' });
+  };
+  assert.deepEqual(await runMailJobs({ db, sendMail: send, now: () => T0 }), { sent: 0, failed: 1 });
+  assert.equal(calls, 1);
+  assert.deepEqual(ids.map((id) => job(db, id).status), ['error', 'pending', 'pending']);
+  assert.deepEqual(ids.map((id) => user(db, id).email_status), ['error', 'pending', 'pending']);
+});
