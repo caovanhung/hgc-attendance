@@ -81,3 +81,26 @@ test('quản trị khu: chỉ dùng phòng trong khu; quá 200 dòng thì 400', 
     await app.close();
   }
 });
+
+test('vai trò là tên thuộc tính kế thừa bị từ chối; mã ghi sẵn trùng nhau trong file báo cả hai dòng', async () => {
+  const { app } = await setup();
+  try {
+    const hr = await loginAs(app, 'HR01');
+    const rows = [
+      row({ email: 'r1@test.vn', role: 'constructor' }),
+      row({ email: 'r2@test.vn', role: '__proto__' }),
+      row({ email: 'c1@test.vn', code: 'DUP01' }),
+      row({ email: 'c2@test.vn', code: 'dup01' }),
+    ];
+    const r = await hr.post('/api/users/import-csv/preview', { rows });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const p = r.body.rows;
+    assert.deepEqual(p[0].errors, ['Vai trò chỉ được là nhan_vien hoặc truong_phong']);
+    assert.deepEqual(p[1].errors, ['Vai trò chỉ được là nhan_vien hoặc truong_phong']);
+    assert.deepEqual(p[2].errors, ['Mã nhân viên trùng với dòng khác trong file']);
+    assert.deepEqual(p[3].errors, ['Mã nhân viên trùng với dòng khác trong file']);
+    assert.equal((await hr.post('/api/users/import-csv', { rows })).status, 400);
+  } finally {
+    await app.close();
+  }
+});

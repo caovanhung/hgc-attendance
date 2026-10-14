@@ -38,11 +38,8 @@ export function checkCsvRows(db: Db, actor: AuthUser, rows: unknown, reserved: S
   const deptByCode = db.prepare('SELECT id, area_id FROM departments WHERE code = ?');
   const codeTaken = db.prepare('SELECT 1 FROM users WHERE code = ?');
   const emailTaken = db.prepare("SELECT 1 FROM users WHERE email != '' AND lower(email) = ?");
-  const fileEmails = new Map<string, number>();
   const fileCodes = new Map<string, number>();
   for (const r of rows as Record<string, unknown>[]) {
-    const e = cell(r?.email).toLowerCase();
-    if (e) fileEmails.set(e, (fileEmails.get(e) ?? 0) + 1);
     const c = cell(r?.code).toUpperCase();
     if (c) fileCodes.set(c, (fileCodes.get(c) ?? 0) + 1);
   }
@@ -69,7 +66,8 @@ export function checkCsvRows(db: Db, actor: AuthUser, rows: unknown, reserved: S
     const dept = deptByCode.get(cell(r?.departmentCode).toUpperCase()) as { id: string; area_id: string | null } | undefined;
     // Phòng ngoài khu báo như không tồn tại (không lộ dữ liệu khu khác)
     if (!dept || !managesArea(actor, dept.area_id)) errors.push('Mã phòng ban không tồn tại');
-    const role = ROLE_MAP[cell(r?.role).toLowerCase()];
+    const roleKey = cell(r?.role).toLowerCase();
+    const role = Object.hasOwn(ROLE_MAP, roleKey) ? ROLE_MAP[roleKey] : undefined;
     if (!role) errors.push('Vai trò chỉ được là nhan_vien hoặc truong_phong');
     const code = cell(r?.code).toUpperCase();
     if (code) {
