@@ -637,7 +637,7 @@ function parseCheckin(body, now) {
       ts,
       imageUrl: str(d.detected_image_url ?? d.avatar)
     },
-    note: fromServer ? "Thi\u1EBFu th\u1EDDi gian t\u1EEB Hanet, d\xF9ng gi\u1EDD nh\u1EADn" : null
+    note: fromServer ? "Thi\u1EBFu th\u1EDDi gian t\u1EEB Camera AI, d\xF9ng gi\u1EDD nh\u1EADn" : null
   };
 }
 function parseStranger(body, now) {
@@ -775,7 +775,7 @@ async function postForm(deps, url, params) {
   try {
     return await res.json();
   } catch {
-    throw new HanetApiError(0, `Hanet tr\u1EA3 d\u1EEF li\u1EC7u kh\xF4ng \u0111\u1ECDc \u0111\u01B0\u1EE3c t\u1EEB ${url}`, true);
+    throw new HanetApiError(0, `Camera AI tr\u1EA3 d\u1EEF li\u1EC7u kh\xF4ng \u0111\u1ECDc \u0111\u01B0\u1EE3c t\u1EEB ${url}`, true);
   }
 }
 async function doRefresh(deps) {
@@ -821,7 +821,7 @@ async function callApi(deps, apiPath, params, retried = false) {
   }
   if (code !== 1) {
     const text = describeHanetError(code);
-    throw new HanetApiError(code, text ? `${text} (m\xE3 ${code})` : `Hanet tr\u1EA3 l\u1ED7i ${code}: ${body?.returnMessage ?? ""}`);
+    throw new HanetApiError(code, text ? `${text} (m\xE3 ${code})` : `Camera AI tr\u1EA3 l\u1ED7i ${code}: ${body?.returnMessage ?? ""}`);
   }
   return body;
 }
@@ -881,20 +881,20 @@ var init_hanet_api = __esm({
     HANET_TIMEOUT_MS = 15e3;
     PERMANENT_CODES = /* @__PURE__ */ new Set([-1, -2035, -1005, -101, -5011, -9005, -9006, -9007, -9008, -5010, -909, -9002]);
     HANET_ERROR_TEXT = {
-      [-1]: "D\u1EEF li\u1EC7u g\u1EEDi Hanet kh\xF4ng h\u1EE3p l\u1EC7",
-      [-103]: "Token Hanet h\u1EBFt h\u1EA1n",
-      [-2035]: "T\xE0i kho\u1EA3n Hanet kh\xF4ng c\xF3 quy\u1EC1n v\u1EDBi \u0111\u1ECBa \u0111i\u1EC3m ho\u1EB7c thi\u1EBFt b\u1ECB n\xE0y",
-      [-503]: "H\u1EC7 th\u1ED1ng Hanet \u0111ang l\u1ED7i",
-      [-101]: "Kh\xF4ng t\xECm th\u1EA5y thi\u1EBFt b\u1ECB tr\xEAn Hanet",
+      [-1]: "D\u1EEF li\u1EC7u g\u1EEDi Camera AI kh\xF4ng h\u1EE3p l\u1EC7",
+      [-103]: "Token Camera AI h\u1EBFt h\u1EA1n",
+      [-2035]: "T\xE0i kho\u1EA3n Camera AI kh\xF4ng c\xF3 quy\u1EC1n v\u1EDBi \u0111\u1ECBa \u0111i\u1EC3m ho\u1EB7c thi\u1EBFt b\u1ECB n\xE0y",
+      [-503]: "H\u1EC7 th\u1ED1ng Camera AI \u0111ang l\u1ED7i",
+      [-101]: "Kh\xF4ng t\xECm th\u1EA5y thi\u1EBFt b\u1ECB tr\xEAn Camera AI",
       [-102]: "Thi\u1EBFt b\u1ECB \u0111ang offline",
-      [-1005]: "Kh\xF4ng t\xECm th\u1EA5y \u0111\u1ECBa \u0111i\u1EC3m tr\xEAn Hanet",
-      [-5011]: "Kh\xF4ng t\xECm th\u1EA5y ng\u01B0\u1EDDi n\xE0y tr\xEAn Hanet",
-      [-9005]: "Ng\u01B0\u1EDDi n\xE0y \u0111\xE3 c\xF3 tr\xEAn Hanet",
+      [-1005]: "Kh\xF4ng t\xECm th\u1EA5y \u0111\u1ECBa \u0111i\u1EC3m tr\xEAn Camera AI",
+      [-5011]: "Kh\xF4ng t\xECm th\u1EA5y ng\u01B0\u1EDDi n\xE0y tr\xEAn Camera AI",
+      [-9005]: "Ng\u01B0\u1EDDi n\xE0y \u0111\xE3 c\xF3 tr\xEAn Camera AI",
       [-9006]: "\u1EA2nh kh\xF4ng \u0111\u1EA1t: c\u1EA7n r\xF5 m\u1EB7t, m\u1ED9t ng\u01B0\u1EDDi, nh\xECn th\u1EB3ng, kh\xF4ng m\u0169, kh\xF4ng kh\u1EA9u trang",
       [-9007]: "\u1EA2nh tr\xF9ng v\u1EDBi ng\u01B0\u1EDDi \u0111\xE3 \u0111\u0103ng k\xFD",
-      [-9008]: "\u0110\u1ECBa \u0111i\u1EC3m \u0111\xE3 h\u1EBFt s\u1ED1 khu\xF4n m\u1EB7t mi\u1EC5n ph\xED, c\u1EA7n mua g\xF3i cloud Hanet",
+      [-9008]: "\u0110\u1ECBa \u0111i\u1EC3m \u0111\xE3 h\u1EBFt s\u1ED1 khu\xF4n m\u1EB7t mi\u1EC5n ph\xED, c\u1EA7n mua g\xF3i cloud Camera AI",
       [-5010]: "\u1EA2nh kh\xF4ng h\u1EE3p l\u1EC7",
-      [-909]: "T\u1EA3i \u1EA3nh l\xEAn Hanet th\u1EA5t b\u1EA1i",
+      [-909]: "T\u1EA3i \u1EA3nh l\xEAn Camera AI th\u1EA5t b\u1EA1i",
       [-9002]: "\u0110\u1ECBnh d\u1EA1ng \u1EA3nh kh\xF4ng \u0111\u01B0\u1EE3c h\u1ED7 tr\u1EE3"
     };
     HanetApiError = class extends Error {
@@ -908,7 +908,7 @@ var init_hanet_api = __esm({
     PAGE_SIZE = 500;
     TOKEN_EXPIRED = -103;
     MAX_PAGES = 200;
-    REFRESH_FAILED = "K\u1EBFt n\u1ED1i Hanet h\u1ECFng, ki\u1EC3m tra Client ID/Secret/Refresh Token";
+    REFRESH_FAILED = "K\u1EBFt n\u1ED1i Camera AI h\u1ECFng, ki\u1EC3m tra Client ID/Secret/Refresh Token";
     refreshFailed = (detail, code = 0) => new HanetApiError(code, `${REFRESH_FAILED} (${detail})`, true);
     refreshing = /* @__PURE__ */ new WeakMap();
     arr = (v) => Array.isArray(v) ? v : [];
@@ -976,7 +976,7 @@ var init_hanet_api = __esm({
       async createDepartment(deps, placeId, name, desc) {
         const d = (await callApi(deps, "/department/create", { placeID: String(placeId), name, desc })).data;
         const id = Number(d?.id);
-        if (!Number.isInteger(id) || id <= 0) throw new HanetApiError(0, "Hanet kh\xF4ng tr\u1EA3 ID ph\xF2ng ban v\u1EEBa t\u1EA1o");
+        if (!Number.isInteger(id) || id <= 0) throw new HanetApiError(0, "Camera AI kh\xF4ng tr\u1EA3 ID ph\xF2ng ban v\u1EEBa t\u1EA1o");
         return id;
       },
       async updateDepartment(deps, id, name, desc) {
@@ -1002,7 +1002,7 @@ __export(sync_handlers_exports, {
 });
 function placeOf(deps) {
   const id = getPlaceIds(deps.db)[0];
-  if (!id) throw new SyncDeferred("Ch\u01B0a ch\u1ECDn \u0111\u1ECBa \u0111i\u1EC3m Hanet");
+  if (!id) throw new SyncDeferred("Ch\u01B0a ch\u1ECDn \u0111\u1ECBa \u0111i\u1EC3m Camera AI");
   return id;
 }
 async function ignoreNotFound(fn) {
@@ -1045,7 +1045,7 @@ var init_sync_handlers = __esm({
         if (toId) {
           const d = deptRow(deps, toId);
           if (d) {
-            if (!d.hanet_department_id) throw new SyncDeferred("Ch\u1EDD ph\xF2ng ban \u0111\u1ED3ng b\u1ED9 l\xEAn Hanet");
+            if (!d.hanet_department_id) throw new SyncDeferred("Ch\u1EDD ph\xF2ng ban \u0111\u1ED3ng b\u1ED9 l\xEAn Camera AI");
             toHanet = Number(d.hanet_department_id);
           }
         }
@@ -1072,7 +1072,7 @@ var init_sync_handlers = __esm({
       "dept.update": async (deps, job) => {
         const d = deptRow(deps, job.entityId);
         if (!d) return;
-        if (!d.hanet_department_id) throw new SyncDeferred("Ch\u1EDD t\u1EA1o ph\xF2ng ban tr\xEAn Hanet");
+        if (!d.hanet_department_id) throw new SyncDeferred("Ch\u1EDD t\u1EA1o ph\xF2ng ban tr\xEAn Camera AI");
         await hanetApi.updateDepartment(deps, Number(d.hanet_department_id), d.name, d.description ?? "");
       },
       "dept.remove": async (deps, job) => {
@@ -1621,25 +1621,25 @@ async function registerFace(deps, userId, imageUrl) {
     return { ok: false, message };
   };
   const placeId = getPlaceIds(db)[0];
-  if (!reconcileEnabled(db) || !placeId) return fail("Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Hanet (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
+  if (!reconcileEnabled(db) || !placeId) return fail("Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Camera AI (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
   try {
     if (u.face_registered === 1) {
       await hanetApi.updateFaceByUrl(deps, { aliasId: u.code, placeId, url: imageUrl });
       db.prepare("UPDATE users SET face_error = NULL WHERE id = ?").run(userId);
-      return { ok: true, message: "\u0110\xE3 c\u1EADp nh\u1EADt \u1EA3nh nh\u1EADn di\u1EC7n tr\xEAn Hanet" };
+      return { ok: true, message: "\u0110\xE3 c\u1EADp nh\u1EADt \u1EA3nh nh\u1EADn di\u1EC7n tr\xEAn Camera AI" };
     }
     let personId;
     try {
       personId = await hanetApi.registerByUrl(deps, { name: u.name, aliasId: u.code, placeId, url: imageUrl, title: u.position ?? "" });
     } catch (err) {
       if (err instanceof HanetApiError && err.returnCode === -9005) {
-        return fail(`M\xE3 ${u.code} \u0111\xE3 l\xE0 aliasID c\u1EE7a m\u1ED9t ng\u01B0\u1EDDi kh\xE1c tr\xEAn Hanet. D\xF9ng "Nh\u1EADp t\u1EEB Hanet" \u0111\u1EC3 li\xEAn k\u1EBFt ng\u01B0\u1EDDi \u0111\xF3, ho\u1EB7c \u0111\u1ED5i m\xE3 nh\xE2n vi\xEAn.`);
+        return fail(`M\xE3 ${u.code} \u0111\xE3 l\xE0 aliasID c\u1EE7a m\u1ED9t ng\u01B0\u1EDDi kh\xE1c tr\xEAn Camera AI. D\xF9ng "Nh\u1EADp t\u1EEB Camera AI" \u0111\u1EC3 li\xEAn k\u1EBFt ng\u01B0\u1EDDi \u0111\xF3, ho\u1EB7c \u0111\u1ED5i m\xE3 nh\xE2n vi\xEAn.`);
       }
       throw err;
     }
-    if (!personId) return fail("Hanet kh\xF4ng tr\u1EA3 Person ID sau khi \u0111\u0103ng k\xFD");
+    if (!personId) return fail("Camera AI kh\xF4ng tr\u1EA3 Person ID sau khi \u0111\u0103ng k\xFD");
     linkFace(db, userId, String(personId), u.department_id, deps.now());
-    return { ok: true, message: "\u0110\xE3 \u0111\u0103ng k\xFD FaceID tr\xEAn Hanet" };
+    return { ok: true, message: "\u0110\xE3 \u0111\u0103ng k\xFD FaceID tr\xEAn Camera AI" };
   } catch (err) {
     return fail(err.message);
   }
@@ -1771,12 +1771,12 @@ function userRoutes(ctx) {
       if (wanted.size > IMPORT_MAX) throw new HttpError(400, `M\u1ED7i l\u1EA7n nh\u1EADp t\u1ED1i \u0111a ${IMPORT_MAX} ng\u01B0\u1EDDi`);
       const departmentId = resolveDepartment(db, b.departmentId);
       const placeId = getPlaceIds(db)[0];
-      if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, "Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Hanet (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
+      if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, "Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Camera AI (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
       let all;
       try {
         all = await fetchAllPersons(deps, placeId);
       } catch (err) {
-        throw new HttpError(502, `Kh\xF4ng l\u1EA5y \u0111\u01B0\u1EE3c danh s\xE1ch ng\u01B0\u1EDDi t\u1EEB Hanet: ${err.message}`);
+        throw new HttpError(502, `Kh\xF4ng l\u1EA5y \u0111\u01B0\u1EE3c danh s\xE1ch ng\u01B0\u1EDDi t\u1EEB Camera AI: ${err.message}`);
       }
       const chosen = unlinkedPersons(db, all).filter((p) => wanted.has(String(p.personID)));
       if (chosen.length === 0) throw new HttpError(400, "Kh\xF4ng c\xF3 ng\u01B0\u1EDDi h\u1EE3p l\u1EC7 \u0111\u1EC3 nh\u1EADp (c\xF3 th\u1EC3 \u0111\xE3 \u0111\u01B0\u1EE3c nh\u1EADp tr\u01B0\u1EDBc \u0111\xF3)");
@@ -2114,7 +2114,7 @@ function cameraRoutes(ctx) {
   const deps = { db, fetch: ctx.fetch, now: ctx.now };
   const listCameras = () => db.prepare("SELECT * FROM cameras ORDER BY name").all().map(mapCamera);
   const requireHanet = () => {
-    if (!reconcileEnabled(db)) throw new HttpError(400, "Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Hanet (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
+    if (!reconcileEnabled(db)) throw new HttpError(400, "Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Camera AI (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
   };
   r.get("/cameras", (_req, res) => {
     res.json({ cameras: listCameras() });
@@ -2143,7 +2143,7 @@ function cameraRoutes(ctx) {
       try {
         added = await importCameras(deps);
       } catch (err) {
-        throw new HttpError(502, `Kh\xF4ng l\u1EA5y \u0111\u01B0\u1EE3c danh s\xE1ch camera t\u1EEB Hanet: ${err.message}`);
+        throw new HttpError(502, `Kh\xF4ng l\u1EA5y \u0111\u01B0\u1EE3c danh s\xE1ch camera t\u1EEB Camera AI: ${err.message}`);
       }
       res.json({ added, cameras: listCameras() });
     })
@@ -2156,7 +2156,7 @@ function cameraRoutes(ctx) {
       try {
         await refreshCameraStatus(deps);
       } catch (err) {
-        throw new HttpError(502, `Kh\xF4ng l\u1EA5y \u0111\u01B0\u1EE3c tr\u1EA1ng th\xE1i camera t\u1EEB Hanet: ${err.message}`);
+        throw new HttpError(502, `Kh\xF4ng l\u1EA5y \u0111\u01B0\u1EE3c tr\u1EA1ng th\xE1i camera t\u1EEB Camera AI: ${err.message}`);
       }
       res.json({ cameras: listCameras() });
     })
@@ -2786,12 +2786,12 @@ function hanetRoutes(ctx) {
     hr,
     ah(async (_req, res) => {
       const placeId = getPlaceIds(db)[0];
-      if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, "Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Hanet (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
+      if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, "Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Camera AI (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
       let persons;
       try {
         persons = await fetchAllPersons({ db, fetch: ctx.fetch, now: ctx.now }, placeId);
       } catch (err) {
-        throw new HttpError(502, `Kh\xF4ng l\u1EA5y \u0111\u01B0\u1EE3c danh s\xE1ch ng\u01B0\u1EDDi t\u1EEB Hanet: ${err.message}`);
+        throw new HttpError(502, `Kh\xF4ng l\u1EA5y \u0111\u01B0\u1EE3c danh s\xE1ch ng\u01B0\u1EDDi t\u1EEB Camera AI: ${err.message}`);
       }
       res.json({ persons: unlinkedPersons(db, persons) });
     })
