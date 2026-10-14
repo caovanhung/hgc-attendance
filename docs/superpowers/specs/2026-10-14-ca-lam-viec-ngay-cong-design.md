@@ -24,7 +24,8 @@
 | Q3 | Mỗi ca có **ngày làm trong tuần**; HR nhập **ngày lễ** chung; hết giờ ra của ca mà không có lượt quẹt/đơn ⇒ vắng. |
 | Q4 | Ngưỡng theo từng ca, mặc định: cho phép muộn **15** phút, ngưỡng đi sớm **15** phút, cho phép về sớm **10** phút. **Bỏ tăng ca.** |
 | Q5 | **Mỗi khu có danh sách ca riêng**; quản trị khu sửa ca khu mình, HR toàn hệ thống sửa mọi ca. Ca mặc định công ty chỉ HR toàn hệ thống sửa. Đổi ca/ngưỡng ⇒ **tự tính lại công từ đầu tháng hiện tại**, không hỏi. |
-| Q6 | Đơn nghỉ phép và công tác **từ ngày đến ngày** (tối đa 31 ngày, trọn ngày). Duyệt xong các ngày làm việc trong khoảng mang trạng thái "Nghỉ phép"/"Công tác", không tính vắng/muộn/về sớm; lượt quẹt vẫn giữ để xem. |
+| Q6 | Đơn nghỉ phép và công tác **từ ngày đến ngày** (tối đa 31 ngày, trọn ngày), gửi trước **tối đa 7 ngày**. Duyệt xong các ngày làm việc trong khoảng mang trạng thái "Nghỉ phép"/"Công tác", không tính vắng/muộn/về sớm; lượt quẹt vẫn giữ để xem. |
+| Q8 | **Về sớm chỉ xét sau giờ ra của ca.** Trong giờ làm, giờ ra chỉ là "lần quẹt gần nhất" tại thời điểm đó, không gắn về sớm; hết giờ ra mới chốt về sớm (ra trước giờ ra quá ngưỡng 10 phút). |
 | Q7 | Nâng cấp v3 → v4 bằng **migration**, tự sao lưu trước, giữ dữ liệu. Từ nay mọi thay đổi cấu trúc đều có migration. |
 
 ## 3. Dữ liệu (schema v4)
@@ -41,6 +42,7 @@
 - `users.shift_id TEXT REFERENCES shifts(id) ON DELETE RESTRICT` (NULL = theo phòng ban)
 - `requests.end_date TEXT` (NULL = một ngày, bằng `work_date`)
 - `attendance_days.early_arrival_minutes INTEGER NOT NULL DEFAULT 0`
+- `attendance_days.final INTEGER NOT NULL DEFAULT 0` — 1 khi ngày đã được chốt (tính lúc đã qua giờ ra của ca, hoặc ngày đã qua); 0 khi còn trong giờ làm
 
 **Ràng buộc đổi** (SQLite phải dựng lại bảng):
 
@@ -83,14 +85,15 @@ Một ngày công của (người, ngày `D`) được tính lại bởi `recomp
 3. Có lượt quẹt (hoặc giờ chỉnh tay) ⇒ tính như hiện nay theo ca:
    - **Muộn:** vào sau `work_start + late_grace` ⇒ `late_minutes = vào − work_start` (giữ cách đếm từ giờ vào ca).
    - **Đi sớm:** vào trước `work_start − early_arrival_minutes` ⇒ `early_arrival_minutes = work_start − vào`; không đổi trạng thái (vẫn `on_time` nếu không muộn/về sớm), giao diện hiện nhãn "Đi sớm".
-   - **Về sớm:** ra trước `work_end − early_leave_minutes` ⇒ `early_minutes = work_end − ra` (**đổi so với hiện nay**: trước đây mọi lượt ra trước `work_end` đều là về sớm).
+   - **Về sớm:** chỉ xét khi **đã qua `work_end` của ngày `D`** (ngày đã chốt, `final = 1`): ra trước `work_end − early_leave_minutes` ⇒ `early_minutes = work_end − ra` (**đổi so với hiện nay**: trước đây mọi lượt ra trước `work_end` đều là về sớm, kể cả khi người đó vẫn đang làm).
+   - **Trong giờ làm** (chưa qua `work_end`, `final = 0`): `last_out` là lần quẹt gần nhất (giữ ngưỡng `min_out_gap_minutes` như hiện nay); `early_minutes = 0`; trạng thái chỉ có thể là `missing_out`, `late` hoặc `on_time`. Giao diện ghi "Lần quẹt gần nhất HH:mm" thay cho "Giờ ra".
    - Trạng thái: `missing_out` / `late_and_early` / `late` / `early_leave` / `on_time` như hiện nay.
 4. Không có lượt quẹt, `D` là ngày làm việc của ca, không phải ngày lễ, và **thời điểm hiện tại đã qua `work_end` của ngày `D`** ⇒ `absent` (`first_in` NULL).
 5. Còn lại ⇒ không có dòng ngày công.
 
 **Ngày làm việc:** thứ của `D` thuộc `work_days` của ca **và** `D` không có trong `holidays`.
 
-**Đóng ngày (job):** mỗi 15 phút (và lúc khởi động), với ngày hôm nay và hôm qua (giờ Việt Nam), gọi `recomputeDay` cho mọi nhân sự đang hoạt động (trừ `ADMIN`) chưa có dòng ngày công — để ghi `absent` khi qua giờ ra. Lượt quẹt đến muộn sau đó thay `absent` bằng trạng thái thật (đường webhook vẫn gọi `recomputeDay`).
+**Đóng ngày (job):** mỗi 15 phút (và lúc khởi động), với ngày hôm nay và hôm qua (giờ Việt Nam), gọi `recomputeDay` cho mọi nhân sự đang hoạt động (trừ `ADMIN`) **chưa có dòng ngày công hoặc có dòng `final = 0`** mà đã qua giờ ra của ca — để ghi `absent` và chốt về sớm. Lượt quẹt đến sau đó vẫn làm tính lại (đường webhook gọi `recomputeDay`).
 
 ## 7. Tính lại khi cấu hình đổi
 
@@ -109,7 +112,7 @@ Tháng trước không đổi trừ khi HR dùng nút "Tính lại" sẵn có (g
 ## 8. Đơn từ
 
 - Loại mới `business_trip` ("Công tác").
-- `leave_request` và `business_trip` nhận `workDate` (từ ngày) và `endDate` (đến ngày, tùy chọn, ≥ `workDate`, tối đa 31 ngày). Được gửi cho **ngày tương lai** tới 90 ngày (các loại đơn khác vẫn không cho tương lai).
+- `leave_request` và `business_trip` nhận `workDate` (từ ngày) và `endDate` (đến ngày, tùy chọn, ≥ `workDate`, tối đa 31 ngày). Được gửi cho **ngày tương lai** tới **7 ngày** kể từ hôm nay (ngày bắt đầu ≤ hôm nay + 7; các loại đơn khác vẫn không cho tương lai).
 - Hai đơn nghỉ/công tác **đã duyệt** của cùng một người không được chồng ngày: duyệt đơn thứ hai chồng ngày ⇒ 409 "Khoảng ngày trùng với đơn đã duyệt".
 - Duyệt ⇒ tính lại các ngày trong khoảng (mục 7). Từ chối ⇒ không đổi gì.
 - Người duyệt như hiện nay (trưởng phòng; quản trị khu với nhân viên/trưởng phòng trong khu; HR).
@@ -134,7 +137,7 @@ Tháng trước không đổi trừ khi HR dùng nút "Tính lại" sẵn có (g
 - `GET /api/holidays?year=` → `{ holidays: { date, name }[] }`; `POST /api/holidays { date, name }`; `DELETE /api/holidays/:date`.
 - `PUT /api/departments/:id { shiftId }`, `POST/PUT /api/users { shiftId }`.
 - `POST /api/requests { type, workDate, endDate?, … }`.
-- `AttendanceDay` thêm `earlyArrivalMinutes`, `firstIn: number | null`; `DayStatus` thêm `absent`, `leave`, `business_trip`.
+- `AttendanceDay` thêm `earlyArrivalMinutes`, `final: boolean`, `firstIn: number | null`; `DayStatus` thêm `absent`, `leave`, `business_trip`.
 - `StatsData` thêm `absentCount`, `leaveCount`, `businessTripCount`; `notCheckedInCount` = nhân sự có ngày làm việc hôm nay, chưa có dòng ngày công (chưa tới giờ ra), không tính người nghỉ/công tác/vắng. `StatsDetailType` thêm `absent`, `leave`, `business_trip`, `early_arrival`.
 
 Kiểm tra dữ liệu ca: giờ dạng `HH:mm`, `work_end > work_start`, `work_days` không rỗng và mỗi số 1–7, ngưỡng là số nguyên 0–120, tên không trống và không trùng trong khu.
@@ -144,7 +147,7 @@ Kiểm tra dữ liệu ca: giờ dạng `HH:mm`, `work_end > work_start`, `work_
 - **Tab "Ca làm việc"** (HR toàn hệ thống, quản trị khu): theo khu đang chọn — danh sách ca (tên, giờ, ngày làm, ngưỡng, số phòng/người dùng), thêm/sửa/xóa; HR thấy thêm thẻ **Ca mặc định công ty** (chuyển từ thẻ "Giờ làm việc" trong Cấu hình) và mục **Ngày lễ** (theo năm, thêm/xóa).
 - **Phòng ban:** ô "Ca làm việc" (ca của khu phòng đó, hoặc "Ca mặc định công ty").
 - **Nhân sự:** ô "Ca riêng" ("Theo phòng ban" hoặc một ca của khu người đó); thẻ nhân sự hiện ca đang áp dụng.
-- **Bảng công:** trạng thái mới Vắng / Nghỉ phép / Công tác; nhãn "Đi sớm N phút"; ngày vắng/nghỉ không có giờ vào hiện "—".
+- **Bảng công:** trạng thái mới Vắng / Nghỉ phép / Công tác; nhãn "Đi sớm N phút"; ngày chưa chốt hiện "Lần quẹt gần nhất HH:mm" thay cho giờ ra; ngày vắng/nghỉ không có giờ vào hiện "—".
 - **Thẻ thống kê:** thêm Vắng, Nghỉ phép / Công tác; bấm vào xem danh sách như các thẻ khác.
 - **Đơn từ:** loại "Công tác"; đơn nghỉ phép/công tác có "Từ ngày – Đến ngày".
 - Thẻ "Giờ làm việc" trong tab Cấu hình chuyển sang tab Ca làm việc.
@@ -153,9 +156,9 @@ Kiểm tra dữ liệu ca: giờ dạng `HH:mm`, `work_end > work_start`, `work_
 
 - Migration v3 → v4 (mục 4); mở DB v2 vẫn báo cũ; DB v5 báo phiên bản mới hơn; migration lỗi giữ nguyên v3.
 - `effectiveShift`: riêng > phòng > mặc định; ca khác khu bị bỏ qua.
-- `computeDay` theo ca: muộn, đi sớm, về sớm với ngưỡng 10 phút (ra 16:55 không về sớm; 16:45 về sớm 15 phút), các ca giờ khác nhau.
+- `computeDay` theo ca: muộn, đi sớm, về sớm với ngưỡng 10 phút (ra 16:55 không về sớm; 16:45 về sớm 15 phút) **chỉ khi đã qua giờ ra**; lúc 15:00 cùng lượt quẹt 14:30 ⇒ `final = 0`, không về sớm; job đóng ngày sau 17:00 ⇒ `final = 1`, về sớm; các ca giờ khác nhau.
 - Vắng: chưa tới giờ ra ⇒ không có dòng; qua giờ ra ⇒ `absent`; ngày không làm (thứ 7 của ca T2–T6), ngày lễ, người tạo sau ngày đó, người nghỉ việc ⇒ không vắng; quẹt muộn sau khi đã vắng ⇒ thay bằng trạng thái thật.
-- Đơn: khoảng ngày, tối đa 31 ngày, tương lai ≤ 90 ngày, chồng ngày ⇒ 409, duyệt ⇒ các ngày làm việc trong khoảng thành `leave`/`business_trip` (bỏ qua cuối tuần/ngày lễ), có lượt quẹt vẫn giữ giờ.
+- Đơn: khoảng ngày, tối đa 31 ngày, tương lai ≤ 7 ngày, chồng ngày ⇒ 409, duyệt ⇒ các ngày làm việc trong khoảng thành `leave`/`business_trip` (bỏ qua cuối tuần/ngày lễ), có lượt quẹt vẫn giữ giờ.
 - Tính lại khi đổi ca/ngưỡng/gán ca/ngày lễ đúng phạm vi ngày và người (không đụng tháng trước).
 - Quyền: ma trận đợt A mở rộng với `/shifts`, `/holidays`; quản trị khu không sửa ca khu khác, không gán ca khác khu.
 - Thống kê: `absentCount`, `leaveCount`, `notCheckedInCount` đúng trong các tình huống trên.
