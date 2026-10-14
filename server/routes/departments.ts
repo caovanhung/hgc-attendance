@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { AppContext } from '../context';
 import type { Db } from '../db';
-import { newId } from '../db';
+import { newId, tx } from '../db';
 import { HttpError } from '../errors';
 import { currentUser } from '../middleware';
 import { backupNow } from '../backup';
@@ -109,12 +109,14 @@ export function departmentRoutes(ctx: AppContext): Router {
     if (name === '') throw new HttpError(400, 'Tên phòng ban là bắt buộc');
     const areaId = b.areaId === undefined ? undefined : resolveAreaFor(db, actor, b.areaId);
     const managerId = b.managerId === undefined ? undefined : resolveManager(db, actor, b.managerId);
-    if (name !== undefined) db.prepare('UPDATE departments SET name = ? WHERE id = ?').run(name, dept.id);
-    if (b.description !== undefined) {
-      db.prepare('UPDATE departments SET description = ? WHERE id = ?').run(typeof b.description === 'string' ? b.description.trim() : '', dept.id);
-    }
-    if (areaId !== undefined) db.prepare('UPDATE departments SET area_id = ? WHERE id = ?').run(areaId, dept.id);
-    if (managerId !== undefined) db.prepare('UPDATE departments SET manager_id = ? WHERE id = ?').run(managerId, dept.id);
+    tx(db, () => {
+      if (name !== undefined) db.prepare('UPDATE departments SET name = ? WHERE id = ?').run(name, dept.id);
+      if (b.description !== undefined) {
+        db.prepare('UPDATE departments SET description = ? WHERE id = ?').run(typeof b.description === 'string' ? b.description.trim() : '', dept.id);
+      }
+      if (areaId !== undefined) db.prepare('UPDATE departments SET area_id = ? WHERE id = ?').run(areaId, dept.id);
+      if (managerId !== undefined) db.prepare('UPDATE departments SET manager_id = ? WHERE id = ?').run(managerId, dept.id);
+    });
     const after = getDept(db, dept.id)!;
     if (after.name !== dept.name || after.description !== dept.description) {
       enqueue(db, 'department', dept.id, 'dept.update', { name: after.name, desc: after.description }, ctx.now());

@@ -164,6 +164,49 @@ test('đơn: quản trị khu duyệt đơn trong khu, đơn ngoài khu 404', as
   }
 });
 
+test('quản trị khu tự sửa mình: chỉ họ tên, email, điện thoại, chức vụ', async () => {
+  const { app, ids } = await setup();
+  try {
+    const qk = await loginAs(app, 'QKA');
+    const pid = () => (app.db.prepare('SELECT hanet_person_id FROM users WHERE id = ?').get(ids.qkA) as { hanet_person_id: string | null }).hanet_person_id;
+    assert.equal((await qk.put(`/api/users/${ids.qkA}`, { hanetPersonId: 'P9' })).status, 400);
+    assert.equal(pid(), null, 'không đổi');
+    assert.equal((await qk.put(`/api/users/${ids.qkA}`, { name: 'Tôi', avatarUrl: 'http://x/a.jpg' })).status, 400);
+    assert.equal((await qk.put(`/api/users/${ids.qkA}`, { adminAreaIds: [ids.A, ids.B] })).status, 400);
+    assert.equal((await qk.put(`/api/users/${ids.qkA}`, { name: 'X' })).status, 200);
+    assert.equal((await qk.put(`/api/users/${ids.qkA}`, { name: 'X', email: 'x@a.vn', phone: '09', position: 'P', adminAreaIds: [ids.A] })).status, 200);
+  } finally {
+    await app.close();
+  }
+});
+
+test('FaceID: quản trị khu không đăng ký/xem cho HR, quản trị khu khác, chính mình; ngoài khu 404', async () => {
+  const { app, ids } = await setup();
+  try {
+    const qk = await loginAs(app, 'QKA');
+    for (const [who, status] of [[ids.qkA2, 403], [ids.hr2, 403], [ids.qkA, 403], [ids.nvB, 404]] as const) {
+      assert.equal((await qk.post(`/api/users/${who}/face`, { sightingId: 1 })).status, status, `face ${who}`);
+      assert.equal((await qk.get(`/api/users/${who}/face-candidates`)).status, status, `candidates ${who}`);
+    }
+    assert.equal((await qk.get(`/api/users/${ids.nvA}/face-candidates`)).status, 200);
+  } finally {
+    await app.close();
+  }
+});
+
+test('đơn: quản trị khu không duyệt đơn của quản trị khu/HR', async () => {
+  const { app } = await setup();
+  try {
+    const r = await (await loginAs(app, 'QKA2')).post('/api/requests', { workDate: '2026-10-01', type: 'leave_request', reason: 'x' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const qk = await loginAs(app, 'QKA');
+    assert.equal((await qk.put(`/api/requests/${r.body.request.id}`, { status: 'approved' })).status, 403);
+    assert.equal(app.db.prepare('SELECT status FROM requests WHERE id = ?').get(r.body.request.id)!.status, 'pending');
+  } finally {
+    await app.close();
+  }
+});
+
 test('nhập từ Camera AI: quản trị khu phải chọn phòng trong khu', async () => {
   const { app, ids } = await setup();
   try {

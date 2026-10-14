@@ -77,6 +77,12 @@ function resolveDepartmentFor(db: Db, actor: AuthUser, departmentId: unknown): s
   return id;
 }
 
+/** Đăng ký FaceID / xem ảnh nhận diện: như quyền sửa, và quản trị khu không tự làm cho chính mình. */
+function assertCanManageFace(actor: AuthUser, target: User): void {
+  assertCanEdit(actor, target);
+  if (actor.role === 'area_admin' && target.id === actor.id) throw new HttpError(403, 'Bạn không thể tự đăng ký FaceID cho chính mình');
+}
+
 function parseAdminAreaIds(db: Db, raw: unknown): string[] {
   const ids = Array.isArray(raw) ? [...new Set(raw.map(String))] : [];
   if (ids.length === 0) throw new HttpError(400, 'Hãy chọn ít nhất một khu cho quản trị khu vực');
@@ -174,26 +180,28 @@ export function userRoutes(ctx: AppContext): Router {
 
       const id = newId('usr');
       const tempPassword = generateTempPassword();
-      db.prepare(
-        `INSERT INTO users(id, code, name, email, phone, role, department_id, position, avatar_url, hanet_person_id,
-           face_registered, status, password_hash, must_change_password, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 1, ?)`,
-      ).run(
-        id,
-        code,
-        name,
-        str(b.email) ?? '',
-        str(b.phone) ?? '',
-        role,
-        departmentId,
-        str(b.position) ?? '',
-        str(b.avatarUrl) ?? '',
-        hanetPersonId,
-        hanetPersonId ? 1 : 0,
-        hashPassword(tempPassword),
-        toVnDate(ctx.now()),
-      );
-      if (adminAreaIds.length) setAdminAreas(db, id, adminAreaIds);
+      tx(db, () => {
+        db.prepare(
+          `INSERT INTO users(id, code, name, email, phone, role, department_id, position, avatar_url, hanet_person_id,
+             face_registered, status, password_hash, must_change_password, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 1, ?)`,
+        ).run(
+          id,
+          code,
+          name,
+          str(b.email) ?? '',
+          str(b.phone) ?? '',
+          role,
+          departmentId,
+          str(b.position) ?? '',
+          str(b.avatarUrl) ?? '',
+          hanetPersonId,
+          hanetPersonId ? 1 : 0,
+          hashPassword(tempPassword),
+          toVnDate(ctx.now()),
+        );
+        if (adminAreaIds.length) setAdminAreas(db, id, adminAreaIds);
+      });
       // Việc gán aliasID phải đứng trước việc phòng ban/thông tin của người này
       if (hanetPersonId) enqueueAlias(db, id, hanetPersonId, code, ctx.now());
       if (hanetPersonId && departmentId) {
@@ -217,11 +225,23 @@ export function userRoutes(ctx: AppContext): Router {
     const changesRole = b.role !== undefined && b.role !== target.role;
     const changesStatus = b.status !== undefined && b.status !== target.status;
     const changesDept = b.departmentId !== undefined && (b.departmentId || null) !== target.departmentId;
+    // Gửi lại đúng danh sách khu đang có (form gửi kèm) không tính là đổi
+    const changesAreas =
+      b.adminAreaIds !== undefined &&
+      !(Array.isArray(b.adminAreaIds) && [...new Set(b.adminAreaIds.map(String))].sort().join(',') === target.adminAreaIds.join(','));
+    if (target.id === actor.id && actor.role === 'area_admin') {
+      // Quản trị khu tự sửa mình: chỉ họ tên, email, điện thoại, chức vụ
+      const changesOther =
+        changesRole ||
+        changesStatus ||
+        changesDept ||
+        changesAreas ||
+        (b.hanetPersonId !== undefined && (str(b.hanetPersonId) || null) !== target.hanetPersonId) ||
+        (b.avatarUrl !== undefined && (str(b.avatarUrl) ?? '') !== target.avatarUrl);
+      if (changesOther) throw new HttpError(400, 'Bạn chỉ được sửa họ tên, email, điện thoại và chức vụ của chính mình');
+    }
     if (target.id === actor.id && (changesRole || changesStatus)) {
       throw new HttpError(400, 'Không thể tự đổi vai trò hoặc trạng thái của chính mình');
-    }
-    if (target.id === actor.id && actor.role === 'area_admin' && changesDept) {
-      throw new HttpError(400, 'Không thể tự đổi phòng ban của chính mình');
     }
 
     const sets: string[] = [];
@@ -255,7 +275,7 @@ export function userRoutes(ctx: AppContext): Router {
     if (changesDept) set('department_id', resolveDepartmentFor(db, actor, b.departmentId));
     const newRole: UserRole = changesRole ? b.role : target.role;
     let adminAreas: string[] | null = null;
-    if (newRole === 'area_admin' && (changesRole || b.adminAreaIds !== undefined)) {
+    if (newRole === 'area_admin' && (changesRole || changesAreas)) {
       if (!isGlobalHr(actor)) throw new HttpError(403, 'Chỉ HR toàn hệ thống được cấp quyền quản trị khu vực');
       adminAreas = parseAdminAreaIds(db, b.adminAreaIds);
     } else if (changesRole && target.role === 'area_admin') {
@@ -304,6 +324,7 @@ export function userRoutes(ctx: AppContext): Router {
     ah(async (req, res) => {
       const actor = currentUser(req);
       const target = manageableUser(db, actor, req.params.id);
+      assertCanManageFace(actor, target);
       const image = resolveFaceImage(db, actor, target.id, req.body ?? {}, ctx.now());
       if (!image) throw new HttpError(400, 'Hãy chọn một lượt camera chụp');
       const face = await registerFace(deps, target.id, image.url);
@@ -316,6 +337,7 @@ export function userRoutes(ctx: AppContext): Router {
   r.get('/users/:id/face-candidates', requireManager, (req, res) => {
     const actor = currentUser(req);
     const target = manageableUser(db, actor, req.params.id);
+    assertCanManageFace(actor, target);
     const now = ctx.now();
     const rows = db
       .prepare(

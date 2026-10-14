@@ -94,6 +94,12 @@ export function requestRoutes(ctx: AppContext): Router {
     if (reviewer.role === 'area_admin' && !managesArea(reviewer, target.departmentId ? (deptAreaId(db, target.departmentId) ?? null) : null)) {
       throw notFound('đơn');
     }
+    if (reviewer.role === 'area_admin') {
+      const owner = db.prepare('SELECT role FROM users WHERE id = ?').get(target.userId) as { role: string } | undefined;
+      if (!owner || (owner.role !== 'employee' && owner.role !== 'dept_manager')) {
+        throw new HttpError(403, 'Bạn không có quyền duyệt đơn của tài khoản này');
+      }
+    }
     if (target.userId === reviewer.id) throw new HttpError(403, 'Không thể tự duyệt đơn của mình');
     if (reviewer.role === 'dept_manager' && (!reviewer.departmentId || target.departmentId !== reviewer.departmentId)) {
       throw new HttpError(403, 'Trưởng phòng chỉ được duyệt đơn của phòng mình');
