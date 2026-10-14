@@ -321,3 +321,23 @@ export interface MailConfigView {
   sentToday: number;
   pending: number;
 }
+
+/** Một dòng file CSV nhập nhân sự (đã ánh xạ tiêu đề cột). */
+export interface CsvRowInput {
+  code: string;
+  name: string;
+  email: string;
+  phone: string;
+  departmentCode: string;
+  position: string;
+  role: string; // 'nhan_vien' | 'truong_phong' | ''
+}
+
+export interface CsvPreviewRow {
+  line: number; // số dòng trong file (dòng tiêu đề là 1)
+  ok: boolean;
+  errors: string[];
+  code: string | null; // mã sẽ dùng (null nếu dòng lỗi)
+  name: string;
+  email: string;
+}

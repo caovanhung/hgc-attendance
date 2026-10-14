@@ -20,6 +20,7 @@ import { dropEntityJobs, enqueue, kickAll, kickEntity } from '../hanet-sync';
 import { fetchAllPersons, hanetAliases, IMPORT_MAX, importPersons, nextEmployeeCode, unlinkedPersons } from '../hanet-import';
 import { getPlaceIds, reconcileEnabled } from '../hanet';
 import { CODE_ERROR, CODE_RE } from '../validation';
+import { checkCsvRows, createCsvUsers } from '../csv-import';
 import type { FaceCandidates, FaceResult, User, UserRole } from '../../shared/types';
 
 const ROLES: UserRole[] = ['hr', 'area_admin', 'dept_manager', 'employee'];
@@ -162,6 +163,37 @@ export function userRoutes(ctx: AppContext): Router {
   r.get('/users/next-code', requireManager, (_req, res) => {
     res.json({ code: nextEmployeeCode(db) });
   });
+
+  /** aliasID đang có trên Camera AI để mã tự sinh không trùng; không cấu hình hoặc lỗi gọi thì bỏ qua. */
+  const cameraAliases = async (): Promise<Set<string>> => {
+    const placeId = getPlaceIds(db)[0];
+    if (!reconcileEnabled(db) || !placeId) return new Set();
+    try {
+      return hanetAliases(await fetchAllPersons(deps, placeId));
+    } catch {
+      return new Set();
+    }
+  };
+
+  r.post(
+    '/users/import-csv/preview',
+    requireManager,
+    ah(async (req, res) => {
+      const { preview } = checkCsvRows(db, currentUser(req), req.body?.rows, await cameraAliases());
+      res.json({ rows: preview });
+    }),
+  );
+
+  r.post(
+    '/users/import-csv',
+    requireManager,
+    ah(async (req, res) => {
+      const { preview, valid } = checkCsvRows(db, currentUser(req), req.body?.rows, await cameraAliases());
+      if (valid.length === 0) throw new HttpError(400, 'Không có dòng hợp lệ để tạo');
+      const created = createCsvUsers(db, valid, ctx.now());
+      res.json({ created, skipped: preview.length - valid.length });
+    }),
+  );
 
   r.post(
     '/users',
