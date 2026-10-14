@@ -14,7 +14,7 @@ interface RequestsTabProps {
 const TYPE_META: Record<RequestType, { label: string; badge: string }> = {
   late_explanation: { label: 'Giải trình đi muộn', badge: 'bg-amber-100 text-amber-800' },
   missed_punch: { label: 'Quên quẹt mặt', badge: 'bg-blue-100 text-blue-800' },
-  leave_request: { label: 'Xin nghỉ', badge: 'bg-purple-100 text-purple-800' },
+  leave_request: { label: 'Nghỉ phép', badge: 'bg-purple-100 text-purple-800' },
   business_trip: { label: 'Công tác', badge: 'bg-sky-100 text-sky-800' },
 };
 
@@ -22,6 +22,7 @@ export const RequestsTab: React.FC<RequestsTabProps> = ({ requests, currentUser,
   const [showAdd, setShowAdd] = useState(false);
   const [type, setType] = useState<RequestType>('late_explanation');
   const [workDate, setWorkDate] = useState(vnToday());
+  const [endDate, setEndDate] = useState('');
   const [suggestedIn, setSuggestedIn] = useState('');
   const [suggestedOut, setSuggestedOut] = useState('');
   const [reason, setReason] = useState('');
@@ -29,6 +30,8 @@ export const RequestsTab: React.FC<RequestsTabProps> = ({ requests, currentUser,
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const canReview = (req: AttendanceRequest) => currentUser.role !== 'employee' && req.userId !== currentUser.id;
+
+  const maxLeaveDate = new Date(Date.parse(vnToday()) + 7 * 86_400_000).toISOString().slice(0, 10);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,12 +44,14 @@ export const RequestsTab: React.FC<RequestsTabProps> = ({ requests, currentUser,
           type,
           reason,
           ...(type === 'missed_punch' ? { suggestedIn: suggestedIn || undefined, suggestedOut: suggestedOut || undefined } : {}),
+          ...(type === 'leave_request' || type === 'business_trip' ? { endDate: endDate || undefined } : {}),
         },
       });
       setShowAdd(false);
       setReason('');
       setSuggestedIn('');
       setSuggestedOut('');
+      setEndDate('');
       onRefresh();
     } catch (err) {
       setFormError(errorMessage(err));
@@ -61,7 +66,7 @@ export const RequestsTab: React.FC<RequestsTabProps> = ({ requests, currentUser,
       await api(`/api/requests/${id}`, { method: 'PUT', body: { status, comment } });
       onRefresh();
     } catch (err) {
-      window.alert(errorMessage(err));
+      setFormError(errorMessage(err));
     } finally {
       setBusyId(null);
     }
@@ -74,7 +79,7 @@ export const RequestsTab: React.FC<RequestsTabProps> = ({ requests, currentUser,
           <h2 className="text-base font-bold text-slate-900">Đơn giải trình & xin phép</h2>
           <p className="text-xs text-slate-500 mt-0.5">
             {currentUser.role === 'employee'
-              ? 'Gửi giải trình khi đi muộn có lý do, quên quẹt mặt, hoặc xin nghỉ.'
+              ? 'Gửi giải trình khi đi muộn có lý do, quên quẹt mặt, nghỉ phép, hoặc đi công tác.'
               : 'Duyệt đơn của nhân viên trong phạm vi bạn quản lý. Không thể tự duyệt đơn của mình.'}
           </p>
         </div>
@@ -93,9 +98,13 @@ export const RequestsTab: React.FC<RequestsTabProps> = ({ requests, currentUser,
               <div key={req.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
                 <div className="space-y-1.5 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${TYPE_META[req.type].badge}`}>{TYPE_META[req.type].label}</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${TYPE_META[req.type]?.badge || 'bg-slate-100 text-slate-800'}`}>
+                      {TYPE_META[req.type]?.label || req.type}
+                    </span>
                     <span className="font-bold text-slate-900">{req.employeeName}</span>
-                    <span className="text-[11px] text-slate-400">Ngày {req.workDate.split('-').reverse().join('/')}</span>
+                    <span className="text-[11px] text-slate-400">
+                      Ngày {req.endDate ? `${req.workDate.split('-').reverse().join('/')} → ${req.endDate.split('-').reverse().join('/')}` : req.workDate.split('-').reverse().join('/')}
+                    </span>
                   </div>
                   <p className="text-slate-700 bg-slate-50 p-2.5 rounded-xl border border-slate-100 max-w-2xl">"{req.reason}"</p>
                   {(req.suggestedIn || req.suggestedOut) && (
@@ -115,10 +124,18 @@ export const RequestsTab: React.FC<RequestsTabProps> = ({ requests, currentUser,
                   {req.status === 'pending' ? (
                     canReview(req) ? (
                       <div className="flex gap-1.5">
-                        <button disabled={busyId === req.id} onClick={() => review(req.id, 'approved')} className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50">
+                        <button
+                          disabled={busyId === req.id}
+                          onClick={() => review(req.id, 'approved')}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        >
                           <CheckCircle className="w-3.5 h-3.5" /> Duyệt
                         </button>
-                        <button disabled={busyId === req.id} onClick={() => review(req.id, 'rejected')} className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold border border-rose-200 flex items-center gap-1 cursor-pointer disabled:opacity-50">
+                        <button
+                          disabled={busyId === req.id}
+                          onClick={() => review(req.id, 'rejected')}
+                          className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold border border-rose-200 flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        >
                           <XCircle className="w-3.5 h-3.5" /> Từ chối
                         </button>
                       </div>
@@ -150,12 +167,29 @@ export const RequestsTab: React.FC<RequestsTabProps> = ({ requests, currentUser,
               <select value={type} onChange={(e) => setType(e.target.value as RequestType)} className={inputCls}>
                 <option value="late_explanation">Giải trình đi muộn có lý do</option>
                 <option value="missed_punch">Quên quẹt mặt (bổ sung giờ vào/ra)</option>
-                <option value="leave_request">Xin nghỉ</option>
+                <option value="leave_request">Nghỉ phép</option>
+                <option value="business_trip">Công tác</option>
               </select>
             </Field>
-            <Field label="Ngày áp dụng">
-              <input type="date" required max={vnToday()} value={workDate} onChange={(e) => setWorkDate(e.target.value)} className={inputCls} />
-            </Field>
+
+            {type === 'leave_request' || type === 'business_trip' ? (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Từ ngày">
+                    <input type="date" required max={maxLeaveDate} value={workDate} onChange={(e) => setWorkDate(e.target.value)} className={inputCls} />
+                  </Field>
+                  <Field label="Đến ngày">
+                    <input type="date" min={workDate} value={endDate} onChange={(e) => setEndDate(e.target.value)} className={inputCls} />
+                  </Field>
+                </div>
+                <span className="block text-[11px] text-slate-400">Tối đa 31 ngày, gửi trước tối đa 7 ngày; chỉ tính ngày làm việc của ca</span>
+              </div>
+            ) : (
+              <Field label="Ngày áp dụng">
+                <input type="date" required max={vnToday()} value={workDate} onChange={(e) => setWorkDate(e.target.value)} className={inputCls} />
+              </Field>
+            )}
+
             {type === 'missed_punch' && (
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Giờ vào đề xuất">

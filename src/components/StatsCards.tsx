@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle, Clock, FileText, LogOut, UserX, Users } from 'lucide-react';
+import { AlertTriangle, Briefcase, CheckCircle, Clock, FileText, LogOut, Palmtree, Sunrise, UserMinus, UserX, Users } from 'lucide-react';
 import type { StatsData, StatsDetailRow, StatsDetailType, User } from '../types';
 import { api, errorMessage } from '../api';
 import { DAY_STATUS_LABEL, fmtTime } from '../format';
@@ -34,10 +34,14 @@ export const StatsCards: React.FC<StatsCardsProps> = ({ stats, currentUser, onOp
     { label: 'Nhân sự đang làm', value: stats.totalEmployees, icon: Users, tone: 'bg-slate-100 text-slate-700', detail: 'total' },
     { label: 'Có mặt hôm nay', value: stats.presentCount, icon: CheckCircle, tone: 'bg-emerald-100 text-emerald-700', detail: 'present' },
     { label: 'Vào đúng giờ', value: stats.onTimeCount, icon: Clock, tone: 'bg-sky-100 text-sky-700', detail: 'on_time' },
+    { label: 'Đến sớm', value: stats.earlyArrivalCount, icon: Sunrise, tone: 'bg-teal-100 text-teal-700', detail: 'early_arrival' },
     { label: 'Đi muộn', value: stats.lateCount, icon: AlertTriangle, tone: 'bg-rose-100 text-rose-700', detail: 'late' },
     { label: 'Chưa có giờ ra', value: stats.missingOutCount, icon: LogOut, tone: 'bg-amber-100 text-amber-700', detail: 'missing_out' },
     { label: 'Chưa điểm danh', value: stats.notCheckedInCount, icon: UserX, tone: 'bg-slate-100 text-slate-700', detail: 'not_checked_in' },
-    { label: 'Đơn chờ duyệt', value: stats.pendingRequests, icon: FileText, tone: 'bg-purple-100 text-purple-700', detail: 'requests' },
+    { label: 'Vắng', value: stats.absentCount, icon: UserMinus, tone: 'bg-rose-50 text-rose-700', detail: 'absent' },
+    { label: 'Nghỉ phép', value: stats.leaveCount, icon: Palmtree, tone: 'bg-purple-100 text-purple-700', detail: 'leave' },
+    { label: 'Công tác', value: stats.businessTripCount, icon: Briefcase, tone: 'bg-sky-50 text-sky-700', detail: 'business_trip' },
+    { label: 'Đơn chờ duyệt', value: stats.pendingRequests, icon: FileText, tone: 'bg-purple-50 text-purple-700', detail: 'requests' },
   ];
   const dateLabel = stats.date.split('-').reverse().join('/');
   return (
@@ -45,7 +49,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({ stats, currentUser, onOp
       <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
         Hôm nay {dateLabel} · {scopeLabel}
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
         {cards.map((c) => (
           <button
             key={c.label}
@@ -83,7 +87,7 @@ const StatsDetailModal: React.FC<{ type: StatsDetailType; title: string; onClose
     };
   }, [type]);
 
-  const showTimes = type !== 'not_checked_in';
+  const showTimes = type !== 'not_checked_in' && type !== 'absent';
 
   return (
     <Modal title={rows ? `${title} (${rows.length})` : title} onClose={onClose} wide>
@@ -121,7 +125,9 @@ const StatsDetailModal: React.FC<{ type: StatsDetailType; title: string; onClose
                       ) : (
                         <>
                           {DAY_STATUS_LABEL[r.status]}
-                          {r.lateMinutes > 0 && <span className="text-rose-600"> · muộn {r.lateMinutes} phút</span>}
+                          {r.earlyArrivalMinutes > 0 && <span className="text-teal-600"> · đến sớm {r.earlyArrivalMinutes}'</span>}
+                          {r.lateMinutes > 0 && <span className="text-rose-600"> · muộn {r.lateMinutes}'</span>}
+                          {r.earlyMinutes > 0 && <span className="text-amber-600"> · về sớm {r.earlyMinutes}'</span>}
                         </>
                       )}
                     </td>

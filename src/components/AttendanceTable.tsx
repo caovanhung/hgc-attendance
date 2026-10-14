@@ -58,9 +58,20 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
 
   const handleExportCSV = () => {
     const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
-    const headers = ['Mã NV', 'Họ tên', 'Phòng', 'Ngày', 'Giờ vào', 'Giờ ra', 'Phút muộn', 'Phút về sớm', 'Trạng thái'];
+    const headers = ['Mã NV', 'Họ tên', 'Phòng', 'Ngày', 'Giờ vào', 'Giờ ra', 'Đến sớm (phút)', 'Phút muộn', 'Phút về sớm', 'Trạng thái'];
     const rows = records.map((r) =>
-      [r.employeeCode, r.employeeName, r.departmentName ?? '', r.workDate, fmtTime(r.firstIn), fmtTime(r.lastOut), r.lateMinutes, r.earlyMinutes, DAY_STATUS_LABEL[r.status]]
+      [
+        r.employeeCode,
+        r.employeeName,
+        r.departmentName ?? '',
+        r.workDate,
+        r.firstIn !== null ? fmtTime(r.firstIn) : '',
+        r.lastOut !== null ? fmtTime(r.lastOut) : '',
+        r.earlyArrivalMinutes,
+        r.lateMinutes,
+        r.earlyMinutes,
+        DAY_STATUS_LABEL[r.status],
+      ]
         .map(esc)
         .join(','),
     );
@@ -157,15 +168,33 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
                     {r.manualIn !== null && <span className="ml-1 text-[10px] text-blue-600">(bổ sung)</span>}
                   </td>
                   <td className="py-3 px-4 font-mono">
-                    {fmtTime(r.lastOut)}
-                    {r.manualOut !== null && <span className="ml-1 text-[10px] text-blue-600">(bổ sung)</span>}
+                    {!r.final ? (
+                      r.lastOut !== null ? (
+                        <span className="text-slate-400 text-[11px]">Gần nhất {fmtTime(r.lastOut)}</span>
+                      ) : (
+                        '—'
+                      )
+                    ) : (
+                      <>
+                        {fmtTime(r.lastOut)}
+                        {r.manualOut !== null && <span className="ml-1 text-[10px] text-blue-600">(bổ sung)</span>}
+                      </>
+                    )}
                   </td>
                   <td className="py-3 px-4">
                     <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-semibold border ${STATUS_STYLE[r.status]}`}>
                       {DAY_STATUS_LABEL[r.status]}
-                      {r.lateMinutes > 0 && ` · muộn ${r.lateMinutes}'`}
-                      {r.earlyMinutes > 0 && ` · sớm ${r.earlyMinutes}'`}
+                      {r.status !== 'absent' && r.status !== 'leave' && r.status !== 'business_trip' && (
+                        <>
+                          {r.earlyArrivalMinutes > 0 && ` · đến sớm ${r.earlyArrivalMinutes}'`}
+                          {r.lateMinutes > 0 && ` · muộn ${r.lateMinutes}'`}
+                          {r.earlyMinutes > 0 && ` · sớm ${r.earlyMinutes}'`}
+                        </>
+                      )}
                     </span>
+                    {!r.final && (r.status === 'missing_out' || r.status === 'on_time' || r.status === 'late') && (
+                      <div className="text-[10px] text-sky-700">Đang trong giờ làm</div>
+                    )}
                     {r.lateExcused && <div className="text-[10px] text-emerald-600 mt-0.5">Đã duyệt giải trình</div>}
                   </td>
                   <td className="py-3 px-4">
