@@ -196,7 +196,7 @@ CREATE TABLE IF NOT EXISTS webhook_logs (
 );
 
 CREATE TABLE IF NOT EXISTS sync_jobs (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   entity_type TEXT NOT NULL CHECK (entity_type IN ('user', 'department', 'camera')),
   entity_id TEXT NOT NULL,
   op TEXT NOT NULL,
@@ -226,7 +226,7 @@ CREATE TABLE IF NOT EXISTS face_sightings (
 CREATE INDEX IF NOT EXISTS idx_sightings_created ON face_sightings(created_at);
 
 CREATE TABLE IF NOT EXISTS email_jobs (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   kind TEXT NOT NULL CHECK (kind IN ('welcome', 'reset_temp', 'reset_link')),
   to_email TEXT NOT NULL,
@@ -368,7 +368,7 @@ function purgeExpiredSessions(db, now) {
 }
 function scopeFor(user) {
   if (user.role === "hr") return { kind: "all" };
-  if (user.role === "area_admin") return { kind: "areas", areaIds: user.areaIds };
+  if (user.role === "area_admin") return { kind: "areas", areaIds: user.areaIds, userId: user.id };
   if (user.role === "dept_manager") return { kind: "department", departmentId: user.departmentId };
   return { kind: "self", userId: user.id };
 }
@@ -377,7 +377,10 @@ function scopeWhere(scope, userIdCol, deptCol) {
     case "all":
       return { sql: "1=1", params: [] };
     case "areas":
-      return scope.areaIds.length ? { sql: `${deptCol} IN (SELECT id FROM departments WHERE area_id IN (${scope.areaIds.map(() => "?").join(", ")}))`, params: [...scope.areaIds] } : { sql: "0=1", params: [] };
+      return scope.areaIds.length ? {
+        sql: `(${userIdCol} = ? OR ${deptCol} IN (SELECT id FROM departments WHERE area_id IN (${scope.areaIds.map(() => "?").join(", ")})))`,
+        params: [scope.userId, ...scope.areaIds]
+      } : { sql: `${userIdCol} = ?`, params: [scope.userId] };
     case "department":
       return scope.departmentId ? { sql: `${deptCol} = ?`, params: [scope.departmentId] } : { sql: "0=1", params: [] };
     case "self":
@@ -1700,7 +1703,7 @@ function setUserMailStatus(db, userId, status, error) {
   db.prepare("UPDATE users SET email_status = ?, email_error = ? WHERE id = ?").run(status, error, userId);
 }
 function failJob(db, job, attempts, message) {
-  db.prepare("UPDATE email_jobs SET status = 'error', attempts = ?, last_error = ?, payload = '{}' WHERE id = ?").run(attempts, message, job.id);
+  db.prepare("UPDATE email_jobs SET status = 'error', attempts = ?, last_error = ?, payload = '{}' WHERE id = ? AND user_id = ?").run(attempts, message, job.id, job.user_id);
   setUserMailStatus(db, job.user_id, "error", message);
 }
 var running = /* @__PURE__ */ new WeakSet();
@@ -1725,17 +1728,18 @@ async function runMailJobs(deps, limit = 20) {
       }
       const ids = inFlightIds(db);
       ids.add(job.id);
-      let ok;
+      let outcome;
       try {
-        ok = await sendOne(deps, cfg, job);
+        outcome = await sendOne(deps, cfg, job);
       } finally {
         ids.delete(job.id);
       }
-      if (ok) {
+      if (outcome === "sent") {
         result.sent++;
         budget--;
       } else {
         result.failed++;
+        if (outcome === "stop") break;
       }
     }
   } finally {
@@ -1749,13 +1753,13 @@ async function sendOne(deps, cfg, job) {
   const u = db.prepare("SELECT id, code, name, email, status, password_hash, must_change_password FROM users WHERE id = ?").get(job.user_id);
   if (!u || u.status !== "active" || !u.email) {
     failJob(db, job, job.attempts + 1, "Nh\xE2n s\u1EF1 kh\xF4ng c\xF2n ho\u1EA1t \u0111\u1ED9ng ho\u1EB7c kh\xF4ng c\xF3 email");
-    return false;
+    return "failed";
   }
   const resetExpiresAt = job.created_at + RESET_TTL_MS;
   if (job.kind === "reset_link" && now > resetExpiresAt) {
     failJob(db, job, job.attempts + 1, RESET_EXPIRED);
     console.warn(`[MAIL] kind=${job.kind} user=${u.code} status=error code=EXPIRED`);
-    return false;
+    return "failed";
   }
   const mailUser = { name: u.name, code: u.code, email: u.email };
   const appUrl = getAppUrl(db);
@@ -1777,7 +1781,7 @@ async function sendOne(deps, cfg, job) {
     }
     failJob(db, job, job.attempts + 1, "Kh\xF4ng t\u1EA1o \u0111\u01B0\u1EE3c n\u1ED9i dung th\u01B0 (d\u1EEF li\u1EC7u th\u01B0 kh\xF4ng h\u1EE3p l\u1EC7)");
     console.warn(`[MAIL] kind=${job.kind} user=${u.code} status=error code=BUILD`);
-    return false;
+    return "failed";
   }
   try {
     await deps.sendMail(cfg, msg);
@@ -1793,16 +1797,16 @@ async function sendOne(deps, cfg, job) {
     } else if (job.kind === "reset_link" && now + delay > resetExpiresAt) {
       failJob(db, job, attempts, RESET_EXPIRED);
     } else {
-      db.prepare("UPDATE email_jobs SET attempts = ?, last_error = ?, next_run_at = ? WHERE id = ?").run(attempts, me.message, now + delay, job.id);
+      db.prepare("UPDATE email_jobs SET attempts = ?, last_error = ?, next_run_at = ? WHERE id = ? AND user_id = ?").run(attempts, me.message, now + delay, job.id, job.user_id);
     }
     console.warn(`[MAIL] kind=${job.kind} user=${u.code} status=error code=${me.code}`);
-    return false;
+    return me.code === "EAUTH" ? "stop" : "failed";
   }
-  db.prepare("UPDATE email_jobs SET status = 'sent', attempts = attempts + 1, last_error = NULL, payload = '{}', sent_at = ? WHERE id = ?").run(now, job.id);
+  db.prepare("UPDATE email_jobs SET status = 'sent', attempts = attempts + 1, last_error = NULL, payload = '{}', sent_at = ? WHERE id = ? AND user_id = ?").run(now, job.id, job.user_id);
   setUserMailStatus(db, u.id, "sent", null);
   if (job.kind === "reset_temp") deleteUserSessions(db, u.id);
   console.log(`[MAIL] kind=${job.kind} user=${u.code} status=sent`);
-  return true;
+  return "sent";
 }
 
 // server/repo.ts
@@ -1847,7 +1851,7 @@ function canSeeUser(viewer, target) {
   const scope = scopeFor(viewer);
   if (scope.kind === "all") return true;
   if (scope.kind === "self") return target.id === scope.userId;
-  if (scope.kind === "areas") return target.areaId !== null && scope.areaIds.includes(target.areaId);
+  if (scope.kind === "areas") return target.id === scope.userId || target.areaId !== null && scope.areaIds.includes(target.areaId);
   return scope.departmentId !== null && target.departmentId === scope.departmentId;
 }
 
@@ -2530,9 +2534,6 @@ function userRoutes(ctx) {
       res.json({ created });
     })
   );
-  r.get("/users/next-code", requireManager, (_req, res) => {
-    res.json({ code: nextEmployeeCode(db) });
-  });
   const cameraAliases = async () => {
     const placeId = getPlaceIds(db)[0];
     if (!reconcileEnabled(db) || !placeId) return /* @__PURE__ */ new Set();
@@ -2542,6 +2543,13 @@ function userRoutes(ctx) {
       return /* @__PURE__ */ new Set();
     }
   };
+  r.get(
+    "/users/next-code",
+    requireManager,
+    ah(async (_req, res) => {
+      res.json({ code: nextEmployeeCode(db, await cameraAliases()) });
+    })
+  );
   r.post(
     "/users/import-csv/preview",
     requireManager,
@@ -2566,7 +2574,7 @@ function userRoutes(ctx) {
     ah(async (req, res) => {
       const actor = currentUser(req);
       const b = req.body ?? {};
-      const code = (str2(b.code) ?? "").toUpperCase() || nextEmployeeCode(db);
+      const code = (str2(b.code) ?? "").toUpperCase() || nextEmployeeCode(db, await cameraAliases());
       const name = str2(b.name) ?? "";
       if (!CODE_RE.test(code)) throw new HttpError(400, CODE_ERROR);
       if (code === SYSTEM_ADMIN_CODE) throw new HttpError(400, "M\xE3 ADMIN d\xE0nh ri\xEAng cho t\xE0i kho\u1EA3n qu\u1EA3n tr\u1ECB h\u1EC7 th\u1ED1ng");
