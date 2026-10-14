@@ -58,7 +58,7 @@ export function parseCheckin(body: unknown, now: number): { input: CheckinInput;
       ts,
       imageUrl: str(d.detected_image_url ?? d.avatar),
     },
-    note: fromServer ? 'Thiếu thời gian từ Hanet, dùng giờ nhận' : null,
+    note: fromServer ? 'Thiếu thời gian từ Camera AI, dùng giờ nhận' : null,
   };
 }
 

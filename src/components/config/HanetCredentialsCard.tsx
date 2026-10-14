@@ -35,7 +35,7 @@ export const HanetCredentialsCard: React.FC<{ config: HanetConfigView; onChange:
       setClientSecret('');
       setAccessToken('');
       setRefreshToken('');
-      setMessage('Đã lưu cấu hình Hanet.');
+      setMessage('Đã lưu cấu hình Camera AI.');
     } catch (err) {
       setMessage(errorMessage(err));
     } finally {
@@ -79,7 +79,7 @@ export const HanetCredentialsCard: React.FC<{ config: HanetConfigView; onChange:
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 text-xs space-y-4">
       <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-        <ShieldCheck className="w-4 h-4 text-orange-500" /> Kết nối Hanet & đối soát
+        <ShieldCheck className="w-4 h-4 text-orange-500" /> Kết nối Camera AI & đối soát
       </h3>
       <form onSubmit={save} className="space-y-3">
         <Field label="Client ID">
@@ -95,7 +95,7 @@ export const HanetCredentialsCard: React.FC<{ config: HanetConfigView; onChange:
           <input type="password" className={`${inputCls} font-mono`} value={refreshToken} onChange={(e) => setRefreshToken(e.target.value)} autoComplete="off" />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Địa điểm Hanet" hint={places.length ? undefined : 'Lưu thông tin trên rồi bấm "Kiểm tra kết nối" để nạp danh sách'}>
+          <Field label="Địa điểm Camera AI" hint={places.length ? undefined : 'Lưu thông tin trên rồi bấm "Kiểm tra kết nối" để nạp danh sách'}>
             <select className={inputCls} value={placeId} onChange={(e) => setPlaceId(e.target.value)}>
               <option value="">— Chưa chọn —</option>
               {placeId && !places.some((p) => String(p.id) === placeId) && <option value={placeId}>ID {placeId}</option>}
@@ -106,7 +106,7 @@ export const HanetCredentialsCard: React.FC<{ config: HanetConfigView; onChange:
               ))}
             </select>
           </Field>
-          <Field label="Địa chỉ API Hanet">
+          <Field label="Địa chỉ API Camera AI">
             <input className={`${inputCls} font-mono`} value={apiBase} onChange={(e) => setApiBase(e.target.value)} />
           </Field>
         </div>
@@ -120,7 +120,7 @@ export const HanetCredentialsCard: React.FC<{ config: HanetConfigView; onChange:
             <PlugZap className="w-3.5 h-3.5" /> Kiểm tra kết nối
           </button>
           <button type="submit" disabled={busy} className={`${primaryBtn} flex-1`}>
-            Lưu cấu hình Hanet
+            Lưu cấu hình Camera AI
           </button>
         </div>
         {conn && (

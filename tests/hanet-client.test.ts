@@ -31,7 +31,7 @@ test('mã lỗi vĩnh viễn và lỗi tạm', async () => {
     return true;
   });
   await assert.rejects(callApi(d, '/b', {}), (e: unknown) => e instanceof HanetApiError && e.transient === true);
-  await assert.rejects(callApi(d, '/c', {}), (e: unknown) => e instanceof HanetApiError && e.transient && /Hanet trả lỗi -4242: lạ/.test(e.message));
+  await assert.rejects(callApi(d, '/c', {}), (e: unknown) => e instanceof HanetApiError && e.transient && /Camera AI trả lỗi -4242: lạ/.test(e.message));
 });
 
 test('HTTP 5xx là lỗi tạm, HTTP 404 là lỗi vĩnh viễn', async () => {

@@ -143,10 +143,10 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
     <div className="space-y-6">
       <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-base font-bold text-slate-900">Camera Hanet</h2>
+          <h2 className="text-base font-bold text-slate-900">Camera AI</h2>
           <p className="text-xs text-slate-500 mt-0.5">
             Trạng thái online/offline tự cập nhật mỗi 5 phút. Đổi tên ở đây thì
-            đổi luôn trên Hanet.
+            đổi luôn trên Camera AI.
           </p>
         </div>
         {isHr && (
@@ -167,13 +167,13 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
               onClick={() =>
                 hanetAction(
                   "/api/cameras/import",
-                  (b) => `Đã thêm ${b.added ?? 0} camera từ Hanet.`,
+                  (b) => `Đã thêm ${b.added ?? 0} camera từ Camera AI.`,
                 )
               }
               disabled={busy}
               className={secondaryBtn}
             >
-              <CloudDownload className="w-4 h-4" /> Nhập camera từ Hanet
+              <CloudDownload className="w-4 h-4" /> Nhập camera từ Camera AI
             </button>
             <button
               onClick={() => setForm({ ...EMPTY })}
@@ -312,7 +312,7 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
 
       {form && (
         <Modal
-          title={form.id ? "Sửa camera" : "Thêm camera Hanet"}
+          title={form.id ? "Sửa camera" : "Thêm Camera AI"}
           onClose={() => setForm(null)}
         >
           <form onSubmit={save} className="space-y-3.5">
@@ -320,7 +320,7 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
               label="Tên camera"
               hint={
                 form.id
-                  ? "Đổi tên ở đây thì tên trên Hanet cũng đổi theo"
+                  ? "Đổi tên ở đây thì tên trên Camera AI cũng đổi theo"
                   : undefined
               }
             >
@@ -331,7 +331,7 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
                 required
               />
             </Field>
-            <Field label="Mã thiết bị (deviceID trên Hanet)">
+            <Field label="Mã thiết bị (deviceID trên Camera AI)">
               <input
                 className={`${inputCls} font-mono`}
                 value={form.deviceKey}

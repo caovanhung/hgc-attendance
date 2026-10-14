@@ -63,7 +63,7 @@ export const ImportFromHanetModal: React.FC<Props> = ({ departments, onClose, on
   };
 
   return (
-    <Modal title="Nhập nhân sự từ Hanet" onClose={onClose} wide>
+    <Modal title="Nhập nhân sự từ Camera AI" onClose={onClose} wide>
       {created ? (
         <div className="space-y-3">
           <p className="text-emerald-700">Đã nhập {created.length} nhân sự. Mật khẩu tạm chỉ hiện một lần: tải về hoặc chép lại để phát cho từng người.</p>
@@ -97,8 +97,8 @@ export const ImportFromHanetModal: React.FC<Props> = ({ departments, onClose, on
       ) : (
         <div className="space-y-3">
           {error && <p className="text-rose-600">{error}</p>}
-          {persons === null && !error && <p className="text-slate-500">Đang tải danh sách từ Hanet...</p>}
-          {persons && persons.length === 0 && <p className="text-slate-500">Mọi người trên Hanet đều đã có trong danh sách nhân sự.</p>}
+          {persons === null && !error && <p className="text-slate-500">Đang tải danh sách từ Camera AI...</p>}
+          {persons && persons.length === 0 && <p className="text-slate-500">Mọi người trên Camera AI đều đã có trong danh sách nhân sự.</p>}
           {persons && persons.length > 0 && (
             <>
               <div className="flex items-center justify-between gap-2">

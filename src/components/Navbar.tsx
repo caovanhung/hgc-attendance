@@ -33,7 +33,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const tabs: { id: string; label: string; visible: boolean }[] = [
     { id: 'attendance', label: '📊 Bảng công', visible: true },
     { id: 'requests', label: '📝 Đơn giải trình / Xin phép', visible: true },
-    { id: 'cameras', label: `📹 Camera Hanet (${totalCameraCount})`, visible: currentUser.role !== 'employee' },
+    { id: 'cameras', label: `📹 Camera AI (${totalCameraCount})`, visible: currentUser.role !== 'employee' },
     { id: 'departments', label: '🏢 Phòng ban', visible: currentUser.role !== 'employee' },
     { id: 'employees', label: '👤 Nhân sự', visible: currentUser.role === 'hr' },
     { id: 'hanet_config', label: '⚡ Cấu hình', visible: currentUser.role === 'hr' },

@@ -30,7 +30,7 @@ export function cameraRoutes(ctx: AppContext): Router {
   const deps = { db, fetch: ctx.fetch, now: ctx.now };
   const listCameras = () => (db.prepare('SELECT * FROM cameras ORDER BY name').all() as Row[]).map(mapCamera);
   const requireHanet = () => {
-    if (!reconcileEnabled(db)) throw new HttpError(400, 'Chưa cấu hình kết nối Hanet (Client ID, Refresh Token, địa điểm)');
+    if (!reconcileEnabled(db)) throw new HttpError(400, 'Chưa cấu hình kết nối Camera AI (Client ID, Refresh Token, địa điểm)');
   };
 
   r.get('/cameras', (_req, res) => {
@@ -62,7 +62,7 @@ export function cameraRoutes(ctx: AppContext): Router {
       try {
         added = await importCameras(deps);
       } catch (err) {
-        throw new HttpError(502, `Không lấy được danh sách camera từ Hanet: ${(err as Error).message}`);
+        throw new HttpError(502, `Không lấy được danh sách camera từ Camera AI: ${(err as Error).message}`);
       }
       res.json({ added, cameras: listCameras() });
     }),
@@ -76,7 +76,7 @@ export function cameraRoutes(ctx: AppContext): Router {
       try {
         await refreshCameraStatus(deps);
       } catch (err) {
-        throw new HttpError(502, `Không lấy được trạng thái camera từ Hanet: ${(err as Error).message}`);
+        throw new HttpError(502, `Không lấy được trạng thái camera từ Camera AI: ${(err as Error).message}`);
       }
       res.json({ cameras: listCameras() });
     }),

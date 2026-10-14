@@ -49,12 +49,12 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
         <div>
           <h2 className="text-base font-bold text-slate-900">Quản lý nhân sự</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Người mới: nhờ đứng trước camera Hanet, rồi bấm Thêm nhân sự → Lấy từ camera để đăng ký FaceID. Thay đổi trên web tự đồng bộ sang Hanet.
+            Người mới: nhờ đứng trước Camera AI, rồi bấm Thêm nhân sự → Lấy từ camera để đăng ký FaceID. Thay đổi trên web tự đồng bộ sang Camera AI.
           </p>
         </div>
         <div className="flex gap-2 shrink-0">
           <button onClick={() => setImporting(true)} className={secondaryBtn}>
-            <CloudDownload className="w-4 h-4" /> Nhập từ Hanet
+            <CloudDownload className="w-4 h-4" /> Nhập từ Camera AI
           </button>
           <button onClick={() => setEditing('new')} className={primaryBtn}>
             <UserPlus className="w-4 h-4" /> Thêm nhân sự
@@ -108,7 +108,7 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
             </div>
             <div className="mt-3 pt-3 border-t border-slate-100 space-y-1">
               <div className="flex justify-between"><span className="text-slate-400">Phòng ban</span><span>{u.departmentName ?? '—'}</span></div>
-              <div className="flex justify-between"><span className="text-slate-400">Hanet Person ID</span><span className="font-mono">{u.hanetPersonId ?? '—'}</span></div>
+              <div className="flex justify-between"><span className="text-slate-400">Person ID (Camera AI)</span><span className="font-mono">{u.hanetPersonId ?? '—'}</span></div>
               <div className="flex justify-between">
                 <span className="text-slate-400">FaceID</span>
                 <span className={u.faceRegistered ? 'text-emerald-700' : 'text-amber-700'}>{u.faceRegistered ? 'Đã có FaceID' : 'Chưa có FaceID'}</span>

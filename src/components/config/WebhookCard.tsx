@@ -8,7 +8,7 @@ export const WebhookCard: React.FC<{ config: HanetConfigView; onChange: (c: Hane
   const url = `${window.location.origin}${config.webhookPath}`;
 
   const rotate = async () => {
-    if (!window.confirm('Tạo token mới? URL cũ sẽ ngừng hoạt động ngay; bạn phải cập nhật URL mới trên Hanet.')) return;
+    if (!window.confirm('Tạo token mới? URL cũ sẽ ngừng hoạt động ngay; bạn phải cập nhật URL mới trên Camera AI.')) return;
     try {
       onChange((await api<{ config: HanetConfigView }>('/api/hanet/webhook-token/rotate', { method: 'POST' })).config);
       setCopied(false);
@@ -19,9 +19,9 @@ export const WebhookCard: React.FC<{ config: HanetConfigView; onChange: (c: Hane
 
   return (
     <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-3xl p-6 shadow-xl">
-      <h2 className="text-base font-bold">URL webhook cho Hanet</h2>
+      <h2 className="text-base font-bold">URL webhook cho Camera AI</h2>
       <p className="text-xs text-slate-300 mt-1 max-w-2xl">
-        Dán URL này vào cấu hình webhook trên Hanet. URL chứa token bí mật: không chia sẻ công khai. Nếu nghi bị lộ, hãy tạo token mới.
+        Dán URL này vào cấu hình webhook trên Camera AI. URL chứa token bí mật: không chia sẻ công khai. Nếu nghi bị lộ, hãy tạo token mới.
       </p>
       <div className="mt-4 flex flex-wrap items-center gap-2 bg-slate-950/80 border border-slate-700 rounded-2xl p-2.5">
         <Terminal className="w-4 h-4 text-orange-400 shrink-0 ml-1.5" />

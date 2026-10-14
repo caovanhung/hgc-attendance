@@ -34,7 +34,7 @@ export const SyncStatusCard: React.FC = () => {
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 text-xs space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="font-bold text-sm text-slate-900">Đồng bộ Hanet</h3>
+        <h3 className="font-bold text-sm text-slate-900">Đồng bộ Camera AI</h3>
         <button onClick={() => void load()} className="text-slate-500 hover:text-slate-900 cursor-pointer" aria-label="Làm mới">
           <RefreshCw className="w-3.5 h-3.5" />
         </button>

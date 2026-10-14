@@ -36,7 +36,7 @@ test('normalizeTs và parseCheckin (đơn vị thuần)', () => {
   assert.equal(nested.note, null);
   const noTime = parseCheckin({ aliasID: 'x', deviceID: 'C1' }, 42)!;
   assert.equal(noTime.input.ts, 42);
-  assert.equal(noTime.note, 'Thiếu thời gian từ Hanet, dùng giờ nhận');
+  assert.equal(noTime.note, 'Thiếu thời gian từ Camera AI, dùng giờ nhận');
 });
 
 test('sai token → 401 và ghi log rejected; thiếu token → 404', async () => {

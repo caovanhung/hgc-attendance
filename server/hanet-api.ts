@@ -16,20 +16,20 @@ export const HANET_TIMEOUT_MS = 15_000;
 export const PERMANENT_CODES = new Set([-1, -2035, -1005, -101, -5011, -9005, -9006, -9007, -9008, -5010, -909, -9002]);
 
 const HANET_ERROR_TEXT: Record<number, string> = {
-  [-1]: 'Dữ liệu gửi Hanet không hợp lệ',
-  [-103]: 'Token Hanet hết hạn',
-  [-2035]: 'Tài khoản Hanet không có quyền với địa điểm hoặc thiết bị này',
-  [-503]: 'Hệ thống Hanet đang lỗi',
-  [-101]: 'Không tìm thấy thiết bị trên Hanet',
+  [-1]: 'Dữ liệu gửi Camera AI không hợp lệ',
+  [-103]: 'Token Camera AI hết hạn',
+  [-2035]: 'Tài khoản Camera AI không có quyền với địa điểm hoặc thiết bị này',
+  [-503]: 'Hệ thống Camera AI đang lỗi',
+  [-101]: 'Không tìm thấy thiết bị trên Camera AI',
   [-102]: 'Thiết bị đang offline',
-  [-1005]: 'Không tìm thấy địa điểm trên Hanet',
-  [-5011]: 'Không tìm thấy người này trên Hanet',
-  [-9005]: 'Người này đã có trên Hanet',
+  [-1005]: 'Không tìm thấy địa điểm trên Camera AI',
+  [-5011]: 'Không tìm thấy người này trên Camera AI',
+  [-9005]: 'Người này đã có trên Camera AI',
   [-9006]: 'Ảnh không đạt: cần rõ mặt, một người, nhìn thẳng, không mũ, không khẩu trang',
   [-9007]: 'Ảnh trùng với người đã đăng ký',
-  [-9008]: 'Địa điểm đã hết số khuôn mặt miễn phí, cần mua gói cloud Hanet',
+  [-9008]: 'Địa điểm đã hết số khuôn mặt miễn phí, cần mua gói cloud Camera AI',
   [-5010]: 'Ảnh không hợp lệ',
-  [-909]: 'Tải ảnh lên Hanet thất bại',
+  [-909]: 'Tải ảnh lên Camera AI thất bại',
   [-9002]: 'Định dạng ảnh không được hỗ trợ',
 };
 
@@ -68,12 +68,12 @@ async function postForm(deps: HanetDeps, url: string, params: Record<string, str
   try {
     return await res.json();
   } catch {
-    throw new HanetApiError(0, `Hanet trả dữ liệu không đọc được từ ${url}`, true);
+    throw new HanetApiError(0, `Camera AI trả dữ liệu không đọc được từ ${url}`, true);
   }
 }
 
 /** Thông báo khi làm mới token hỏng (spec §9): lỗi tạm, việc đồng bộ vẫn thử lại. */
-export const REFRESH_FAILED = 'Kết nối Hanet hỏng, kiểm tra Client ID/Secret/Refresh Token';
+export const REFRESH_FAILED = 'Kết nối Camera AI hỏng, kiểm tra Client ID/Secret/Refresh Token';
 
 const refreshFailed = (detail: string, code = 0) => new HanetApiError(code, `${REFRESH_FAILED} (${detail})`, true);
 
@@ -125,7 +125,7 @@ export async function callApi(deps: HanetDeps, apiPath: string, params: Record<s
   }
   if (code !== 1) {
     const text = describeHanetError(code);
-    throw new HanetApiError(code, text ? `${text} (mã ${code})` : `Hanet trả lỗi ${code}: ${body?.returnMessage ?? ''}`);
+    throw new HanetApiError(code, text ? `${text} (mã ${code})` : `Camera AI trả lỗi ${code}: ${body?.returnMessage ?? ''}`);
   }
   return body;
 }
@@ -256,7 +256,7 @@ export const hanetApi = {
   async createDepartment(deps: HanetDeps, placeId: number, name: string, desc: string): Promise<number> {
     const d = (await callApi(deps, '/department/create', { placeID: String(placeId), name, desc })).data;
     const id = Number(d?.id);
-    if (!Number.isInteger(id) || id <= 0) throw new HanetApiError(0, 'Hanet không trả ID phòng ban vừa tạo');
+    if (!Number.isInteger(id) || id <= 0) throw new HanetApiError(0, 'Camera AI không trả ID phòng ban vừa tạo');
     return id;
   },
   async updateDepartment(deps: HanetDeps, id: number, name: string, desc: string): Promise<void> {

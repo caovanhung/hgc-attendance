@@ -29,7 +29,7 @@ export const DangerZoneCard: React.FC = () => {
         <Trash2 className="w-4 h-4" /> Xóa toàn bộ dữ liệu
       </h3>
       <p className="text-rose-700">
-        Giữ lại tài khoản của bạn và các cấu hình (giờ làm, Hanet, token webhook). Mọi thứ khác bị xóa. Hệ thống sao lưu tự động trước khi xóa.
+        Giữ lại tài khoản của bạn và các cấu hình (giờ làm, Camera AI, token webhook). Mọi thứ khác bị xóa. Hệ thống sao lưu tự động trước khi xóa.
       </p>
       <Field label="Nhập lại mật khẩu của bạn để xác nhận">
         <input type="password" className={inputCls} value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />

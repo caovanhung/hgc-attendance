@@ -85,7 +85,7 @@ test('đổi phòng ban khi phòng chưa lên Hanet → hoãn; phòng lên Hanet
     await hr.put(`/api/users/${u}`, { departmentId: it });
     await runDueJobs(deps, SYNC_HANDLERS);
     const dep = app.db.prepare("SELECT attempts, last_error FROM sync_jobs WHERE op = 'user.department'").get() as { attempts: number; last_error: string };
-    assert.deepEqual({ ...dep }, { attempts: 0, last_error: 'Chờ phòng ban đồng bộ lên Hanet' });
+    assert.deepEqual({ ...dep }, { attempts: 0, last_error: 'Chờ phòng ban đồng bộ lên Camera AI' });
     advance(61_000);
     await runDueJobs(deps, SYNC_HANDLERS); // tạo phòng thành công, đánh thức việc đổi phòng
     await runDueJobs(deps, SYNC_HANDLERS);

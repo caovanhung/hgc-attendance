@@ -139,7 +139,7 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
             <p className="text-[11px] text-slate-600">
               {isEdit
                 ? 'Đổi ảnh nhận diện: chọn một lượt camera chụp người này rồi bấm Cập nhật FaceID.'
-                : 'Nhờ người này đứng trước camera Hanet, rồi bấm nút để chọn ảnh đăng ký FaceID (người lạ) hoặc liên kết người đã có trên Hanet.'}
+                : 'Nhờ người này đứng trước Camera AI, rồi bấm nút để chọn ảnh đăng ký FaceID (người lạ) hoặc liên kết người đã có trên Camera AI.'}
             </p>
             <button type="button" onClick={loadFaces} disabled={loadingFaces} className={`${secondaryBtn} py-1.5 shrink-0`}>
               {loadingFaces ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />} Lấy từ camera
@@ -186,7 +186,7 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
 
           {unlinked.length > 0 && (
             <div className="space-y-1.5">
-              <div className="text-[11px] font-semibold text-slate-700">Đã có trên Hanet — chọn để liên kết</div>
+              <div className="text-[11px] font-semibold text-slate-700">Đã có trên Camera AI — chọn để liên kết</div>
               {unlinked.map((s) => (
                 <button
                   key={s.id}
@@ -198,7 +198,7 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
                   <div className="min-w-0 flex-1">
                     <div className="font-semibold text-slate-900 truncate">{s.personName ?? 'Không rõ tên'}</div>
                     <div className="text-[11px] text-slate-500 truncate">
-                      Mã: <span className="font-mono">{s.aliasId ?? '— (chưa có trên Hanet)'}</span> · {fmtTime(s.ts)}
+                      Mã: <span className="font-mono">{s.aliasId ?? '— (chưa có trên Camera AI)'}</span> · {fmtTime(s.ts)}
                     </div>
                   </div>
                   <span className="text-[11px] font-semibold text-orange-600 shrink-0">Chọn</span>
@@ -210,13 +210,13 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
           {!isEdit && picked && <p className="text-[11px] text-emerald-700">✓ Sẽ đăng ký FaceID bằng ảnh đã chọn khi bấm Tạo nhân sự.</p>}
           {!isEdit && hanetPersonId && (
             <p className="text-[11px] text-emerald-700">
-              ✓ Đã liên kết với người trên Hanet (Person ID <span className="font-mono">{hanetPersonId}</span>)
+              ✓ Đã liên kết với người trên Camera AI (Person ID <span className="font-mono">{hanetPersonId}</span>)
             </p>
           )}
           {isEdit && (
             <div className="flex items-center justify-between gap-2">
               <span className={`text-[11px] ${user?.faceRegistered ? 'text-emerald-700' : 'text-amber-700'}`}>
-                {user?.faceRegistered ? '✓ Đã có FaceID trên Hanet' : 'Chưa có FaceID'}
+                {user?.faceRegistered ? '✓ Đã có FaceID trên Camera AI' : 'Chưa có FaceID'}
                 {user?.faceError && <span className="text-rose-600"> · Lỗi gần nhất: {user.faceError}</span>}
               </span>
               <button type="button" onClick={updateFace} disabled={busy || !picked} className={`${primaryBtn} py-1.5 shrink-0`}>
@@ -228,7 +228,7 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Mã nhân viên" hint={isEdit ? undefined : 'Phải trùng aliasID trên Hanet nếu người này đã có trên Hanet'}>
+          <Field label="Mã nhân viên" hint={isEdit ? undefined : 'Phải trùng aliasID trên Camera AI nếu người này đã có trên Camera AI'}>
             <input className={`${inputCls} font-mono uppercase`} value={code} onChange={(e) => setCode(e.target.value)} disabled={isEdit} required />
           </Field>
           <Field label="Họ tên">

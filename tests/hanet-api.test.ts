@@ -97,7 +97,7 @@ test('refresh thất bại → ném lỗi và lưu last_reconcile_error', async 
   configure(db);
   const fake = fakeHanet({ pages: [], expireFirst: true, refreshFails: true });
   await assert.rejects(reconcileDate({ db, fetch: fake.fetchImpl, now: () => NOW }, D));
-  assert.match(getSetting(db, 'hanet.last_reconcile_error')!, /Kết nối Hanet hỏng/);
+  assert.match(getSetting(db, 'hanet.last_reconcile_error')!, /Kết nối Camera AI hỏng/);
 });
 
 test('lượt đã có từ webhook không bị ghi trùng khi đối soát', async () => {
@@ -176,7 +176,7 @@ test('làm mới token hỏng (HTTP 4xx, thiếu access_token, thiếu cấu hì
     await assert.rejects(refreshAccessToken({ db, fetch: fetchImpl, now: () => NOW }), (err: unknown) => {
       assert.ok(err instanceof HanetApiError, name);
       assert.equal(err.transient, true, name);
-      assert.match(err.message, /^Kết nối Hanet hỏng, kiểm tra Client ID\/Secret\/Refresh Token/, name);
+      assert.match(err.message, /^Kết nối Camera AI hỏng, kiểm tra Client ID\/Secret\/Refresh Token/, name);
       return true;
     });
   }

@@ -28,7 +28,7 @@ test('tạo nhân sự từ ảnh người lạ → đăng ký FaceID, lưu Pers
     const sightingId = addStranger(app.db);
     const r = await hr.post('/api/users', { code: 'nv09', name: 'Cao Văn Hùng & Cộng sự', position: 'Kế toán viên', sightingId });
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.deepEqual(r.body.face, { ok: true, message: 'Đã đăng ký FaceID trên Hanet' });
+    assert.deepEqual(r.body.face, { ok: true, message: 'Đã đăng ký FaceID trên Camera AI' });
     assert.ok(r.body.tempPassword);
     assert.deepEqual([r.body.user.faceRegistered, r.body.user.hanetPersonId, r.body.user.faceError], [true, '1889724440081326080', null]);
     const p = fake.last('/person/registerByUrl')!.params;
@@ -66,7 +66,7 @@ test('-9005 mã đã là aliasID của người khác trên Hanet: không liên 
     const sightingId = addStranger(app.db);
     const r = await hr.post('/api/users', { code: 'NV11', name: 'X', sightingId });
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    const message = 'Mã NV11 đã là aliasID của một người khác trên Hanet. Dùng "Nhập từ Hanet" để liên kết người đó, hoặc đổi mã nhân viên.';
+    const message = 'Mã NV11 đã là aliasID của một người khác trên Camera AI. Dùng "Nhập từ Camera AI" để liên kết người đó, hoặc đổi mã nhân viên.';
     assert.deepEqual(r.body.face, { ok: false, message });
     assert.deepEqual([r.body.user.hanetPersonId, r.body.user.faceRegistered, r.body.user.faceError], [null, false, message]);
     assert.equal(fake.last('/person/getUserInfoByAliasID'), undefined, 'không tra để liên kết');
@@ -80,7 +80,7 @@ test('-9008 hết lượt FaceID miễn phí: báo rõ', async () => {
   const { app, hr } = await setup({ '/person/registerByUrl': fail(-9008) });
   try {
     const r = await hr.post('/api/users', { code: 'NV12', name: 'X', sightingId: addStranger(app.db) });
-    assert.equal(r.body.face.message, 'Địa điểm đã hết số khuôn mặt miễn phí, cần mua gói cloud Hanet (mã -9008)');
+    assert.equal(r.body.face.message, 'Địa điểm đã hết số khuôn mặt miễn phí, cần mua gói cloud Camera AI (mã -9008)');
   } finally {
     await app.close();
   }
@@ -92,7 +92,7 @@ test('đã có FaceID → đổi ảnh bằng updateByFaceUrlByAliasID, không �
     const id = seedUser(app.db, { code: 'NV13', hanetPersonId: 'P13' });
     app.db.prepare('UPDATE users SET face_registered = 1 WHERE id = ?').run(id);
     const r = await hr.post(`/api/users/${id}/face`, { sightingId: addStranger(app.db) });
-    assert.deepEqual(r.body.face, { ok: true, message: 'Đã cập nhật ảnh nhận diện trên Hanet' });
+    assert.deepEqual(r.body.face, { ok: true, message: 'Đã cập nhật ảnh nhận diện trên Camera AI' });
     const p = fake.last('/person/updateByFaceUrlByAliasID')!.params;
     assert.deepEqual([p.get('aliasID'), p.get('placeID'), p.get('url')], ['NV13', String(PLACE), IMG]);
     assert.equal(fake.last('/person/registerByUrl'), undefined);
@@ -139,7 +139,7 @@ test('chưa cấu hình Hanet: không gọi Hanet, báo lý do; lượt chụp k
   const { app, fake, hr } = await setup({}, false);
   try {
     const r = await hr.post('/api/users', { code: 'NV16', name: 'X', sightingId: addStranger(app.db) });
-    assert.deepEqual(r.body.face, { ok: false, message: 'Chưa cấu hình kết nối Hanet (Client ID, Refresh Token, địa điểm)' });
+    assert.deepEqual(r.body.face, { ok: false, message: 'Chưa cấu hình kết nối Camera AI (Client ID, Refresh Token, địa điểm)' });
     assert.equal(fake.calls.length, 0);
     assert.equal((await hr.post('/api/users', { code: 'NV17', name: 'X', sightingId: 999 })).status, 404);
     assert.equal(app.db.prepare("SELECT 1 FROM users WHERE code = 'NV17'").get(), undefined);

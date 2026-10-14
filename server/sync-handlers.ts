@@ -5,7 +5,7 @@ import { getPlaceIds } from './hanet';
 
 function placeOf(deps: HanetDeps): number {
   const id = getPlaceIds(deps.db)[0];
-  if (!id) throw new SyncDeferred('Chưa chọn địa điểm Hanet');
+  if (!id) throw new SyncDeferred('Chưa chọn địa điểm Camera AI');
   return id;
 }
 
@@ -54,7 +54,7 @@ export const SYNC_HANDLERS: SyncHandlers = {
     if (toId) {
       const d = deptRow(deps, toId);
       if (d) {
-        if (!d.hanet_department_id) throw new SyncDeferred('Chờ phòng ban đồng bộ lên Hanet');
+        if (!d.hanet_department_id) throw new SyncDeferred('Chờ phòng ban đồng bộ lên Camera AI');
         toHanet = Number(d.hanet_department_id);
       }
     }
@@ -85,7 +85,7 @@ export const SYNC_HANDLERS: SyncHandlers = {
   'dept.update': async (deps, job) => {
     const d = deptRow(deps, job.entityId);
     if (!d) return;
-    if (!d.hanet_department_id) throw new SyncDeferred('Chờ tạo phòng ban trên Hanet');
+    if (!d.hanet_department_id) throw new SyncDeferred('Chờ tạo phòng ban trên Camera AI');
     await hanetApi.updateDepartment(deps, Number(d.hanet_department_id), d.name, d.description ?? '');
   },
 

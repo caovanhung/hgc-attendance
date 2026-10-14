@@ -54,7 +54,7 @@ test('tuần tự theo đối tượng: việc đầu lỗi thì việc sau ch�
 
 test('lỗi tạm: chờ 1, 2, 5, 15 phút rồi 60 phút; quá 20 lần thì "error"', async () => {
   const { db, deps, userId, now, advance } = setup();
-  const handlers: SyncHandlers = { 'user.info': async () => { throw new HanetApiError(-503, 'Hệ thống Hanet đang lỗi (mã -503)'); } };
+  const handlers: SyncHandlers = { 'user.info': async () => { throw new HanetApiError(-503, 'Hệ thống Camera AI đang lỗi (mã -503)'); } };
   assert.deepEqual([1, 2, 3, 4, 5, 9].map(retryDelayMs), [60_000, 120_000, 300_000, 900_000, 3_600_000, 3_600_000]);
   enqueue(db, 'user', userId, 'user.info', {}, now());
   await runDueJobs(deps, handlers);
@@ -67,7 +67,7 @@ test('lỗi tạm: chờ 1, 2, 5, 15 phút rồi 60 phút; quá 20 lần thì "e
   }
   assert.equal(job(db).attempts, MAX_ATTEMPTS);
   assert.equal(job(db).status, 'error');
-  assert.deepEqual(userStatus(db, userId), { s: 'error', e: 'Hệ thống Hanet đang lỗi (mã -503)' });
+  assert.deepEqual(userStatus(db, userId), { s: 'error', e: 'Hệ thống Camera AI đang lỗi (mã -503)' });
 });
 
 test('lỗi vĩnh viễn → "error" ngay; thiếu handler → "error"', async () => {

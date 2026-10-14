@@ -158,12 +158,12 @@ export function hanetRoutes(ctx: AppContext): Router {
     hr,
     ah(async (_req, res) => {
       const placeId = getPlaceIds(db)[0];
-      if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, 'Chưa cấu hình kết nối Hanet (Client ID, Refresh Token, địa điểm)');
+      if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, 'Chưa cấu hình kết nối Camera AI (Client ID, Refresh Token, địa điểm)');
       let persons;
       try {
         persons = await fetchAllPersons({ db, fetch: ctx.fetch, now: ctx.now }, placeId);
       } catch (err) {
-        throw new HttpError(502, `Không lấy được danh sách người từ Hanet: ${(err as Error).message}`);
+        throw new HttpError(502, `Không lấy được danh sách người từ Camera AI: ${(err as Error).message}`);
       }
       res.json({ persons: unlinkedPersons(db, persons) });
     }),

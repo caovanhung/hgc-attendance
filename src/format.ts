@@ -37,8 +37,8 @@ export const SYSTEM_ADMIN_CODE = 'ADMIN';
 export const SYNC_OP_LABEL: Record<SyncOp, string> = {
   'user.info': 'Cập nhật thông tin nhân sự',
   'user.department': 'Đổi phòng ban của nhân sự',
-  'user.alias': 'Gán mã nhân viên trên Hanet',
-  'user.remove': 'Xóa khuôn mặt trên Hanet',
+  'user.alias': 'Gán mã nhân viên trên Camera AI',
+  'user.remove': 'Xóa khuôn mặt trên Camera AI',
   'dept.create': 'Tạo phòng ban',
   'dept.update': 'Sửa phòng ban',
   'dept.remove': 'Xóa phòng ban',
