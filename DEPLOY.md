@@ -84,11 +84,16 @@ Bản này **tự nâng cấp database v3 lên v4 và giữ nguyên dữ liệu*
 cd /home/ubuntu/hgc-attendance
 pm2 stop hanet-attendance
 git pull && npm ci --omit=dev
+# Chạy thử nâng cấp trên một bản sao (không đụng database thật, không khởi động server)
+cp data/attendance.db /tmp/try-v4.db && MIGRATE_ONLY=1 DB_FILE=/tmp/try-v4.db NODE_ENV=production node server.js
+# Phải thấy dòng: [MIGRATE] Chạy thử xong: database v4 — chỉ khi đó mới chạy tiếp
 pm2 restart hanet-attendance
 pm2 logs hanet-attendance --lines 20 --nostream    # thấy: [MIGRATE] v3 → v4 xong (sao lưu: attendance-pre-migrate-v3.db)
 ```
 
-Nếu log có `[MIGRATE] Nâng cấp v3 → v4 thất bại …`: database vẫn là v3, không mất gì; gửi dòng log đó cho bộ phận kỹ thuật và chạy lại bản cũ bằng `git checkout <commit cũ> && npm ci --omit=dev && pm2 restart hanet-attendance`.
+Nếu chạy thử báo `[MIGRATE] … thất bại`: **không** `pm2 restart`; gửi dòng log đó cho bộ phận kỹ thuật (database thật chưa bị đụng).
+
+Nếu log của pm2 có `[MIGRATE] Nâng cấp v3 → v4 thất bại …`: chạy ngay `pm2 stop hanet-attendance` (để pm2 không khởi động lại liên tục). Database vẫn là v3, không mất gì; gửi dòng log đó cho bộ phận kỹ thuật và chạy lại bản cũ bằng `git checkout <commit cũ> && npm ci --omit=dev && pm2 restart hanet-attendance`.
 
 Sau khi nâng cấp (tài khoản HR toàn hệ thống):
 

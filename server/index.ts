@@ -17,7 +17,22 @@ const PORT = process.env.PORT && process.env.PORT !== '8080' ? Number(process.en
 const dataDir = path.resolve(process.cwd(), 'data');
 const backupDir = path.join(dataDir, 'backups');
 
+/** Chạy thử nâng cấp (MIGRATE_ONLY=1): mở bản sao DB_FILE, nâng cấp nếu cần, in phiên bản rồi thoát — không chạy server/job. */
+function migrateOnly(): void {
+  if (!process.env.DB_FILE) {
+    console.error('[MIGRATE] Chế độ chạy thử (MIGRATE_ONLY=1) cần biến DB_FILE trỏ tới bản sao database.');
+    process.exit(1);
+  }
+  const file = path.resolve(process.env.DB_FILE);
+  const db = openDb(file, { backupDir: path.join(path.dirname(file), 'backups') });
+  const { version } = db.prepare('SELECT version FROM schema_version').get() as { version: number };
+  db.close();
+  console.log(`[MIGRATE] Chạy thử xong: database v${version}`);
+  process.exit(0);
+}
+
 async function main() {
+  if (process.env.MIGRATE_ONLY === '1') return migrateOnly();
   const db = openDb(path.join(dataDir, 'attendance.db'), { backupDir });
 
   const admin = ensureAdminAccess(db, process.env.ADMIN_INITIAL_PASSWORD);

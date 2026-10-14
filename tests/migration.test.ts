@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
 import { openDb, SchemaTooNewError, SCHEMA_VERSION } from '../server/db';
 import { MigrationError } from '../server/migrations';
 
@@ -112,4 +113,34 @@ test('DB phiên bản mới hơn (v5) ⇒ SchemaTooNewError, không đụng vào
     () => openDb(file),
     (e: unknown) => e instanceof SchemaTooNewError && e.message === '[STARTUP] Database được tạo bởi phiên bản mới hơn (v5). Hãy cập nhật code.',
   );
+});
+
+/** Chạy `tsx server/index.ts` trong một thư mục tạm (lỡ khởi động thật thì cũng không đụng data/ của repo). */
+function runServer(env: Record<string, string | undefined>) {
+  const root = path.join(import.meta.dirname, '..');
+  const merged: NodeJS.ProcessEnv = { ...process.env, PORT: '1', ...env };
+  for (const k of Object.keys(env)) if (env[k] === undefined) delete merged[k];
+  return spawnSync(path.join(root, 'node_modules', '.bin', 'tsx'), [path.join(root, 'server', 'index.ts')], {
+    cwd: fs.mkdtempSync(path.join(os.tmpdir(), 'hgc-run-')),
+    env: merged,
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+}
+
+test('MIGRATE_ONLY=1: chạy thử nâng cấp trên bản sao DB_FILE rồi thoát 0, không khởi động server', () => {
+  const { file } = makeV3();
+  const r = runServer({ MIGRATE_ONLY: '1', DB_FILE: file });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /\[MIGRATE\] Chạy thử xong: database v4/);
+  assert.ok(fs.existsSync(path.join(path.dirname(file), 'backups', 'attendance-pre-migrate-v3.db')), 'sao lưu cạnh file DB');
+  const raw = new DatabaseSync(file);
+  assert.equal((raw.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 4);
+  raw.close();
+});
+
+test('MIGRATE_ONLY=1 mà thiếu DB_FILE ⇒ thoát 1', () => {
+  const r = runServer({ MIGRATE_ONLY: '1', DB_FILE: undefined });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /DB_FILE/);
 });
