@@ -16,7 +16,7 @@
   "dependencies": {
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
-    "nodemailer": "^6.9.16"
+    "nodemailer": "^10.0.13"
   },
   "devDependencies": {
     "@google/genai": "^2.4.0",
