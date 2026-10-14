@@ -9,6 +9,7 @@ import { SYNC_HANDLERS } from './sync-handlers';
 import { reconcileDate, type HanetDeps } from './hanet-api';
 import { runMailJobs } from './mail-queue';
 import { addDays, toVnDate, vnMinutesOfDay } from './vntime';
+import { closeDays } from './attendance';
 
 export interface DueJobs {
   backup: boolean;
@@ -17,6 +18,7 @@ export interface DueJobs {
   purgeSessions: boolean;
   purgeHourly: boolean;
   cameraStatus: boolean;
+  closeDays: boolean;
 }
 
 export function dueJobs(now: number): DueJobs {
@@ -28,6 +30,7 @@ export function dueJobs(now: number): DueJobs {
     purgeSessions: m % 60 === 0,
     purgeHourly: m % 60 === 30,
     cameraStatus: m % 5 === 0,
+    closeDays: m % 15 === 0,
   };
 }
 
@@ -58,6 +61,7 @@ export function startJobs(ctx: AppContext): () => void {
     if (due.purgeHourly) run('purge-sync-jobs', () => purgeDoneJobs(ctx.db, now));
     run('sync', () => runDueJobs(deps, SYNC_HANDLERS));
     run('mail', () => runMailJobs({ db: ctx.db, sendMail: ctx.sendMail, now: ctx.now }));
+    if (due.closeDays) run('close-days', () => closeDays(ctx.db, now));
     if (reconcileEnabled(ctx.db)) {
       if (due.cameraStatus) run('camera-status', () => refreshCameraStatus(deps));
       if (due.reconcileToday) run('reconcile-today', () => reconcileDate(deps, today));
@@ -72,6 +76,8 @@ export function startJobs(ctx: AppContext): () => void {
       await reconcileDate(deps, today);
     });
   }
+
+  run('close-days-startup', () => closeDays(ctx.db, ctx.now()));
 
   const timer = setInterval(tick, 20_000);
   timer.unref();

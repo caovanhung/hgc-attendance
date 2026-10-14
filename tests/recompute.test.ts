@@ -7,7 +7,7 @@ import { freshDb, seedUser, addDetection } from './helpers';
 
 const D = '2026-10-13';
 const at = (hhmm: string, date = D) => vnDateTimeToTs(date, hhmm);
-type DayRow = { first_in: number; last_out: number | null; late_minutes: number; early_minutes: number; status: string; late_excused: number; manual_in: number | null; manual_out: number | null; detection_count: number };
+type DayRow = { first_in: number | null; last_out: number | null; late_minutes: number; early_minutes: number; status: string; late_excused: number; manual_in: number | null; manual_out: number | null; detection_count: number };
 const day = (db: ReturnType<typeof freshDb>, userId: string, date = D) =>
   db.prepare('SELECT * FROM attendance_days WHERE user_id = ? AND work_date = ?').get(userId, date) as DayRow | undefined;
 
@@ -48,13 +48,17 @@ test('applyDayAdjustment: quên quẹt khi chưa có lượt nào tạo dòng m�
   assert.equal(r.detection_count, 0);
 });
 
-test('recomputeDay xóa dòng khi không còn lượt nào và không có điều chỉnh', () => {
+test('recomputeDay xóa dòng khi người đã nghỉ việc không còn lượt nào; người đang làm thành absent', () => {
   const db = freshDb();
-  const u = seedUser(db, { code: 'NV01', password: null });
-  addDetection(db, u, at('08:00'));
+  const off = seedUser(db, { code: 'NV01', status: 'inactive' });
+  addDetection(db, off, at('08:00'));
   db.prepare('DELETE FROM detections').run();
-  recomputeDay(db, u, D);
-  assert.equal(day(db, u), undefined);
+  recomputeDay(db, off, D, at('18:00'));
+  assert.equal(day(db, off), undefined, 'người đã nghỉ việc không có dòng');
+
+  const active = seedUser(db, { code: 'NV02' });
+  recomputeDay(db, active, D, at('18:00'));
+  assert.equal(day(db, active)!.status, 'absent', 'người đang làm thành absent sau giờ ra');
 });
 
 test('recomputeRange áp dụng giờ làm mới cho khoảng ngày', () => {
@@ -73,8 +77,9 @@ test('recomputeRange áp dụng giờ làm mới cho khoảng ngày', () => {
     earlyArrivalMinutes: 15,
     earlyLeaveMinutes: 10,
   });
-  assert.equal(recomputeRange(db, '2026-10-12', '2026-10-13'), 1);
+  assert.equal(recomputeRange(db, '2026-10-12', '2026-10-13'), 2);
   assert.equal(day(db, u, '2026-10-12')!.status, 'late');
+  assert.equal(day(db, u, '2026-10-13')!.status, 'absent');
   assert.equal(day(db, u, '2026-10-14')!.status, 'on_time', 'ngoài khoảng thì giữ nguyên');
 });
 
@@ -85,7 +90,8 @@ test('production: lượt từ mô phỏng không được tính công', () => {
   try {
     process.env.NODE_ENV = 'production';
     addDetection(db, u, at('08:00'), { source: 'simulator' });
-    assert.equal(day(db, u), undefined);
+    assert.equal(day(db, u)!.status, 'absent');
+    assert.equal(day(db, u)!.detection_count, 0);
     addDetection(db, u, at('08:05'), { source: 'webhook' });
     assert.equal(day(db, u)!.detection_count, 1);
   } finally {

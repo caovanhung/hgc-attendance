@@ -6,8 +6,24 @@ import { vnDateTimeToTs } from '../server/vntime';
 const at = (hhmm: string) => vnDateTimeToTs('2026-10-13', hhmm) + 30_000; // giữa phút
 
 test('dueJobs theo giờ VN', () => {
-  assert.deepEqual(dueJobs(at('02:00')), { backup: true, reconcileToday: true, reconcileYesterday: false, purgeSessions: true, purgeHourly: false, cameraStatus: true });
-  assert.deepEqual(dueJobs(at('02:01')), { backup: false, reconcileToday: false, reconcileYesterday: false, purgeSessions: false, purgeHourly: false, cameraStatus: false });
+  assert.deepEqual(dueJobs(at('02:00')), {
+    backup: true,
+    reconcileToday: true,
+    reconcileYesterday: false,
+    purgeSessions: true,
+    purgeHourly: false,
+    cameraStatus: true,
+    closeDays: true,
+  });
+  assert.deepEqual(dueJobs(at('02:01')), {
+    backup: false,
+    reconcileToday: false,
+    reconcileYesterday: false,
+    purgeSessions: false,
+    purgeHourly: false,
+    cameraStatus: false,
+    closeDays: false,
+  });
   assert.equal(dueJobs(at('08:05')).cameraStatus, true);
   assert.equal(dueJobs(at('08:15')).reconcileToday, true);
   assert.equal(dueJobs(at('23:30')).reconcileToday, true);
@@ -15,4 +31,5 @@ test('dueJobs theo giờ VN', () => {
   assert.equal(dueJobs(at('00:05')).reconcileYesterday, true);
   assert.equal(dueJobs(at('10:00')).purgeSessions, true);
   assert.equal(dueJobs(at('10:30')).purgeHourly, true);
+  assert.equal(dueJobs(at('17:15')).closeDays, true);
 });

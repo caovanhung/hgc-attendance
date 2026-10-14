@@ -1,19 +1,21 @@
-import type { DayStatus, WorkSettings } from '../shared/types';
-import { parseHHmm, vnMinutesOfDay } from './vntime';
+import type { DayStatus } from '../shared/types';
+import { addDays, daysBetween, toVnDate, vnDayStart, vnMinutesOfDay } from './vntime';
 import type { Db } from './db';
 import { tx } from './db';
-import { getWorkSettings } from './settings';
-import { ruleFromSettings, type ShiftRule } from './shifts';
+import { effectiveShift, isWorkday, ruleFromSettings, type ShiftRule } from './shifts';
+import { SYSTEM_ADMIN_CODE } from './bootstrap';
 
 export type DaySettings = ShiftRule;
 export const toDaySettings = ruleFromSettings;
 
 export interface ComputeDayInput {
   detectionTs: number[];
-  settings: DaySettings;
+  settings: ShiftRule;
   lateExcused: boolean;
   manualIn: number | null;
   manualOut: number | null;
+  /** Đã qua giờ ra của ca: chỉ khi đó mới xét về sớm và chốt ngày. */
+  closed: boolean;
 }
 
 export interface ComputedDay {
@@ -21,12 +23,14 @@ export interface ComputedDay {
   lastOut: number | null;
   lateMinutes: number;
   earlyMinutes: number;
+  earlyArrivalMinutes: number;
   status: DayStatus;
   detectionCount: number;
+  final: boolean;
 }
 
 export function computeDay(input: ComputeDayInput): ComputedDay | null {
-  const { detectionTs, settings, lateExcused, manualIn, manualOut } = input;
+  const { detectionTs, settings, lateExcused, manualIn, manualOut, closed } = input;
   const minDet = detectionTs.length ? Math.min(...detectionTs) : null;
   const maxDet = detectionTs.length ? Math.max(...detectionTs) : null;
 
@@ -40,9 +44,11 @@ export function computeDay(input: ComputeDayInput): ComputedDay | null {
   const inMin = vnMinutesOfDay(firstIn);
   const isLate = !lateExcused && inMin > settings.workStart + settings.graceMinutes;
   const lateMinutes = isLate ? inMin - settings.workStart : 0;
+  const earlyArrivalMinutes = inMin < settings.workStart - settings.earlyArrivalMinutes ? settings.workStart - inMin : 0;
 
+  // Về sớm chỉ xét khi đã qua giờ ra; trong giờ làm, giờ ra chỉ là lần quẹt gần nhất
   const outMin = lastOut === null ? null : vnMinutesOfDay(lastOut);
-  const isEarly = outMin !== null && outMin < settings.workEnd;
+  const isEarly = closed && outMin !== null && outMin < settings.workEnd - settings.earlyLeaveMinutes;
   const earlyMinutes = isEarly ? settings.workEnd - (outMin as number) : 0;
 
   let status: DayStatus;
@@ -52,7 +58,23 @@ export function computeDay(input: ComputeDayInput): ComputedDay | null {
   else if (isEarly) status = 'early_leave';
   else status = 'on_time';
 
-  return { firstIn, lastOut, lateMinutes, earlyMinutes, status, detectionCount: detectionTs.length };
+  return { firstIn, lastOut, lateMinutes, earlyMinutes, earlyArrivalMinutes, status, detectionCount: detectionTs.length, final: closed };
+}
+
+export function shiftEndTs(rule: ShiftRule, date: string): number {
+  return vnDayStart(date) + rule.workEnd * 60_000;
+}
+
+/** Loại đơn nghỉ phép/công tác đã duyệt phủ ngày này (nếu có). */
+export function approvedLeaveType(db: Db, userId: string, date: string): 'leave' | 'business_trip' | null {
+  const r = db
+    .prepare(
+      `SELECT type FROM requests WHERE user_id = ? AND status = 'approved' AND type IN ('leave_request', 'business_trip')
+       AND work_date <= ? AND COALESCE(end_date, work_date) >= ? ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get(userId, date, date) as { type: string } | undefined;
+  if (!r) return null;
+  return r.type === 'business_trip' ? 'business_trip' : 'leave';
 }
 
 export interface DayAdjustment {
@@ -61,7 +83,6 @@ export interface DayAdjustment {
   manualOut: number | null;
 }
 
-/** Ở production, lượt từ công cụ mô phỏng không được tính vào công. */
 function simulatorFilter(): string {
   return process.env.NODE_ENV === 'production' ? " AND source != 'simulator'" : '';
 }
@@ -70,72 +91,144 @@ function readAdjustment(db: Db, userId: string, workDate: string): DayAdjustment
   const row = db
     .prepare('SELECT late_excused, manual_in, manual_out FROM attendance_days WHERE user_id = ? AND work_date = ?')
     .get(userId, workDate) as { late_excused: number; manual_in: number | null; manual_out: number | null } | undefined;
-  return {
-    lateExcused: row?.late_excused === 1,
-    manualIn: row?.manual_in ?? null,
-    manualOut: row?.manual_out ?? null,
-  };
+  return { lateExcused: row?.late_excused === 1, manualIn: row?.manual_in ?? null, manualOut: row?.manual_out ?? null };
 }
 
-function writeDay(db: Db, userId: string, workDate: string, adj: DayAdjustment, settings: DaySettings): void {
-  const detections = db
-    .prepare(`SELECT ts FROM detections WHERE user_id = ? AND work_date = ?${simulatorFilter()}`)
-    .all(userId, workDate) as { ts: number }[];
-  const result = computeDay({
-    detectionTs: detections.map((d) => d.ts),
-    settings,
-    lateExcused: adj.lateExcused,
-    manualIn: adj.manualIn,
-    manualOut: adj.manualOut,
-  });
-  if (!result) {
-    db.prepare('DELETE FROM attendance_days WHERE user_id = ? AND work_date = ?').run(userId, workDate);
-    return;
-  }
+interface DayRow {
+  firstIn: number | null;
+  lastOut: number | null;
+  lateMinutes: number;
+  earlyMinutes: number;
+  earlyArrivalMinutes: number;
+  status: DayStatus;
+  final: boolean;
+  detectionCount: number;
+}
+
+function saveDay(db: Db, userId: string, workDate: string, adj: DayAdjustment, d: DayRow): void {
   db.prepare(
-    `INSERT INTO attendance_days(user_id, work_date, first_in, last_out, late_minutes, early_minutes, status,
+    `INSERT INTO attendance_days(user_id, work_date, first_in, last_out, late_minutes, early_minutes, early_arrival_minutes, status, final,
        late_excused, manual_in, manual_out, detection_count)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(user_id, work_date) DO UPDATE SET
        first_in = excluded.first_in, last_out = excluded.last_out, late_minutes = excluded.late_minutes,
-       early_minutes = excluded.early_minutes, status = excluded.status, late_excused = excluded.late_excused,
-       manual_in = excluded.manual_in, manual_out = excluded.manual_out, detection_count = excluded.detection_count`,
+       early_minutes = excluded.early_minutes, early_arrival_minutes = excluded.early_arrival_minutes, status = excluded.status,
+       final = excluded.final, late_excused = excluded.late_excused, manual_in = excluded.manual_in, manual_out = excluded.manual_out,
+       detection_count = excluded.detection_count`,
   ).run(
-    userId,
-    workDate,
-    result.firstIn,
-    result.lastOut,
-    result.lateMinutes,
-    result.earlyMinutes,
-    result.status,
-    adj.lateExcused ? 1 : 0,
-    adj.manualIn,
-    adj.manualOut,
-    result.detectionCount,
+    userId, workDate, d.firstIn, d.lastOut, d.lateMinutes, d.earlyMinutes, d.earlyArrivalMinutes, d.status, d.final ? 1 : 0,
+    adj.lateExcused ? 1 : 0, adj.manualIn, adj.manualOut, d.detectionCount,
   );
 }
 
-export function recomputeDay(db: Db, userId: string, workDate: string, settings?: DaySettings): void {
-  writeDay(db, userId, workDate, readAdjustment(db, userId, workDate), settings ?? toDaySettings(getWorkSettings(db)));
-}
-
-export function applyDayAdjustment(db: Db, userId: string, workDate: string, patch: Partial<DayAdjustment>): void {
-  const adj = { ...readAdjustment(db, userId, workDate), ...patch };
-  writeDay(db, userId, workDate, adj, toDaySettings(getWorkSettings(db)));
-}
-
-/** Tính lại mọi (nhân viên, ngày) có dữ liệu trong [from, to]. Trả số cặp đã tính. */
-export function recomputeRange(db: Db, from: string, to: string): number {
-  const settings = toDaySettings(getWorkSettings(db));
-  const pairs = db
-    .prepare(
-      `SELECT user_id, work_date FROM detections WHERE work_date BETWEEN ? AND ?
-       UNION
-       SELECT user_id, work_date FROM attendance_days WHERE work_date BETWEEN ? AND ?`,
-    )
-    .all(from, to, from, to) as { user_id: string; work_date: string }[];
-  tx(db, () => {
-    for (const p of pairs) recomputeDay(db, p.user_id, p.work_date, settings);
+/**
+ * Tính lại một ngày công (spec mục 6): đơn nghỉ/công tác đã duyệt > lượt quẹt/giờ chỉnh tay > vắng (ngày làm việc, đã qua giờ ra) > không có dòng.
+ * Người không hoạt động, ADMIN, hoặc ngày trước ngày tạo tài khoản: không bao giờ vắng/nghỉ.
+ */
+function writeDay(db: Db, userId: string, workDate: string, adj: DayAdjustment, now: number): void {
+  const user = db.prepare('SELECT code, status, created_at FROM users WHERE id = ?').get(userId) as
+    | { code: string; status: string; created_at: string }
+    | undefined;
+  if (!user) return;
+  const rule = effectiveShift(db, userId);
+  const closed = now >= shiftEndTs(rule, workDate);
+  const eligible = user.status === 'active' && user.code !== SYSTEM_ADMIN_CODE && workDate >= user.created_at.slice(0, 10);
+  const workday = isWorkday(db, rule, workDate);
+  const detections = db
+    .prepare(`SELECT ts FROM detections WHERE user_id = ? AND work_date = ?${simulatorFilter()}`)
+    .all(userId, workDate) as { ts: number }[];
+  const computed = computeDay({
+    detectionTs: detections.map((d) => d.ts),
+    settings: rule,
+    lateExcused: adj.lateExcused,
+    manualIn: adj.manualIn,
+    manualOut: adj.manualOut,
+    closed,
   });
-  return pairs.length;
+
+  const leave = eligible && workday ? approvedLeaveType(db, userId, workDate) : null;
+  if (leave) {
+    saveDay(db, userId, workDate, adj, {
+      firstIn: computed?.firstIn ?? null,
+      lastOut: computed?.lastOut ?? null,
+      lateMinutes: 0,
+      earlyMinutes: 0,
+      earlyArrivalMinutes: 0,
+      status: leave,
+      final: true,
+      detectionCount: detections.length,
+    });
+    return;
+  }
+  if (computed) {
+    saveDay(db, userId, workDate, adj, computed);
+    return;
+  }
+  if (eligible && workday && closed) {
+    saveDay(db, userId, workDate, adj, {
+      firstIn: null, lastOut: null, lateMinutes: 0, earlyMinutes: 0, earlyArrivalMinutes: 0, status: 'absent', final: true, detectionCount: 0,
+    });
+    return;
+  }
+  db.prepare('DELETE FROM attendance_days WHERE user_id = ? AND work_date = ?').run(userId, workDate);
+}
+
+export function recomputeDay(db: Db, userId: string, workDate: string, now: number = Date.now()): void {
+  writeDay(db, userId, workDate, readAdjustment(db, userId, workDate), now);
+}
+
+export function applyDayAdjustment(db: Db, userId: string, workDate: string, patch: Partial<DayAdjustment>, now: number = Date.now()): void {
+  writeDay(db, userId, workDate, { ...readAdjustment(db, userId, workDate), ...patch }, now);
+}
+
+/** Tính lại mọi (người, ngày) trong [from, to] cho danh sách người. Trả số cặp đã tính. */
+export function recomputeUsers(db: Db, userIds: string[], from: string, to: string, now: number): number {
+  const span = daysBetween(from, to);
+  if (span < 0 || userIds.length === 0) return 0;
+  let n = 0;
+  tx(db, () => {
+    for (let i = 0; i <= span; i++) {
+      const date = addDays(from, i);
+      for (const id of userIds) {
+        recomputeDay(db, id, date, now);
+        n++;
+      }
+    }
+  });
+  return n;
+}
+
+/** Tính lại mọi nhân sự (trừ ADMIN) trong khoảng ngày — nút "Tính lại" của HR. */
+export function recomputeRange(db: Db, from: string, to: string, now: number = Date.now()): number {
+  const ids = (db.prepare('SELECT id FROM users WHERE code != ?').all(SYSTEM_ADMIN_CODE) as { id: string }[]).map((r) => r.id);
+  return recomputeUsers(db, ids, from, to, now);
+}
+
+/** Từ ngày 1 tháng hiện tại tới hôm nay (giờ Việt Nam). */
+export function monthToDate(now: number): { from: string; to: string } {
+  const to = toVnDate(now);
+  return { from: `${to.slice(0, 8)}01`, to };
+}
+
+/**
+ * Đóng ngày (job 15 phút): hôm qua và hôm nay, mọi nhân sự đang làm (trừ ADMIN) chưa có dòng hoặc dòng chưa chốt
+ * mà đã qua giờ ra của ca ⇒ tính lại để ghi vắng/chốt về sớm. Trả số ngày đã tính.
+ */
+export function closeDays(db: Db, now: number): number {
+  const today = toVnDate(now);
+  const users = (db.prepare("SELECT id FROM users WHERE status = 'active' AND code != ?").all(SYSTEM_ADMIN_CODE) as { id: string }[]).map((r) => r.id);
+  const final = db.prepare('SELECT final FROM attendance_days WHERE user_id = ? AND work_date = ?');
+  let n = 0;
+  tx(db, () => {
+    for (const date of [addDays(today, -1), today]) {
+      for (const id of users) {
+        const r = final.get(id, date) as { final: number } | undefined;
+        if (r?.final === 1) continue;
+        if (now < shiftEndTs(effectiveShift(db, id), date)) continue;
+        recomputeDay(db, id, date, now);
+        n++;
+      }
+    }
+  });
+  return n;
 }

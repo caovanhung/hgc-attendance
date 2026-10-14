@@ -20,6 +20,7 @@ const input = (detectionTs: number[], extra: Partial<ComputeDayInput> = {}): Com
   lateExcused: false,
   manualIn: null,
   manualOut: null,
+  closed: true,
   ...extra,
 });
 
@@ -61,19 +62,17 @@ test('hai lượt cách 29 phút → thiếu giờ ra; cách 30 phút → có gi
   assert.equal(r.status, 'early_leave');
 });
 
-test('ra 16:50 → về sớm 10 phút', () => {
-  const r = computeDay(input([at('07:55'), at('12:00'), at('16:50')]))!;
-  assert.equal(r.status, 'early_leave');
-  assert.equal(r.earlyMinutes, 10);
-  assert.equal(r.firstIn, at('07:55'));
-  assert.equal(r.lastOut, at('16:50'));
+test('ra 16:50 → trong ngưỡng 10 phút, không về sớm; ra 16:49 → về sớm 11 phút', () => {
+  assert.equal(computeDay(input([at('07:55'), at('12:00'), at('16:50')]))!.status, 'on_time');
+  const r = computeDay(input([at('07:55'), at('12:00'), at('16:49')]))!;
+  assert.deepEqual([r.status, r.earlyMinutes], ['early_leave', 11]);
 });
 
 test('muộn và về sớm', () => {
-  const r = computeDay(input([at('08:30'), at('16:50')]))!;
+  const r = computeDay(input([at('08:30'), at('16:40')]))!;
   assert.equal(r.status, 'late_and_early');
   assert.equal(r.lateMinutes, 30);
-  assert.equal(r.earlyMinutes, 10);
+  assert.equal(r.earlyMinutes, 20);
 });
 
 test('đã được duyệt giải trình → không tính muộn', () => {
@@ -100,4 +99,15 @@ test('manualIn khi không có lượt nào → thiếu giờ ra', () => {
   const r = computeDay(input([], { manualIn: at('08:00') }))!;
   assert.equal(r.status, 'missing_out');
   assert.equal(r.detectionCount, 0);
+});
+
+test('chưa qua giờ ra (closed = false) → không gắn về sớm, final = false', () => {
+  const r = computeDay(input([at('08:00'), at('14:30')], { closed: false }))!;
+  assert.deepEqual([r.status, r.earlyMinutes, r.final], ['on_time', 0, false]);
+});
+
+test('đến trước 07:45 → ghi đi sớm, vẫn đúng giờ', () => {
+  const r = computeDay(input([at('07:30'), at('17:00')]))!;
+  assert.deepEqual([r.status, r.earlyArrivalMinutes], ['on_time', 30]);
+  assert.equal(computeDay(input([at('07:45'), at('17:00')]))!.earlyArrivalMinutes, 0);
 });
