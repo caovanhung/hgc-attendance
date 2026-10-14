@@ -83,9 +83,9 @@ Bản này đổi cấu trúc database và **không chuyển dữ liệu cũ** (
 ```bash
 cd /home/ubuntu/hgc-attendance
 pm2 stop hanet-attendance
-mkdir -p ~/hgc-backup && cp data/attendance.db ~/hgc-backup/attendance-v2-$(date +%F).db
-rm -f data/attendance.db data/attendance.db-wal data/attendance.db-shm
+mkdir -p ~/hgc-backup && cp data/attendance.db* ~/hgc-backup/   # chép cả file -wal/-shm (dữ liệu chưa ghi hết vào file chính)
 git pull && npm install --omit=dev
+rm -f data/attendance.db data/attendance.db-wal data/attendance.db-shm
 pm2 restart hanet-attendance
 pm2 logs hanet-attendance --lines 20 --nostream    # thấy [BOOTSTRAP] Đã tạo tài khoản ADMIN ...
 ```
@@ -97,7 +97,7 @@ Sau khi khởi động (đăng nhập `ADMIN` / `Admin@123`, đổi mật khẩu
 3. **Khu vực**: tạo các khu (ví dụ Trụ sở 26 Đức Giang, Tổng kho Đức Giang).
 4. **Phòng ban**: tạo phòng ban, chọn khu cho từng phòng.
 5. **Camera**: **Nhập camera từ Camera AI**, rồi gán khu cho từng camera (tab Khu vực hoặc Sửa camera).
-6. **Nhân sự**: thêm từng người (email + điện thoại bắt buộc; mật khẩu tự gửi qua email), hoặc **Nhập từ file CSV** (tải file mẫu), hoặc **Nhập từ Camera AI** (người nhập theo cách này chưa có email: bấm Sửa để bổ sung email và điện thoại — hệ thống tự gửi mật khẩu).
+6. **Nhân sự**: thêm từng người (email + điện thoại bắt buộc; mật khẩu tự gửi qua email), hoặc **Nhập từ file CSV** (tải file mẫu), hoặc **Nhập từ Camera AI** (người nhập theo cách này chưa có email: bấm Sửa để bổ sung email và điện thoại — hệ thống tự gửi mật khẩu). Người đã có trên Camera AI: dùng Nhập từ Camera AI trước (giữ đúng mã cũ), rồi mới thêm người mới.
 7. Cấp quyền: Sửa nhân sự → Vai trò **Quản trị khu vực** → tích các khu được giao. Vai trò **HR toàn hệ thống** chỉ tài khoản `ADMIN` cấp được.
 
 ## Kiểm tra sau khi nâng cấp v3 (trên host)
