@@ -7,8 +7,9 @@ export type Row = Record<string, any>;
 export const USER_SELECT = `SELECT u.id, u.code, u.name, u.email, u.phone, u.role, u.department_id,
   d.name AS department_name, d.area_id, ar.name AS area_name, u.position, u.avatar_url, u.hanet_person_id, u.face_registered, u.status,
   u.hanet_sync_status, u.hanet_sync_error, u.face_error, u.email_status, u.email_error, (u.password_hash IS NOT NULL) AS can_login,
+  u.shift_id, us.name AS shift_name,
   (SELECT group_concat(x.area_id) FROM admin_areas x WHERE x.user_id = u.id) AS admin_area_ids, u.created_at
-  FROM users u LEFT JOIN departments d ON d.id = u.department_id LEFT JOIN areas ar ON ar.id = d.area_id`;
+  FROM users u LEFT JOIN departments d ON d.id = u.department_id LEFT JOIN areas ar ON ar.id = d.area_id LEFT JOIN shifts us ON us.id = u.shift_id`;
 
 export function mapUser(r: Row): User {
   return {
@@ -33,6 +34,8 @@ export function mapUser(r: Row): User {
     faceError: r.face_error ?? null,
     emailStatus: r.email_status ?? 'none',
     emailError: r.email_error ?? null,
+    shiftId: r.shift_id ?? null,
+    shiftName: r.shift_name ?? null,
     canLogin: r.can_login === 1,
     createdAt: r.created_at,
   };

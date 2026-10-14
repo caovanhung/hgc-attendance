@@ -10,6 +10,7 @@ import { deleteUserSessions, scopeFor, scopeWhere, type AuthUser } from '../auth
 import { assertEmailFree, parseEmail, parsePhone } from '../accounts';
 import { enqueueMail } from '../mail-queue';
 import { toVnDate } from '../vntime';
+import { monthToDate, recomputeUsers } from '../attendance';
 import { NOT_SYSTEM_ADMIN, SYSTEM_ADMIN_CODE } from '../bootstrap';
 import {
   areaFilterSql, canDeleteUser, deptAreaId, deviceAreaId, isGlobalHr, isSystemAdmin, managesArea, notFound, parseAreaFilter, requireManager,
@@ -78,6 +79,15 @@ function resolveDepartmentFor(db: Db, actor: AuthUser, departmentId: unknown): s
   }
   if (!managesArea(actor, deptAreaId(db, id) ?? null)) throw notFound('phòng ban');
   return id;
+}
+
+/** Ca riêng cho nhân sự: null = theo phòng ban; ca phải thuộc khu của phòng ban người đó. */
+function resolveUserShift(db: Db, shiftId: unknown, departmentId: string | null): string | null {
+  if (shiftId === undefined || shiftId === null || shiftId === '') return null;
+  const area = departmentId ? (deptAreaId(db, departmentId) ?? null) : null;
+  const s = typeof shiftId === 'string' ? (db.prepare('SELECT area_id FROM shifts WHERE id = ?').get(shiftId) as { area_id: string } | undefined) : undefined;
+  if (!s || area === null || s.area_id !== area) throw new HttpError(400, 'Ca không thuộc khu của nhân sự này');
+  return shiftId as string;
 }
 
 /** Đăng ký FaceID / xem ảnh nhận diện: như quyền sửa, và quản trị khu không tự làm cho chính mình. */
@@ -215,6 +225,7 @@ export function userRoutes(ctx: AppContext): Router {
       const role = b.role === undefined ? 'employee' : b.role;
       assertRoleAllowed(actor, role);
       const departmentId = resolveDepartmentFor(db, actor, b.departmentId);
+      const shiftId = resolveUserShift(db, b.shiftId, departmentId);
       const email = parseEmail(b.email);
       const phone = parsePhone(b.phone);
       const adminAreaIds = role === 'area_admin' ? parseAdminAreaIds(db, b.adminAreaIds) : [];
@@ -229,9 +240,9 @@ export function userRoutes(ctx: AppContext): Router {
       tx(db, () => {
         db.prepare(
           `INSERT INTO users(id, code, name, email, phone, role, department_id, position, avatar_url, hanet_person_id,
-             face_registered, status, password_hash, must_change_password, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, 1, ?)`,
-        ).run(id, code, name, email, phone, role, departmentId, str(b.position) ?? '', str(b.avatarUrl) ?? '', hanetPersonId, hanetPersonId ? 1 : 0, toVnDate(ctx.now()));
+             face_registered, status, password_hash, must_change_password, shift_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, 1, ?, ?)`,
+        ).run(id, code, name, email, phone, role, departmentId, str(b.position) ?? '', str(b.avatarUrl) ?? '', hanetPersonId, hanetPersonId ? 1 : 0, shiftId, toVnDate(ctx.now()));
         if (adminAreaIds.length) setAdminAreas(db, id, adminAreaIds);
         enqueueMail(db, id, 'welcome', {}, ctx.now());
       });
@@ -258,6 +269,7 @@ export function userRoutes(ctx: AppContext): Router {
     const changesRole = b.role !== undefined && b.role !== target.role;
     const changesStatus = b.status !== undefined && b.status !== target.status;
     const changesDept = b.departmentId !== undefined && (b.departmentId || null) !== target.departmentId;
+    const changesShift = b.shiftId !== undefined && (b.shiftId || null) !== target.shiftId;
     // Gửi lại đúng danh sách khu đang có (form gửi kèm) không tính là đổi
     const changesAreas =
       b.adminAreaIds !== undefined &&
@@ -269,6 +281,7 @@ export function userRoutes(ctx: AppContext): Router {
         changesStatus ||
         changesDept ||
         changesAreas ||
+        changesShift ||
         (b.hanetPersonId !== undefined && (str(b.hanetPersonId) || null) !== target.hanetPersonId) ||
         (b.avatarUrl !== undefined && (str(b.avatarUrl) ?? '') !== target.avatarUrl);
       if (changesOther) throw new HttpError(400, 'Bạn chỉ được sửa họ tên, email, điện thoại và chức vụ của chính mình');
@@ -311,7 +324,9 @@ export function userRoutes(ctx: AppContext): Router {
       if (b.status !== 'active' && b.status !== 'inactive') throw new HttpError(400, 'Trạng thái không hợp lệ');
       set('status', b.status);
     }
-    if (changesDept) set('department_id', resolveDepartmentFor(db, actor, b.departmentId));
+    const deptAfter = changesDept ? resolveDepartmentFor(db, actor, b.departmentId) : target.departmentId;
+    if (changesDept) set('department_id', deptAfter);
+    if (b.shiftId !== undefined) set('shift_id', resolveUserShift(db, b.shiftId, deptAfter));
     const newRole: UserRole = changesRole ? b.role : target.role;
     let adminAreas: string[] | null = null;
     if (newRole === 'area_admin' && (changesRole || changesAreas)) {
@@ -325,6 +340,10 @@ export function userRoutes(ctx: AppContext): Router {
       if (sets.length) db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...params, target.id);
       if (adminAreas !== null) setAdminAreas(db, target.id, adminAreas);
     });
+    if (changesShift || changesDept) {
+      const { from, to } = monthToDate(ctx.now());
+      recomputeUsers(db, [target.id], from, to, ctx.now());
+    }
     // Người chưa đăng nhập được (nhập từ Camera AI, hoặc thư chào mừng lỗi) vừa có/đổi email: gửi thư chào mừng
     if (b.email !== undefined && !target.canLogin && parseEmail(b.email) !== target.email.toLowerCase()) {
       enqueueMail(db, target.id, 'welcome', {}, ctx.now());

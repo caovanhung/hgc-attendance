@@ -25,6 +25,8 @@ export interface User {
   faceError: string | null; // lý do đăng ký FaceID thất bại gần nhất
   emailStatus: EmailStatus; // trạng thái thư gần nhất gửi cho người này
   emailError: string | null;
+  shiftId: string | null;
+  shiftName: string | null; // ca riêng (null = theo phòng ban)
   canLogin: boolean; // đã có mật khẩu (false: thiếu email hoặc thư chào mừng chưa gửi được)
   createdAt: string;
 }
@@ -39,6 +41,8 @@ export interface Department {
   memberCount: number;
   hanetSyncStatus: SyncStatus;
   hanetSyncError: string | null;
+  shiftId: string | null;
+  shiftName: string | null;
   areaId: string | null;
   areaName: string | null;
   createdAt: string;

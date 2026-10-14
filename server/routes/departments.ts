@@ -11,12 +11,14 @@ import { dropEntityJobs, enqueue, kickEntity } from '../hanet-sync';
 import { getUser, type Row } from '../repo';
 import { CODE_RE } from '../validation';
 import { toVnDate } from '../vntime';
+import { monthToDate, recomputeUsers } from '../attendance';
 import type { Department } from '../../shared/types';
 
 const DEPT_SELECT = `SELECT d.id, d.code, d.name, d.description, d.manager_id, m.name AS manager_name, d.hanet_sync_status, d.hanet_sync_error, d.created_at,
+  d.shift_id, ds.name AS shift_name,
   d.area_id, ar.name AS area_name,
   (SELECT COUNT(*) FROM users x WHERE x.department_id = d.id) AS member_count
-  FROM departments d LEFT JOIN users m ON m.id = d.manager_id LEFT JOIN areas ar ON ar.id = d.area_id`;
+  FROM departments d LEFT JOIN users m ON m.id = d.manager_id LEFT JOIN areas ar ON ar.id = d.area_id LEFT JOIN shifts ds ON ds.id = d.shift_id`;
 
 function mapDept(r: Row): Department {
   return {
@@ -29,6 +31,8 @@ function mapDept(r: Row): Department {
     memberCount: Number(r.member_count),
     hanetSyncStatus: r.hanet_sync_status ?? 'synced',
     hanetSyncError: r.hanet_sync_error ?? null,
+    shiftId: r.shift_id ?? null,
+    shiftName: r.shift_name ?? null,
     areaId: r.area_id ?? null,
     areaName: r.area_name ?? null,
     createdAt: r.created_at,
@@ -46,6 +50,14 @@ function resolveManager(db: Db, actor: AuthUser, managerId: unknown): string | n
   if (!m) throw new HttpError(400, 'Trưởng phòng được chọn không tồn tại');
   if (!managesArea(actor, m.areaId)) throw notFound('nhân sự');
   return m.id;
+}
+
+/** Ca cho phòng ban: null = ca mặc định; ca phải thuộc đúng khu của phòng. */
+function resolveDeptShift(db: Db, shiftId: unknown, areaId: string | null): string | null {
+  if (shiftId === undefined || shiftId === null || shiftId === '') return null;
+  const s = typeof shiftId === 'string' ? (db.prepare('SELECT area_id FROM shifts WHERE id = ?').get(shiftId) as { area_id: string } | undefined) : undefined;
+  if (!s || s.area_id !== areaId) throw new HttpError(400, 'Ca không thuộc khu của phòng ban này');
+  return shiftId as string;
 }
 
 /** Phòng ban trong phạm vi quản lý, không thì 404. */
@@ -83,15 +95,17 @@ export function departmentRoutes(ctx: AppContext): Router {
     if (!CODE_RE.test(code)) throw new HttpError(400, 'Mã phòng ban không hợp lệ');
     if (!name) throw new HttpError(400, 'Tên phòng ban là bắt buộc');
     const areaId = resolveAreaFor(db, actor, b.areaId);
+    const shiftId = resolveDeptShift(db, b.shiftId, areaId);
     const managerId = resolveManager(db, actor, b.managerId);
     if (db.prepare('SELECT 1 FROM departments WHERE code = ?').get(code)) throw new HttpError(409, 'Mã phòng ban đã tồn tại');
     const id = newId('dep');
-    db.prepare('INSERT INTO departments(id, code, name, description, manager_id, area_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+    db.prepare('INSERT INTO departments(id, code, name, description, manager_id, shift_id, area_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
       id,
       code,
       name,
       typeof b.description === 'string' ? b.description.trim() : '',
       managerId,
+      shiftId,
       areaId,
       toVnDate(ctx.now()),
     );
@@ -108,15 +122,23 @@ export function departmentRoutes(ctx: AppContext): Router {
     const name = b.name === undefined ? undefined : typeof b.name === 'string' ? b.name.trim() : '';
     if (name === '') throw new HttpError(400, 'Tên phòng ban là bắt buộc');
     const areaId = b.areaId === undefined ? undefined : resolveAreaFor(db, actor, b.areaId);
+    const areaAfter = areaId === undefined ? dept.areaId : areaId;
+    const shiftId = b.shiftId === undefined ? undefined : resolveDeptShift(db, b.shiftId, areaAfter);
     const managerId = b.managerId === undefined ? undefined : resolveManager(db, actor, b.managerId);
     tx(db, () => {
       if (name !== undefined) db.prepare('UPDATE departments SET name = ? WHERE id = ?').run(name, dept.id);
       if (b.description !== undefined) {
         db.prepare('UPDATE departments SET description = ? WHERE id = ?').run(typeof b.description === 'string' ? b.description.trim() : '', dept.id);
       }
+      if (shiftId !== undefined) db.prepare('UPDATE departments SET shift_id = ? WHERE id = ?').run(shiftId, dept.id);
       if (areaId !== undefined) db.prepare('UPDATE departments SET area_id = ? WHERE id = ?').run(areaId, dept.id);
       if (managerId !== undefined) db.prepare('UPDATE departments SET manager_id = ? WHERE id = ?').run(managerId, dept.id);
     });
+    if (shiftId !== undefined || areaId !== undefined) {
+      const members = (db.prepare('SELECT id FROM users WHERE department_id = ?').all(dept.id) as { id: string }[]).map((x) => x.id);
+      const { from, to } = monthToDate(ctx.now());
+      recomputeUsers(db, members, from, to, ctx.now());
+    }
     const after = getDept(db, dept.id)!;
     if (after.name !== dept.name || after.description !== dept.description) {
       enqueue(db, 'department', dept.id, 'dept.update', { name: after.name, desc: after.description }, ctx.now());

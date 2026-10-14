@@ -135,7 +135,7 @@ test('giờ làm việc: HR đọc/sửa, dữ liệu sai 400, tính lại áp d
     assert.equal((await hr.post('/api/attendance/recompute', { from: '2026-01-01', to: D })).status, 400, 'quá 92 ngày');
     const rc = await hr.post('/api/attendance/recompute', { from: D, to: D });
     assert.equal(rc.status, 200);
-    assert.equal(rc.body.updated, 2);
+    assert.equal(rc.body.updated, 5);
     const nv1 = (await hr.get(`/api/attendance?date=${D}&search=NV01`)).body.records[0];
     assert.equal(nv1.lateMinutes, 5);
   } finally {

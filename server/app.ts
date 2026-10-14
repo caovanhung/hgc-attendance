@@ -6,6 +6,7 @@ import { authPublicRoutes, authRoutes } from './routes/auth';
 import { userRoutes } from './routes/users';
 import { departmentRoutes } from './routes/departments';
 import { areaRoutes } from './routes/areas';
+import { shiftRoutes } from './routes/shifts';
 import { cameraRoutes } from './routes/cameras';
 import { attendanceRoutes } from './routes/attendance';
 import { settingsRoutes } from './routes/settings';
@@ -41,6 +42,7 @@ export function createApp(ctx: AppContext): express.Express {
   api.use(userRoutes(ctx));
   api.use(departmentRoutes(ctx));
   api.use(areaRoutes(ctx));
+  api.use(shiftRoutes(ctx));
   api.use(cameraRoutes(ctx));
   api.use(attendanceRoutes(ctx));
   api.use(settingsRoutes(ctx));

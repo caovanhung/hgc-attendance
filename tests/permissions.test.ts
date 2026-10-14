@@ -73,7 +73,14 @@ const CASES: Case[] = [
   { method: 'GET', path: () => '/api/admin/backups/latest', allowed: ADMIN },
   { method: 'POST', path: () => '/api/admin/reset-database', body: { password: 'sai' }, allowed: ADMIN },
   { method: 'GET', path: () => '/api/users/next-code', allowed: MANAGERS },
+  { method: 'GET', path: () => '/api/shifts', allowed: MANAGERS },
+  { method: 'POST', path: () => '/api/shifts', body: { name: 'Mới' }, allowed: MANAGERS },
+  { method: 'PUT', path: () => '/api/shifts/sA', body: { lateGraceMinutes: 10 }, allowed: MANAGERS },
+  { method: 'GET', path: () => '/api/holidays', allowed: ALL },
+  { method: 'POST', path: () => '/api/holidays', body: { date: '2026-12-31', name: 'Lễ' }, allowed: GLOBAL },
   // Xóa: để cuối danh sách
+  { method: 'DELETE', path: () => '/api/shifts/sDel', allowed: MANAGERS },
+  { method: 'DELETE', path: () => '/api/holidays/2026-12-31', allowed: GLOBAL },
   { method: 'DELETE', path: (i) => `/api/users/${i.hr2}`, allowed: ADMIN },
   { method: 'DELETE', path: (i) => `/api/users/${i.nv2}`, allowed: MANAGERS },
   { method: 'DELETE', path: (i) => `/api/departments/${i.kt2}`, allowed: MANAGERS },
@@ -100,6 +107,7 @@ async function setup(): Promise<{ app: TestApp; ids: Record<string, string>; cli
     nv2: seedUser(app.db, { code: 'NV02', departmentId: kt }),
   };
   app.db.prepare("INSERT INTO cameras(id, name, device_key, area_id, created_at) VALUES ('camA', 'Cổng A', 'DEVA', ?, 'x')").run(A);
+  app.db.prepare("INSERT INTO shifts(id, area_id, name, work_start, work_end, work_days, late_grace_minutes, early_arrival_minutes, early_leave_minutes, created_at) VALUES ('sA', ?, 'Ca A', '08:00', '17:00', '1,2,3,4,5', 15, 15, 10, 'x'), ('sDel', ?, 'Ca xóa', '08:00', '17:00', '1,2,3,4,5', 15, 15, 10, 'x')").run(A, A);
   const nv2 = await loginAs(app, 'NV02');
   ids.req = (await nv2.post('/api/requests', { workDate: '2026-10-01', type: 'leave_request', reason: 'x' })).body.request.id;
   const clients = {
