@@ -109,9 +109,25 @@ test('giờ làm việc: HR đọc/sửa, dữ liệu sai 400, tính lại áp d
     const nv = await loginAs(app, 'NV01');
     assert.equal((await nv.get('/api/settings/work')).status, 403);
     const hr = await loginAs(app, 'HR01');
-    assert.deepEqual((await hr.get('/api/settings/work')).body.settings, { workStart: '08:00', lateGraceMinutes: 15, workEnd: '17:00', minOutGapMinutes: 30 });
+    assert.deepEqual((await hr.get('/api/settings/work')).body.settings, {
+      workStart: '08:00',
+      lateGraceMinutes: 15,
+      workEnd: '17:00',
+      minOutGapMinutes: 30,
+      workDays: [1, 2, 3, 4, 5],
+      earlyArrivalMinutes: 15,
+      earlyLeaveMinutes: 10,
+    });
     assert.equal((await hr.put('/api/settings/work', { workStart: '25:00', lateGraceMinutes: 0, workEnd: '17:00', minOutGapMinutes: 30 })).status, 400);
-    const ok = await hr.put('/api/settings/work', { workStart: '08:00', lateGraceMinutes: 0, workEnd: '17:00', minOutGapMinutes: 30 });
+    const ok = await hr.put('/api/settings/work', {
+      workStart: '08:00',
+      lateGraceMinutes: 0,
+      workEnd: '17:00',
+      minOutGapMinutes: 30,
+      workDays: [1, 2, 3, 4, 5],
+      earlyArrivalMinutes: 15,
+      earlyLeaveMinutes: 10,
+    });
     assert.equal(ok.status, 200);
 
     assert.equal((await nv.post('/api/attendance/recompute', { from: D, to: D })).status, 403);

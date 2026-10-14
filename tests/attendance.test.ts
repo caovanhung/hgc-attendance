@@ -5,7 +5,15 @@ import { vnDateTimeToTs } from '../server/vntime';
 
 const D = '2026-10-13';
 const at = (hhmm: string, seconds = 0) => vnDateTimeToTs(D, hhmm) + seconds * 1000;
-const settings = toDaySettings({ workStart: '08:00', lateGraceMinutes: 15, workEnd: '17:00', minOutGapMinutes: 30 });
+const settings = toDaySettings({
+  workStart: '08:00',
+  lateGraceMinutes: 15,
+  workEnd: '17:00',
+  minOutGapMinutes: 30,
+  workDays: [1, 2, 3, 4, 5],
+  earlyArrivalMinutes: 15,
+  earlyLeaveMinutes: 10,
+});
 const input = (detectionTs: number[], extra: Partial<ComputeDayInput> = {}): ComputeDayInput => ({
   detectionTs,
   settings,

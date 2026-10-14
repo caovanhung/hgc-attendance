@@ -151,6 +151,29 @@ export interface WorkSettings {
   lateGraceMinutes: number;
   workEnd: string; // 'HH:mm'
   minOutGapMinutes: number;
+  workDays: number[];
+  earlyArrivalMinutes: number;
+  earlyLeaveMinutes: number;
+}
+
+export interface Shift {
+  id: string;
+  areaId: string;
+  areaName: string | null;
+  name: string;
+  workStart: string;
+  workEnd: string;
+  workDays: number[];
+  lateGraceMinutes: number;
+  earlyArrivalMinutes: number;
+  earlyLeaveMinutes: number;
+  departmentCount: number;
+  userCount: number;
+}
+
+export interface Holiday {
+  date: string;
+  name: string;
 }
 
 export type WebhookLogStatus = 'success' | 'ignored' | 'duplicate' | 'rejected' | 'error';

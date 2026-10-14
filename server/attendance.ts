@@ -3,22 +3,10 @@ import { parseHHmm, vnMinutesOfDay } from './vntime';
 import type { Db } from './db';
 import { tx } from './db';
 import { getWorkSettings } from './settings';
+import { ruleFromSettings, type ShiftRule } from './shifts';
 
-export interface DaySettings {
-  workStart: number; // phút trong ngày
-  graceMinutes: number;
-  workEnd: number; // phút trong ngày
-  minOutGapMinutes: number;
-}
-
-export function toDaySettings(ws: WorkSettings): DaySettings {
-  return {
-    workStart: parseHHmm(ws.workStart),
-    graceMinutes: ws.lateGraceMinutes,
-    workEnd: parseHHmm(ws.workEnd),
-    minOutGapMinutes: ws.minOutGapMinutes,
-  };
-}
+export type DaySettings = ShiftRule;
+export const toDaySettings = ruleFromSettings;
 
 export interface ComputeDayInput {
   detectionTs: number[];
