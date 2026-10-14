@@ -2248,7 +2248,7 @@ function readCookies(res, into) {
   return into;
 }
 var cookieHeader = (jar) => [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
-var hasSessionToken = (jar) => [...jar.keys()].some((k) => /authjs\.session-token/.test(k));
+var hasSessionToken = (jar) => [...jar.keys()].some((k) => /(authjs|next-auth)\.session-token/.test(k));
 async function doLogin(deps) {
   const email = getSetting(deps.db, EMAIL_KEY);
   const password = getSetting(deps.db, PASSWORD_KEY);
@@ -2453,8 +2453,9 @@ function attendanceRoutes(ctx) {
         duration: clip.duration,
         offsetSeconds: Math.min(Math.max((at - clip.startTs) / 1e3, 0), clip.duration),
         deviceName: clip.deviceName,
-        prevAt: clip.startTs - 1e3,
-        nextAt: clip.startTs + clip.duration * 1e3 + 1e3
+        // Làm tròn: duration lẻ từ Hanet không được làm ?at= của nút đoạn trước/sau bị từ chối (400)
+        prevAt: Math.round(clip.startTs - 1e3),
+        nextAt: Math.round(clip.startTs + clip.duration * 1e3 + 1e3)
       };
       res.json(body);
     })
