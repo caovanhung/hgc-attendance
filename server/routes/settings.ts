@@ -2,8 +2,8 @@ import { Router } from 'express';
 import type { AppContext } from '../context';
 import { requireGlobalHr } from '../access';
 import { getWorkSettings, saveWorkSettings, validateWorkSettings } from '../settings';
-import { monthToDate, recomputeUsers } from '../attendance';
-import { allStaffIds } from './shifts';
+import { recomputeForShiftChange } from '../attendance';
+import { usersOnDefaultShift } from './shifts';
 
 export function settingsRoutes(ctx: AppContext): Router {
   const { db } = ctx;
@@ -15,9 +15,8 @@ export function settingsRoutes(ctx: AppContext): Router {
 
   r.put('/settings/work', requireGlobalHr, (req, res) => {
     saveWorkSettings(db, validateWorkSettings(req.body));
-    // Ca mặc định đổi: tính lại từ đầu tháng cho mọi người (người có ca riêng/ca phòng tính lại không đổi gì)
-    const { from, to } = monthToDate(ctx.now());
-    const recomputed = recomputeUsers(db, allStaffIds(db), from, to, ctx.now());
+    // Ca mặc định đổi: tính lại từ đầu tháng cho người đang dùng ca mặc định
+    const recomputed = recomputeForShiftChange(db, usersOnDefaultShift(db), ctx.now());
     res.json({ settings: getWorkSettings(db), recomputed });
   });
 

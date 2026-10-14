@@ -210,21 +210,45 @@ export function monthToDate(now: number): { from: string; to: string } {
   return { from: `${to.slice(0, 8)}01`, to };
 }
 
+/** Ngày cuối cùng của các đơn nghỉ phép/công tác đã duyệt của những người này (null nếu không có). */
+export function latestLeaveEnd(db: Db, userIds: string[]): string | null {
+  if (userIds.length === 0) return null;
+  const r = db
+    .prepare(
+      `SELECT MAX(COALESCE(end_date, work_date)) AS last FROM requests
+       WHERE status = 'approved' AND type IN ('leave_request', 'business_trip') AND user_id IN (${userIds.map(() => '?').join(', ')})`,
+    )
+    .get(...userIds) as { last: string | null };
+  return r.last;
+}
+
+/**
+ * Ca/gán ca đổi: tính lại từ ngày 1 tháng hiện tại tới max(hôm nay, ngày cuối của đơn nghỉ/công tác đã duyệt)
+ * — để các ngày nghỉ đã ghi trước cho tương lai theo đúng ngày làm của ca mới.
+ */
+export function recomputeForShiftChange(db: Db, userIds: string[], now: number): number {
+  const { from, to } = monthToDate(now);
+  const last = latestLeaveEnd(db, userIds);
+  return recomputeUsers(db, userIds, from, last && last > to ? last : to, now);
+}
+
 /**
  * Đóng ngày (job 15 phút): hôm qua và hôm nay, mọi nhân sự đang làm (trừ ADMIN) chưa có dòng hoặc dòng chưa chốt
- * mà đã qua giờ ra của ca ⇒ tính lại để ghi vắng/chốt về sớm. Trả số ngày đã tính.
+ * mà đã qua giờ ra của ca ⇒ tính lại để ghi vắng/chốt về sớm. Dòng nghỉ phép/công tác (ghi trước khi duyệt đơn)
+ * luôn được tính lại để sửa nếu ca/ngày lễ đã đổi. Trả số ngày đã tính.
  */
 export function closeDays(db: Db, now: number): number {
   const today = toVnDate(now);
   const users = (db.prepare("SELECT id FROM users WHERE status = 'active' AND code != ?").all(SYSTEM_ADMIN_CODE) as { id: string }[]).map((r) => r.id);
-  const final = db.prepare('SELECT final FROM attendance_days WHERE user_id = ? AND work_date = ?');
+  const row = db.prepare('SELECT final, status FROM attendance_days WHERE user_id = ? AND work_date = ?');
   let n = 0;
   tx(db, () => {
     for (const date of [addDays(today, -1), today]) {
       for (const id of users) {
-        const r = final.get(id, date) as { final: number } | undefined;
-        if (r?.final === 1) continue;
-        if (now < shiftEndTs(effectiveShift(db, id), date)) continue;
+        const r = row.get(id, date) as { final: number; status: string } | undefined;
+        const preWritten = r?.status === 'leave' || r?.status === 'business_trip';
+        if (!preWritten && r?.final === 1) continue;
+        if (!preWritten && now < shiftEndTs(effectiveShift(db, id), date)) continue;
         recomputeDay(db, id, date, now);
         n++;
       }

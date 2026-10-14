@@ -10,7 +10,7 @@ import { deleteUserSessions, scopeFor, scopeWhere, type AuthUser } from '../auth
 import { assertEmailFree, parseEmail, parsePhone } from '../accounts';
 import { enqueueMail } from '../mail-queue';
 import { toVnDate } from '../vntime';
-import { monthToDate, recomputeUsers } from '../attendance';
+import { recomputeForShiftChange } from '../attendance';
 import { NOT_SYSTEM_ADMIN, SYSTEM_ADMIN_CODE } from '../bootstrap';
 import {
   areaFilterSql, canDeleteUser, deptAreaId, deviceAreaId, isGlobalHr, isSystemAdmin, managesArea, notFound, parseAreaFilter, requireManager,
@@ -88,6 +88,11 @@ function resolveUserShift(db: Db, shiftId: unknown, departmentId: string | null)
   const s = typeof shiftId === 'string' ? (db.prepare('SELECT area_id FROM shifts WHERE id = ?').get(shiftId) as { area_id: string } | undefined) : undefined;
   if (!s || area === null || s.area_id !== area) throw new HttpError(400, 'Ca không thuộc khu của nhân sự này');
   return shiftId as string;
+}
+
+function shiftInDeptArea(db: Db, shiftId: string, departmentId: string | null): boolean {
+  const area = departmentId ? (deptAreaId(db, departmentId) ?? null) : null;
+  return area !== null && Boolean(db.prepare('SELECT 1 FROM shifts WHERE id = ? AND area_id = ?').get(shiftId, area));
 }
 
 /** Đăng ký FaceID / xem ảnh nhận diện: như quyền sửa, và quản trị khu không tự làm cho chính mình. */
@@ -326,7 +331,9 @@ export function userRoutes(ctx: AppContext): Router {
     }
     const deptAfter = changesDept ? resolveDepartmentFor(db, actor, b.departmentId) : target.departmentId;
     if (changesDept) set('department_id', deptAfter);
-    if (b.shiftId !== undefined) set('shift_id', resolveUserShift(db, b.shiftId, deptAfter));
+    // Chỉ kiểm tra ca khi ca thật sự đổi hoặc đổi phòng: ca riêng cũ không còn thuộc khu (phòng bị chuyển khu) không chặn sửa thông tin khác
+    if (changesShift) set('shift_id', resolveUserShift(db, b.shiftId, deptAfter));
+    else if (changesDept && target.shiftId && !shiftInDeptArea(db, target.shiftId, deptAfter)) set('shift_id', null);
     const newRole: UserRole = changesRole ? b.role : target.role;
     let adminAreas: string[] | null = null;
     if (newRole === 'area_admin' && (changesRole || changesAreas)) {
@@ -340,10 +347,7 @@ export function userRoutes(ctx: AppContext): Router {
       if (sets.length) db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...params, target.id);
       if (adminAreas !== null) setAdminAreas(db, target.id, adminAreas);
     });
-    if (changesShift || changesDept) {
-      const { from, to } = monthToDate(ctx.now());
-      recomputeUsers(db, [target.id], from, to, ctx.now());
-    }
+    if (changesShift || changesDept) recomputeForShiftChange(db, [target.id], ctx.now());
     // Người chưa đăng nhập được (nhập từ Camera AI, hoặc thư chào mừng lỗi) vừa có/đổi email: gửi thư chào mừng
     if (b.email !== undefined && !target.canLogin && parseEmail(b.email) !== target.email.toLowerCase()) {
       enqueueMail(db, target.id, 'welcome', {}, ctx.now());

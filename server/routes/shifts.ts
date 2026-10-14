@@ -6,32 +6,47 @@ import { HttpError } from '../errors';
 import { currentUser } from '../middleware';
 import { areaColumnSql, isGlobalHr, managesArea, notFound, parseAreaFilter, requireGlobalHr, requireManager, resolveAreaFor } from '../access';
 import { SYSTEM_ADMIN_CODE } from '../bootstrap';
-import { formatWorkDays, getShift, mapShift, SHIFT_SELECT, validateShiftInput } from '../shifts';
-import { monthToDate, recomputeUsers } from '../attendance';
+import { effectiveShift, formatWorkDays, getShift, mapShift, SHIFT_SELECT, validateShiftInput } from '../shifts';
+import { recomputeForShiftChange, recomputeUsers } from '../attendance';
 import type { Row } from '../repo';
 import { isValidDate, toVnDate } from '../vntime';
 import type { Holiday } from '../../shared/types';
 
-/** Nhân sự (trừ ADMIN) đang gán ca này, qua ca riêng hoặc qua phòng ban. */
+/** Nhân sự (trừ ADMIN) đang thực sự áp dụng ca này (ca riêng, hoặc ca phòng khi không có ca riêng hợp lệ). */
 export function usersOfShift(db: Db, shiftId: string): string[] {
   return (
     db
       .prepare('SELECT u.id FROM users u LEFT JOIN departments d ON d.id = u.department_id WHERE u.code != ? AND (u.shift_id = ? OR d.shift_id = ?)')
       .all(SYSTEM_ADMIN_CODE, shiftId, shiftId) as { id: string }[]
-  ).map((r) => r.id);
+  )
+    .map((r) => r.id)
+    .filter((id) => effectiveShift(db, id).shiftId === shiftId);
+}
+
+/** Nhân sự (trừ ADMIN) đang dùng ca mặc định công ty. */
+export function usersOnDefaultShift(db: Db): string[] {
+  return allStaffIds(db).filter((id) => effectiveShift(db, id).shiftId === null);
 }
 
 export function allStaffIds(db: Db): string[] {
   return (db.prepare('SELECT id FROM users WHERE code != ?').all(SYSTEM_ADMIN_CODE) as { id: string }[]).map((r) => r.id);
 }
 
+/** Có đơn nghỉ phép/công tác đã duyệt nào phủ ngày này không. */
+function leaveCovers(db: Db, date: string): boolean {
+  return Boolean(
+    db
+      .prepare(
+        `SELECT 1 FROM requests WHERE status = 'approved' AND type IN ('leave_request', 'business_trip')
+         AND work_date <= ? AND COALESCE(end_date, work_date) >= ? LIMIT 1`,
+      )
+      .get(date, date),
+  );
+}
+
 export function shiftRoutes(ctx: AppContext): Router {
   const { db } = ctx;
   const r = Router();
-  const recomputeMonth = (ids: string[]) => {
-    const { from, to } = monthToDate(ctx.now());
-    return recomputeUsers(db, ids, from, to, ctx.now());
-  };
 
   r.get('/shifts', requireManager, (req, res) => {
     const actor = currentUser(req);
@@ -69,7 +84,7 @@ export function shiftRoutes(ctx: AppContext): Router {
     db.prepare(
       `UPDATE shifts SET name = ?, work_start = ?, work_end = ?, work_days = ?, late_grace_minutes = ?, early_arrival_minutes = ?, early_leave_minutes = ? WHERE id = ?`,
     ).run(s.name, s.workStart, s.workEnd, formatWorkDays(s.workDays), s.lateGraceMinutes, s.earlyArrivalMinutes, s.earlyLeaveMinutes, cur.id);
-    const recomputed = recomputeMonth(usersOfShift(db, cur.id));
+    const recomputed = recomputeForShiftChange(db, usersOfShift(db, cur.id), ctx.now());
     res.json({ shift: getShift(db, cur.id), recomputed });
   });
 
@@ -87,8 +102,9 @@ export function shiftRoutes(ctx: AppContext): Router {
     res.json({ holidays: rows.map((h) => ({ date: h.date, name: h.name })) });
   });
 
-  /** Ngày lễ đổi: tính lại đúng ngày đó cho mọi người, nếu ngày đã tới. */
-  const recomputeDate = (date: string) => (date <= toVnDate(ctx.now()) ? recomputeUsers(db, allStaffIds(db), date, date, ctx.now()) : 0);
+  /** Ngày lễ đổi: tính lại đúng ngày đó cho mọi người, nếu ngày đã tới hoặc có đơn nghỉ/công tác đã duyệt ghi trước cho ngày đó. */
+  const recomputeDate = (date: string) =>
+    date <= toVnDate(ctx.now()) || leaveCovers(db, date) ? recomputeUsers(db, allStaffIds(db), date, date, ctx.now()) : 0;
 
   r.post('/holidays', requireGlobalHr, (req, res) => {
     const b = req.body ?? {};

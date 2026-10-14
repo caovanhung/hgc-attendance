@@ -11,7 +11,7 @@ import { dropEntityJobs, enqueue, kickEntity } from '../hanet-sync';
 import { getUser, type Row } from '../repo';
 import { CODE_RE } from '../validation';
 import { toVnDate } from '../vntime';
-import { monthToDate, recomputeUsers } from '../attendance';
+import { recomputeForShiftChange } from '../attendance';
 import type { Department } from '../../shared/types';
 
 const DEPT_SELECT = `SELECT d.id, d.code, d.name, d.description, d.manager_id, m.name AS manager_name, d.hanet_sync_status, d.hanet_sync_error, d.created_at,
@@ -136,8 +136,7 @@ export function departmentRoutes(ctx: AppContext): Router {
     });
     if (shiftId !== undefined || areaId !== undefined) {
       const members = (db.prepare('SELECT id FROM users WHERE department_id = ?').all(dept.id) as { id: string }[]).map((x) => x.id);
-      const { from, to } = monthToDate(ctx.now());
-      recomputeUsers(db, members, from, to, ctx.now());
+      recomputeForShiftChange(db, members, ctx.now());
     }
     const after = getDept(db, dept.id)!;
     if (after.name !== dept.name || after.description !== dept.description) {
