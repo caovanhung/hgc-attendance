@@ -313,6 +313,12 @@ function backupNow(db, dir, reason, now) {
   pruneBackups(dir);
   return name;
 }
+function backupPreMigrate(db, dir, from) {
+  fs.mkdirSync(dir, { recursive: true });
+  const name = `attendance-pre-migrate-v${from}.db`;
+  if (!fs.existsSync(path.join(dir, name))) db.prepare("VACUUM INTO ?").run(path.join(dir, name));
+  return name;
+}
 function listBackups(dir) {
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir).filter((n) => BACKUP_RE.test(n)).map((name) => {
@@ -322,7 +328,7 @@ function listBackups(dir) {
 }
 function pruneBackups(dir) {
   if (!fs.existsSync(dir)) return;
-  const names = fs.readdirSync(dir).filter((n) => BACKUP_RE.test(n)).sort().reverse();
+  const names = fs.readdirSync(dir).filter((n) => BACKUP_RE.test(n) && !PRE_MIGRATE_RE.test(n)).sort().reverse();
   const daily = names.filter((n) => DAILY_RE.test(n));
   const others = names.filter((n) => !DAILY_RE.test(n));
   for (const n of [...daily.slice(BACKUP_KEEP), ...others.slice(BACKUP_KEEP)]) fs.rmSync(path.join(dir, n), { force: true });
@@ -331,13 +337,14 @@ function latestBackup(dir) {
   const [first] = listBackups(dir);
   return first ? path.join(dir, first.name) : null;
 }
-var BACKUP_KEEP, BACKUP_RE, DAILY_RE;
+var BACKUP_KEEP, BACKUP_RE, DAILY_RE, PRE_MIGRATE_RE;
 var init_backup = __esm({
   "server/backup.ts"() {
     init_vntime();
     BACKUP_KEEP = 30;
     BACKUP_RE = /^attendance-.*\.db$/;
     DAILY_RE = /^attendance-\d{4}-\d{2}-\d{2}\.db$/;
+    PRE_MIGRATE_RE = /-pre-migrate-v\d+\.db$/;
   }
 });
 
@@ -366,7 +373,7 @@ function migrate3to4(db, now) {
   db.exec(`INSERT OR IGNORE INTO settings(key, value) VALUES ('work_days', '1,2,3,4,5'), ('early_arrival_minutes', '15'), ('early_leave_minutes', '10')`);
 }
 function runMigrations(db, file, from, opts) {
-  const backup = opts.backupDir && file !== ":memory:" ? backupNow(db, opts.backupDir, "pre-migrate", opts.now) : null;
+  const backup = opts.backupDir && file !== ":memory:" ? backupPreMigrate(db, opts.backupDir, from) : null;
   db.exec("PRAGMA foreign_keys = OFF");
   try {
     db.exec("BEGIN IMMEDIATE");
@@ -1016,17 +1023,31 @@ function monthToDate(now) {
   const to = toVnDate(now);
   return { from: `${to.slice(0, 8)}01`, to };
 }
+function latestLeaveEnd(db, userIds) {
+  if (userIds.length === 0) return null;
+  const r = db.prepare(
+    `SELECT MAX(COALESCE(end_date, work_date)) AS last FROM requests
+       WHERE status = 'approved' AND type IN ('leave_request', 'business_trip') AND user_id IN (${userIds.map(() => "?").join(", ")})`
+  ).get(...userIds);
+  return r.last;
+}
+function recomputeForShiftChange(db, userIds, now) {
+  const { from, to } = monthToDate(now);
+  const last = latestLeaveEnd(db, userIds);
+  return recomputeUsers(db, userIds, from, last && last > to ? last : to, now);
+}
 function closeDays(db, now) {
   const today = toVnDate(now);
   const users = db.prepare("SELECT id FROM users WHERE status = 'active' AND code != ?").all(SYSTEM_ADMIN_CODE).map((r) => r.id);
-  const final = db.prepare("SELECT final FROM attendance_days WHERE user_id = ? AND work_date = ?");
+  const row = db.prepare("SELECT final, status FROM attendance_days WHERE user_id = ? AND work_date = ?");
   let n = 0;
   tx(db, () => {
     for (const date of [addDays(today, -1), today]) {
       for (const id of users) {
-        const r = final.get(id, date);
-        if (r?.final === 1) continue;
-        if (now < shiftEndTs(effectiveShift(db, id), date)) continue;
+        const r = row.get(id, date);
+        const preWritten = r?.status === "leave" || r?.status === "business_trip";
+        if (!preWritten && r?.final === 1) continue;
+        if (!preWritten && now < shiftEndTs(effectiveShift(db, id), date)) continue;
         recomputeDay(db, id, date, now);
         n++;
       }
@@ -2817,6 +2838,10 @@ function resolveUserShift(db, shiftId, departmentId) {
   if (!s || area === null || s.area_id !== area) throw new HttpError(400, "Ca kh\xF4ng thu\u1ED9c khu c\u1EE7a nh\xE2n s\u1EF1 n\xE0y");
   return shiftId;
 }
+function shiftInDeptArea(db, shiftId, departmentId) {
+  const area = departmentId ? deptAreaId(db, departmentId) ?? null : null;
+  return area !== null && Boolean(db.prepare("SELECT 1 FROM shifts WHERE id = ? AND area_id = ?").get(shiftId, area));
+}
 function assertCanManageFace(actor, target) {
   assertCanEdit(actor, target);
   if (actor.role === "area_admin" && target.id === actor.id) throw new HttpError(403, "B\u1EA1n kh\xF4ng th\u1EC3 t\u1EF1 \u0111\u0103ng k\xFD FaceID cho ch\xEDnh m\xECnh");
@@ -3015,7 +3040,8 @@ function userRoutes(ctx) {
     }
     const deptAfter = changesDept ? resolveDepartmentFor(db, actor, b.departmentId) : target.departmentId;
     if (changesDept) set("department_id", deptAfter);
-    if (b.shiftId !== void 0) set("shift_id", resolveUserShift(db, b.shiftId, deptAfter));
+    if (changesShift) set("shift_id", resolveUserShift(db, b.shiftId, deptAfter));
+    else if (changesDept && target.shiftId && !shiftInDeptArea(db, target.shiftId, deptAfter)) set("shift_id", null);
     const newRole = changesRole ? b.role : target.role;
     let adminAreas = null;
     if (newRole === "area_admin" && (changesRole || changesAreas)) {
@@ -3028,10 +3054,7 @@ function userRoutes(ctx) {
       if (sets.length) db.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).run(...params, target.id);
       if (adminAreas !== null) setAdminAreas(db, target.id, adminAreas);
     });
-    if (changesShift || changesDept) {
-      const { from, to } = monthToDate(ctx.now());
-      recomputeUsers(db, [target.id], from, to, ctx.now());
-    }
+    if (changesShift || changesDept) recomputeForShiftChange(db, [target.id], ctx.now());
     if (b.email !== void 0 && !target.canLogin && parseEmail(b.email) !== target.email.toLowerCase()) {
       enqueueMail(db, target.id, "welcome", {}, ctx.now());
     }
@@ -3224,8 +3247,7 @@ function departmentRoutes(ctx) {
     });
     if (shiftId !== void 0 || areaId !== void 0) {
       const members = db.prepare("SELECT id FROM users WHERE department_id = ?").all(dept.id).map((x) => x.id);
-      const { from, to } = monthToDate(ctx.now());
-      recomputeUsers(db, members, from, to, ctx.now());
+      recomputeForShiftChange(db, members, ctx.now());
     }
     const after = getDept(db, dept.id);
     if (after.name !== dept.name || after.description !== dept.description) {
@@ -3258,18 +3280,25 @@ init_shifts();
 init_attendance();
 init_vntime();
 function usersOfShift(db, shiftId) {
-  return db.prepare("SELECT u.id FROM users u LEFT JOIN departments d ON d.id = u.department_id WHERE u.code != ? AND (u.shift_id = ? OR d.shift_id = ?)").all(SYSTEM_ADMIN_CODE, shiftId, shiftId).map((r) => r.id);
+  return db.prepare("SELECT u.id FROM users u LEFT JOIN departments d ON d.id = u.department_id WHERE u.code != ? AND (u.shift_id = ? OR d.shift_id = ?)").all(SYSTEM_ADMIN_CODE, shiftId, shiftId).map((r) => r.id).filter((id) => effectiveShift(db, id).shiftId === shiftId);
+}
+function usersOnDefaultShift(db) {
+  return allStaffIds(db).filter((id) => effectiveShift(db, id).shiftId === null);
 }
 function allStaffIds(db) {
   return db.prepare("SELECT id FROM users WHERE code != ?").all(SYSTEM_ADMIN_CODE).map((r) => r.id);
 }
+function leaveCovers(db, date) {
+  return Boolean(
+    db.prepare(
+      `SELECT 1 FROM requests WHERE status = 'approved' AND type IN ('leave_request', 'business_trip')
+         AND work_date <= ? AND COALESCE(end_date, work_date) >= ? LIMIT 1`
+    ).get(date, date)
+  );
+}
 function shiftRoutes(ctx) {
   const { db } = ctx;
   const r = Router5();
-  const recomputeMonth = (ids) => {
-    const { from, to } = monthToDate(ctx.now());
-    return recomputeUsers(db, ids, from, to, ctx.now());
-  };
   r.get("/shifts", requireManager, (req, res) => {
     const actor = currentUser(req);
     const f = areaColumnSql(parseAreaFilter(db, actor, req.query.area), "s.area_id");
@@ -3300,7 +3329,7 @@ function shiftRoutes(ctx) {
     db.prepare(
       `UPDATE shifts SET name = ?, work_start = ?, work_end = ?, work_days = ?, late_grace_minutes = ?, early_arrival_minutes = ?, early_leave_minutes = ? WHERE id = ?`
     ).run(s.name, s.workStart, s.workEnd, formatWorkDays(s.workDays), s.lateGraceMinutes, s.earlyArrivalMinutes, s.earlyLeaveMinutes, cur.id);
-    const recomputed = recomputeMonth(usersOfShift(db, cur.id));
+    const recomputed = recomputeForShiftChange(db, usersOfShift(db, cur.id), ctx.now());
     res.json({ shift: getShift(db, cur.id), recomputed });
   });
   r.delete("/shifts/:id", requireManager, (req, res) => {
@@ -3315,7 +3344,7 @@ function shiftRoutes(ctx) {
     const rows = db.prepare("SELECT date, name FROM holidays WHERE date LIKE ? ORDER BY date").all(`${year}-%`);
     res.json({ holidays: rows.map((h) => ({ date: h.date, name: h.name })) });
   });
-  const recomputeDate = (date) => date <= toVnDate(ctx.now()) ? recomputeUsers(db, allStaffIds(db), date, date, ctx.now()) : 0;
+  const recomputeDate = (date) => date <= toVnDate(ctx.now()) || leaveCovers(db, date) ? recomputeUsers(db, allStaffIds(db), date, date, ctx.now()) : 0;
   r.post("/holidays", requireGlobalHr, (req, res) => {
     const b = req.body ?? {};
     const name = typeof b.name === "string" ? b.name.trim() : "";
@@ -3868,8 +3897,7 @@ function settingsRoutes(ctx) {
   });
   r.put("/settings/work", requireGlobalHr, (req, res) => {
     saveWorkSettings(db, validateWorkSettings(req.body));
-    const { from, to } = monthToDate(ctx.now());
-    const recomputed = recomputeUsers(db, allStaffIds(db), from, to, ctx.now());
+    const recomputed = recomputeForShiftChange(db, usersOnDefaultShift(db), ctx.now());
     res.json({ settings: getWorkSettings(db), recomputed });
   });
   return r;
@@ -4472,7 +4500,20 @@ var defaultPort = production ? 3001 : 3e3;
 var PORT = process.env.PORT && process.env.PORT !== "8080" ? Number(process.env.PORT) : defaultPort;
 var dataDir = path3.resolve(process.cwd(), "data");
 var backupDir = path3.join(dataDir, "backups");
+function migrateOnly() {
+  if (!process.env.DB_FILE) {
+    console.error("[MIGRATE] Ch\u1EBF \u0111\u1ED9 ch\u1EA1y th\u1EED (MIGRATE_ONLY=1) c\u1EA7n bi\u1EBFn DB_FILE tr\u1ECF t\u1EDBi b\u1EA3n sao database.");
+    process.exit(1);
+  }
+  const file = path3.resolve(process.env.DB_FILE);
+  const db = openDb(file, { backupDir: path3.join(path3.dirname(file), "backups") });
+  const { version } = db.prepare("SELECT version FROM schema_version").get();
+  db.close();
+  console.log(`[MIGRATE] Ch\u1EA1y th\u1EED xong: database v${version}`);
+  process.exit(0);
+}
 async function main() {
+  if (process.env.MIGRATE_ONLY === "1") return migrateOnly();
   const db = openDb(path3.join(dataDir, "attendance.db"), { backupDir });
   const admin = ensureAdminAccess(db, process.env.ADMIN_INITIAL_PASSWORD);
   if (admin) {
