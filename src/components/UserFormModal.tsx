@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Camera, RefreshCw, ScanFace } from 'lucide-react';
 import type { Area, Department, FaceCandidates, FaceResult, FaceSighting, User, UserRole, UserStatus } from '../types';
 import { api, errorMessage } from '../api';
@@ -8,7 +8,6 @@ import { Field, Modal, inputCls, primaryBtn, secondaryBtn } from './ui';
 
 export interface UserSaved {
   user: User;
-  tempPassword?: string;
   face?: FaceResult;
 }
 
@@ -63,6 +62,13 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, me, isSystem
   const [facesError, setFacesError] = useState<string | null>(null);
   const [picked, setPicked] = useState<Picked | null>(null);
   const [faceMsg, setFaceMsg] = useState<FaceResult | null>(null);
+
+  useEffect(() => {
+    if (isEdit) return;
+    api<{ code: string }>('/api/users/next-code')
+      .then((r) => setCode((c) => c || r.code))
+      .catch(() => undefined);
+  }, [isEdit]);
 
   const loadFaces = async () => {
     setLoadingFaces(true);
@@ -252,8 +258,8 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, me, isSystem
         )}
 
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Mã nhân viên" hint={isEdit ? undefined : 'Phải trùng aliasID trên Camera AI nếu người này đã có trên Camera AI'}>
-            <input className={`${inputCls} font-mono uppercase`} value={code} onChange={(e) => setCode(e.target.value)} disabled={isEdit} required />
+          <Field label="Mã nhân viên" hint={isEdit ? undefined : 'Mã gợi ý tự sinh; sửa nếu cần. Phải trùng aliasID trên Camera AI nếu người này đã có trên Camera AI'}>
+            <input className={`${inputCls} font-mono uppercase`} value={code} onChange={(e) => setCode(e.target.value)} disabled={isEdit} />
           </Field>
           <Field label="Họ tên">
             <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} required />
@@ -281,10 +287,10 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, me, isSystem
             <input className={inputCls} value={position} onChange={(e) => setPosition(e.target.value)} />
           </Field>
           <Field label="Số điện thoại">
-            <input className={inputCls} value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <input className={inputCls} type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} required placeholder="0912345678" />
           </Field>
-          <Field label="Email">
-            <input className={inputCls} type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <Field label="Email" hint={isEdit ? undefined : 'Mật khẩu đăng nhập sẽ được gửi tới email này'}>
+            <input className={inputCls} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
           </Field>
           {isEdit && (
             <Field label="Trạng thái">

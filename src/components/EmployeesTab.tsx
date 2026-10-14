@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { CloudDownload, KeyRound, Pencil, Search, Trash2, UserPlus } from 'lucide-react';
+import { CloudDownload, FileSpreadsheet, KeyRound, Mail, Pencil, Search, Trash2, UserPlus } from 'lucide-react';
 import type { Area, Department, FaceResult, User } from '../types';
 import { api, errorMessage } from '../api';
 import { ROLE_LABEL } from '../format';
 import { canDeleteUserUi } from '../permissions';
 import { UserFormModal } from './UserFormModal';
 import { ImportFromHanetModal } from './ImportFromHanetModal';
-import { TempPasswordDialog } from './TempPasswordDialog';
+import { CsvImportModal } from './CsvImportModal';
 import { ConfirmDeleteDialog, inputCls, primaryBtn, secondaryBtn } from './ui';
 import { SyncBadge, SyncRetryButton } from './SyncBadge';
 
@@ -21,7 +21,8 @@ interface EmployeesTabProps {
 
 export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, currentUser, isSystemAdmin, areas, onRefresh }) => {
   const [editing, setEditing] = useState<User | 'new' | null>(null);
-  const [tempPassword, setTempPassword] = useState<{ label: string; password: string } | null>(null);
+  const [csvOpen, setCsvOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [deptFilter, setDeptFilter] = useState('');
   const [search, setSearch] = useState('');
@@ -29,15 +30,21 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
   const [faceNotice, setFaceNotice] = useState<FaceResult | null>(null);
 
   const resetPassword = async (u: User) => {
-    if (!window.confirm(`Đặt lại mật khẩu cho ${u.name} (${u.code})? Mật khẩu cũ và các phiên đăng nhập của người này sẽ mất hiệu lực.`)) return;
+    const again = u.canLogin ? 'Mật khẩu mới sẽ được gửi qua email; mật khẩu cũ hết hiệu lực khi thư đi.' : 'Thư chào mừng kèm mật khẩu sẽ được gửi lại.';
+    if (!window.confirm(`${u.canLogin ? 'Đặt lại mật khẩu' : 'Gửi lại thư'} cho ${u.name} (${u.code}) tới ${u.email || '(chưa có email)'}? ${again}`)) return;
     try {
-      const r = await api<{ tempPassword?: string; queued?: boolean }>(`/api/users/${u.id}/reset-password`, { method: 'POST' });
-      if (r.tempPassword) setTempPassword({ label: `${u.name} (${u.code})`, password: r.tempPassword });
-      else window.alert('Đã xếp hàng gửi mật khẩu mới qua email.');
+      await api<{ queued: boolean }>(`/api/users/${u.id}/reset-password`, { method: 'POST' });
+      setNotice(`Đã xếp thư gửi tới ${u.email}. Thư sẽ đi trong vòng 1 phút.`);
+      onRefresh();
     } catch (err) {
       window.alert(errorMessage(err));
     }
   };
+
+  // Quản trị khu không đụng người quản trị khác/HR; không phải ADMIN thì không sửa/đặt lại mật khẩu của HR khác
+  const canManageTarget = (u: User) =>
+    (currentUser.role !== 'area_admin' || u.id === currentUser.id || (u.role !== 'hr' && u.role !== 'area_admin')) &&
+    (isSystemAdmin || u.role !== 'hr' || u.id === currentUser.id);
 
   const q = search.trim().toLocaleLowerCase('vi');
   const filtered = users.filter(
@@ -56,6 +63,9 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
           </p>
         </div>
         <div className="flex gap-2 shrink-0">
+          <button onClick={() => setCsvOpen(true)} className={secondaryBtn}>
+            <FileSpreadsheet className="w-4 h-4" /> Nhập từ file CSV
+          </button>
           <button onClick={() => setImporting(true)} className={secondaryBtn}>
             <CloudDownload className="w-4 h-4" /> Nhập từ Camera AI
           </button>
@@ -69,6 +79,15 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
         <div className={`rounded-2xl p-3 text-xs flex items-center justify-between gap-2 ${faceNotice.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-700'}`}>
           <span>FaceID: {faceNotice.message}</span>
           <button onClick={() => setFaceNotice(null)} className="cursor-pointer" aria-label="Đóng">
+            ✕
+          </button>
+        </div>
+      )}
+
+      {notice && (
+        <div className="rounded-2xl p-3 text-xs flex items-center justify-between gap-2 bg-emerald-50 text-emerald-800">
+          <span>{notice}</span>
+          <button onClick={() => setNotice(null)} className="cursor-pointer" aria-label="Đóng">
             ✕
           </button>
         </div>
@@ -117,6 +136,28 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
                   <span>{areas.filter((a) => u.adminAreaIds.includes(a.id)).map((a) => a.name).join(', ') || '—'}</span>
                 </div>
               )}
+              <div className="flex justify-between"><span className="text-slate-400">Email</span><span className="truncate ml-2">{u.email || '—'}</span></div>
+              <div className="flex justify-between"><span className="text-slate-400">Điện thoại</span><span>{u.phone || '—'}</span></div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Tài khoản</span>
+                <span
+                  className={
+                    !u.email ? 'text-amber-700' : u.emailStatus === 'error' ? 'text-rose-700' : u.emailStatus === 'pending' ? 'text-sky-700' : 'text-emerald-700'
+                  }
+                  title={u.emailError ?? undefined}
+                >
+                  {!u.email
+                    ? 'Thiếu email'
+                    : u.emailStatus === 'error'
+                      ? 'Lỗi gửi thư'
+                      : u.emailStatus === 'pending'
+                        ? 'Chờ gửi thư'
+                        : u.canLogin
+                          ? 'Đã có mật khẩu'
+                          : 'Chưa gửi thư'}
+                </span>
+              </div>
+              {u.emailStatus === 'error' && u.emailError && <p className="text-[10px] text-rose-600">{u.emailError}</p>}
               <div className="flex justify-between"><span className="text-slate-400">Phòng ban</span><span>{u.departmentName ?? '—'}</span></div>
               <div className="flex justify-between"><span className="text-slate-400">Person ID (Camera AI)</span><span className="font-mono">{u.hanetPersonId ?? '—'}</span></div>
               <div className="flex justify-between">
@@ -127,15 +168,20 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
               <div className="flex justify-between"><span className="text-slate-400">Trạng thái</span><span>{u.status === 'active' ? 'Đang làm việc' : 'Đã nghỉ'}</span></div>
             </div>
             <div className="mt-3 pt-3 border-t border-slate-100 flex gap-2">
-              {/* Quản trị khu không sửa người quản trị khác/HR (chỉ sửa chính mình) */}
-              {(currentUser.role !== 'area_admin' || u.id === currentUser.id || (u.role !== 'hr' && u.role !== 'area_admin')) && (
+              {/* Quản trị khu không sửa người quản trị khác/HR (chỉ sửa chính mình); HR chỉ ADMIN mới sửa người khác */}
+              {canManageTarget(u) && (
                 <button onClick={() => setEditing(u)} className={`${secondaryBtn} flex-1 py-1.5`}>
                   <Pencil className="w-3.5 h-3.5" /> Sửa
                 </button>
               )}
-              {(currentUser.role !== 'area_admin' || (u.id !== currentUser.id && u.role !== 'hr' && u.role !== 'area_admin')) && (
-                <button onClick={() => resetPassword(u)} className={`${secondaryBtn} flex-1 py-1.5`}>
-                  <KeyRound className="w-3.5 h-3.5" /> Đặt lại mật khẩu
+              {canManageTarget(u) && (currentUser.role !== 'area_admin' || u.id !== currentUser.id) && (
+                <button
+                  onClick={() => resetPassword(u)}
+                  disabled={!u.email}
+                  title={u.email ? undefined : 'Hãy bổ sung email trước'}
+                  className={`${secondaryBtn} flex-1 py-1.5`}
+                >
+                  {u.canLogin ? <KeyRound className="w-3.5 h-3.5" /> : <Mail className="w-3.5 h-3.5" />} {u.canLogin ? 'Đặt lại mật khẩu' : 'Gửi lại thư'}
                 </button>
               )}
               {canDeleteUserUi(currentUser, isSystemAdmin, u) && (
@@ -161,9 +207,9 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
           isSystemAdmin={isSystemAdmin}
           areas={areas}
           onClose={() => setEditing(null)}
-          onSaved={({ user, tempPassword: pw, face }) => {
+          onSaved={({ user, face }) => {
+            if (!editing || editing === 'new') setNotice(`Đã tạo ${user.name} (${user.code}). Mật khẩu sẽ được gửi tới ${user.email}.`);
             setEditing(null);
-            if (pw) setTempPassword({ label: `${user.name} (${user.code})`, password: pw });
             if (face) setFaceNotice(face);
             onRefresh();
           }}
@@ -192,7 +238,7 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
         </ConfirmDeleteDialog>
       )}
       {importing && <ImportFromHanetModal departments={departments} onClose={() => setImporting(false)} onImported={onRefresh} />}
-      {tempPassword && <TempPasswordDialog employeeLabel={tempPassword.label} password={tempPassword.password} onClose={() => setTempPassword(null)} />}
+      {csvOpen && <CsvImportModal onClose={() => setCsvOpen(false)} onImported={onRefresh} />}
     </div>
   );
 };

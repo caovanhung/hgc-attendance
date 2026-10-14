@@ -4,6 +4,7 @@ import { api, errorMessage } from '../api';
 import { WebhookCard } from './config/WebhookCard';
 import { WorkSettingsCard } from './config/WorkSettingsCard';
 import { SyncStatusCard } from './config/SyncStatusCard';
+import { MailCard } from './config/MailCard';
 import { HanetCredentialsCard } from './config/HanetCredentialsCard';
 import { HanetConnectCard } from './config/HanetConnectCard';
 import { BackupsCard } from './config/BackupsCard';
@@ -43,6 +44,7 @@ export const HanetConfigTab: React.FC<HanetConfigTabProps> = ({ isSystemAdmin, o
           <HanetCredentialsCard config={config} onChange={setConfig} onReconciled={onRefresh} />
           <HanetConnectCard />
           <SyncStatusCard />
+          <MailCard />
         </fieldset>
         <WorkSettingsCard onRecomputed={onRefresh} />
         <BackupsCard canWrite={isSystemAdmin} />

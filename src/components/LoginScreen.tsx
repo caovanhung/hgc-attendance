@@ -3,8 +3,8 @@ import { Camera } from 'lucide-react';
 import { api, errorMessage } from '../api';
 import { Field, inputCls, primaryBtn } from './ui';
 
-export const LoginScreen: React.FC<{ onLoggedIn: () => void }> = ({ onLoggedIn }) => {
-  const [code, setCode] = useState('');
+export const LoginScreen: React.FC<{ onLoggedIn: () => void; onForgot: () => void; notice?: string | null }> = ({ onLoggedIn, onForgot, notice }) => {
+  const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -14,7 +14,7 @@ export const LoginScreen: React.FC<{ onLoggedIn: () => void }> = ({ onLoggedIn }
     setBusy(true);
     setError(null);
     try {
-      await api('/api/auth/login', { method: 'POST', body: { code, password } });
+      await api('/api/auth/login', { method: 'POST', body: { login, password } });
       onLoggedIn();
     } catch (err) {
       setError(errorMessage(err));
@@ -32,11 +32,12 @@ export const LoginScreen: React.FC<{ onLoggedIn: () => void }> = ({ onLoggedIn }
           </div>
           <div>
             <h1 className="font-bold text-slate-900">Petrolimex Attendance</h1>
-            <p className="text-xs text-slate-500">Đăng nhập bằng mã nhân viên</p>
+            <p className="text-xs text-slate-500">Đăng nhập bằng mã nhân viên hoặc email</p>
           </div>
         </div>
-        <Field label="Mã nhân viên">
-          <input className={`${inputCls} uppercase font-mono`} value={code} onChange={(e) => setCode(e.target.value)} autoComplete="username" required autoFocus />
+        {notice && <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl p-2">{notice}</p>}
+        <Field label="Mã nhân viên hoặc email">
+          <input className={inputCls} value={login} onChange={(e) => setLogin(e.target.value)} autoComplete="username" required autoFocus />
         </Field>
         <Field label="Mật khẩu">
           <input className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
@@ -45,7 +46,9 @@ export const LoginScreen: React.FC<{ onLoggedIn: () => void }> = ({ onLoggedIn }
         <button type="submit" disabled={busy} className={`${primaryBtn} w-full py-2.5`}>
           {busy ? 'Đang đăng nhập...' : 'Đăng nhập'}
         </button>
-        <p className="text-[11px] text-slate-400">Quên mật khẩu? Liên hệ phòng Nhân sự để được cấp lại mật khẩu tạm.</p>
+        <button type="button" onClick={onForgot} className="text-[11px] text-orange-600 hover:underline cursor-pointer">
+          Quên mật khẩu?
+        </button>
       </form>
     </div>
   );

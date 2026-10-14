@@ -18,6 +18,8 @@ import { RequestsTab } from './components/RequestsTab';
 import { HanetConfigTab } from './components/HanetConfigTab';
 import { HanetSimulatorModal } from './components/HanetSimulatorModal';
 import { LoginScreen } from './components/LoginScreen';
+import { ForgotPasswordScreen } from './components/ForgotPasswordScreen';
+import { ResetPasswordScreen } from './components/ResetPasswordScreen';
 import { ChangePasswordScreen } from './components/ChangePasswordScreen';
 import { api, ApiError, AUTH_EVENT, errorMessage, type AuthEventDetail } from './api';
 import { vnToday } from './format';
@@ -37,6 +39,15 @@ export default function App() {
   const [me, setMe] = useState<MeResponse | null>(null);
   const [changingPassword, setChangingPassword] = useState(false);
   const [area, setAreaState] = useState(loadArea);
+  const [anonView, setAnonView] = useState<'login' | 'forgot'>('login');
+  const [loginNotice, setLoginNotice] = useState<string | null>(null);
+  const [resetToken, setResetToken] = useState<string | null>(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('reset');
+    } catch {
+      return null;
+    }
+  });
 
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -147,7 +158,27 @@ export default function App() {
   if (authState === 'loading') {
     return <div className="min-h-screen flex items-center justify-center text-sm text-slate-500">Đang tải...</div>;
   }
-  if (authState === 'anonymous') return <LoginScreen onLoggedIn={loadMe} />;
+  if (resetToken) {
+    return (
+      <ResetPasswordScreen
+        token={resetToken}
+        onDone={(notice) => {
+          // Bỏ token khỏi thanh địa chỉ để không dùng lại / không lộ khi chia sẻ màn hình
+          window.history.replaceState(null, '', window.location.pathname);
+          setResetToken(null);
+          setLoginNotice(notice);
+          setAnonView('login');
+        }}
+      />
+    );
+  }
+  if (authState === 'anonymous') {
+    return anonView === 'forgot' ? (
+      <ForgotPasswordScreen onBack={() => setAnonView('login')} />
+    ) : (
+      <LoginScreen onLoggedIn={loadMe} onForgot={() => setAnonView('forgot')} notice={loginNotice} />
+    );
+  }
   if (authState === 'must-change' || changingPassword || !me) {
     return (
       <ChangePasswordScreen
