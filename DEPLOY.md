@@ -76,6 +76,35 @@ pm2 logs hanet-attendance --lines 20              # thấy dòng [BOOTSTRAP] Đ�
 
 Sau đó đăng nhập `ADMIN` / `Admin@123`, đổi mật khẩu, rồi tạo lại phòng ban, nhân sự (mỗi người nhận mật khẩu tạm từ HR) và camera. Cập nhật URL webhook mới (có token) trên Hanet theo phần dưới.
 
+## Nâng cấp lên bản ca làm việc (database v4)
+
+Bản này **tự nâng cấp database v3 lên v4 và giữ nguyên dữ liệu** (khu vực, phòng ban, nhân sự, ngày công, đơn). Server tự sao lưu trước khi nâng cấp vào `data/backups/attendance-<ngày>-<giờ>-pre-migrate.db`. **Không xóa database.**
+
+```bash
+cd /home/ubuntu/hgc-attendance
+pm2 stop hanet-attendance
+git pull && npm ci --omit=dev
+pm2 restart hanet-attendance
+pm2 logs hanet-attendance --lines 20 --nostream    # thấy: [MIGRATE] v3 → v4 xong (sao lưu: attendance-…-pre-migrate.db)
+```
+
+Nếu log có `[MIGRATE] Nâng cấp v3 → v4 thất bại …`: database vẫn là v3, không mất gì; gửi dòng log đó cho bộ phận kỹ thuật và chạy lại bản cũ bằng `git checkout <commit cũ> && npm ci --omit=dev && pm2 restart hanet-attendance`.
+
+Sau khi nâng cấp (tài khoản HR toàn hệ thống):
+
+1. Tab **Ca làm việc** → thẻ **Ca mặc định công ty**: kiểm tra giờ vào/ra, **ngày làm trong tuần** (mặc định T2–T6), ngưỡng đi sớm (15') và cho phép về sớm (10').
+2. Mục **Ngày lễ**: nhập các ngày lễ của năm (1/1, Tết, 30/4, 1/5, 2/9…).
+3. Khu cần giờ riêng (cửa hàng, kho): **Thêm ca** cho khu đó, rồi tab **Phòng ban** → Sửa → chọn **Ca làm việc**.
+4. Người làm giờ riêng: tab **Nhân sự** → Sửa → **Ca riêng**.
+
+## Kiểm tra sau khi nâng cấp v4 (trên host)
+
+- [ ] Log có `[MIGRATE] v3 → v4 xong`; khu vực, phòng ban, nhân sự, ngày công cũ còn nguyên.
+- [ ] Một nhân viên không quẹt cả ngày làm việc ⇒ sau giờ ra của ca (tối đa 15 phút) bảng công hiện **Vắng**.
+- [ ] Người quẹt giữa giờ chiều: trước giờ ra bảng công hiện "Gần nhất HH:mm", không bị gắn về sớm; sau giờ ra mới hiện về sớm (nếu ra sớm quá 10 phút).
+- [ ] Đơn nghỉ phép 2 ngày làm việc được duyệt ⇒ hai ngày đó hiện **Nghỉ phép**; cuối tuần trong khoảng không bị đánh dấu.
+- [ ] Quản trị khu thêm ca cho khu mình và gán cho một phòng; không thấy ca của khu khác.
+
 ## Nâng cấp lên bản khu vực và tài khoản email (database v3)
 
 Bản này đổi cấu trúc database và **không chuyển dữ liệu cũ** (server in `[STARTUP] Database phiên bản cũ (v2). Sao lưu rồi xóa data/attendance.db để hệ thống tạo mới.` rồi dừng). Bản này thêm thư viện gửi thư nên **phải chạy `npm install`**.

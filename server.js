@@ -13,46 +13,68 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// server/db.ts
-import { createRequire } from "node:module";
-import fs from "node:fs";
-import path from "node:path";
-import { randomBytes } from "node:crypto";
-function openDb(file) {
-  if (file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true });
-  const db = new DatabaseSync(file);
-  db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
-  const hasVersionTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'").get();
-  const found = hasVersionTable ? db.prepare("SELECT version FROM schema_version").get() : void 0;
-  if (found && found.version !== SCHEMA_VERSION) {
-    db.close();
-    throw new SchemaVersionError(found.version);
-  }
-  db.exec(SCHEMA);
-  if (!found) db.prepare("INSERT INTO schema_version(version) VALUES (?)").run(SCHEMA_VERSION);
-  return db;
+// server/schema.ts
+function ddlShifts(ifNotExists) {
+  return `CREATE TABLE ${ine(ifNotExists)}shifts (
+  id TEXT PRIMARY KEY,
+  area_id TEXT NOT NULL REFERENCES areas(id) ON DELETE RESTRICT,
+  name TEXT NOT NULL,
+  work_start TEXT NOT NULL,
+  work_end TEXT NOT NULL,
+  work_days TEXT NOT NULL,
+  late_grace_minutes INTEGER NOT NULL,
+  early_arrival_minutes INTEGER NOT NULL,
+  early_leave_minutes INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (area_id, name)
+);`;
 }
-function tx(db, fn) {
-  if (db.isTransaction) return fn();
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    const result = fn();
-    db.exec("COMMIT");
-    return result;
-  } catch (err) {
-    db.exec("ROLLBACK");
-    throw err;
-  }
+function ddlHolidays(ifNotExists) {
+  return `CREATE TABLE ${ine(ifNotExists)}holidays (
+  date TEXT PRIMARY KEY,
+  name TEXT NOT NULL
+);`;
 }
-function newId(prefix) {
-  return `${prefix}-${randomBytes(6).toString("hex")}`;
+function ddlRequests(name, ifNotExists) {
+  return `CREATE TABLE ${ine(ifNotExists)}${name} (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  work_date TEXT NOT NULL,
+  end_date TEXT,
+  type TEXT NOT NULL CHECK (type IN ('missed_punch', 'late_explanation', 'leave_request', 'business_trip')),
+  reason TEXT NOT NULL,
+  suggested_in TEXT,
+  suggested_out TEXT,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected')),
+  reviewed_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_at TEXT,
+  comment TEXT,
+  created_at TEXT NOT NULL
+);`;
 }
-var require2, DatabaseSync, SCHEMA_VERSION, SCHEMA, SchemaVersionError;
-var init_db = __esm({
-  "server/db.ts"() {
-    require2 = createRequire(import.meta.url);
-    ({ DatabaseSync } = require2("node:sqlite"));
-    SCHEMA_VERSION = 3;
+function ddlAttendanceDays(name, ifNotExists) {
+  return `CREATE TABLE ${ine(ifNotExists)}${name} (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  work_date TEXT NOT NULL,
+  first_in INTEGER,
+  last_out INTEGER,
+  late_minutes INTEGER NOT NULL DEFAULT 0,
+  early_minutes INTEGER NOT NULL DEFAULT 0,
+  early_arrival_minutes INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL CHECK (status IN ('on_time', 'late', 'early_leave', 'late_and_early', 'missing_out', 'absent', 'leave', 'business_trip')),
+  final INTEGER NOT NULL DEFAULT 0,
+  late_excused INTEGER NOT NULL DEFAULT 0,
+  manual_in INTEGER,
+  manual_out INTEGER,
+  detection_count INTEGER NOT NULL,
+  PRIMARY KEY (user_id, work_date)
+);`;
+}
+var SCHEMA_VERSION, ine, SCHEMA;
+var init_schema = __esm({
+  "server/schema.ts"() {
+    SCHEMA_VERSION = 4;
+    ine = (b) => b ? "IF NOT EXISTS " : "";
     SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
 
@@ -73,6 +95,7 @@ CREATE TABLE IF NOT EXISTS departments (
   hanet_department_id TEXT,
   hanet_sync_status TEXT NOT NULL DEFAULT 'synced' CHECK (hanet_sync_status IN ('synced', 'pending', 'error')),
   hanet_sync_error TEXT,
+  shift_id TEXT REFERENCES shifts(id) ON DELETE RESTRICT,
   area_id TEXT REFERENCES areas(id) ON DELETE RESTRICT,
   created_at TEXT NOT NULL
 );
@@ -96,6 +119,7 @@ CREATE TABLE IF NOT EXISTS users (
   hanet_sync_status TEXT NOT NULL DEFAULT 'synced' CHECK (hanet_sync_status IN ('synced', 'pending', 'error')),
   hanet_sync_error TEXT,
   face_error TEXT,
+  shift_id TEXT REFERENCES shifts(id) ON DELETE RESTRICT,
   email_status TEXT NOT NULL DEFAULT 'none' CHECK (email_status IN ('none', 'pending', 'sent', 'error')),
   email_error TEXT,
   created_at TEXT NOT NULL
@@ -148,36 +172,10 @@ CREATE TABLE IF NOT EXISTS detections (
 );
 CREATE INDEX IF NOT EXISTS idx_detections_user_date ON detections(user_id, work_date);
 
-CREATE TABLE IF NOT EXISTS attendance_days (
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  work_date TEXT NOT NULL,
-  first_in INTEGER NOT NULL,
-  last_out INTEGER,
-  late_minutes INTEGER NOT NULL DEFAULT 0,
-  early_minutes INTEGER NOT NULL DEFAULT 0,
-  status TEXT NOT NULL CHECK (status IN ('on_time', 'late', 'early_leave', 'late_and_early', 'missing_out')),
-  late_excused INTEGER NOT NULL DEFAULT 0,
-  manual_in INTEGER,
-  manual_out INTEGER,
-  detection_count INTEGER NOT NULL,
-  PRIMARY KEY (user_id, work_date)
-);
+${ddlAttendanceDays("attendance_days", true)}
 CREATE INDEX IF NOT EXISTS idx_attendance_days_date ON attendance_days(work_date);
 
-CREATE TABLE IF NOT EXISTS requests (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  work_date TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('missed_punch', 'late_explanation', 'leave_request')),
-  reason TEXT NOT NULL,
-  suggested_in TEXT,
-  suggested_out TEXT,
-  status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected')),
-  reviewed_by TEXT REFERENCES users(id) ON DELETE SET NULL,
-  reviewed_at TEXT,
-  comment TEXT,
-  created_at TEXT NOT NULL
-);
+${ddlRequests("requests", true)}
 CREATE INDEX IF NOT EXISTS idx_requests_user ON requests(user_id);
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -246,10 +244,234 @@ CREATE TABLE IF NOT EXISTS password_resets (
   expires_at INTEGER NOT NULL,
   used_at INTEGER
 );
+
+${ddlShifts(true)}
+
+${ddlHolidays(true)}
 `;
+  }
+});
+
+// server/vntime.ts
+function toVnDate(ts) {
+  return new Date(ts + VN_OFFSET_MS).toISOString().slice(0, 10);
+}
+function vnMinutesOfDay(ts) {
+  const d = new Date(ts + VN_OFFSET_MS);
+  return d.getUTCHours() * 60 + d.getUTCMinutes();
+}
+function parseHHmm(s) {
+  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(s);
+  if (!m) throw new Error(`Gi\u1EDD kh\xF4ng h\u1EE3p l\u1EC7: ${s}`);
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+function isValidDate(s) {
+  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const t = Date.parse(`${s}T00:00:00Z`);
+  return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === s;
+}
+function vnDateTimeToTs(date, hhmm2) {
+  const [y, mo, d] = date.split("-").map(Number);
+  return Date.UTC(y, mo - 1, d, 0, parseHHmm(hhmm2)) - VN_OFFSET_MS;
+}
+function vnDayStart(date) {
+  return vnDateTimeToTs(date, "00:00");
+}
+function addDays(date, n) {
+  return new Date(Date.parse(`${date}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
+}
+function daysBetween(from, to) {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS);
+}
+var VN_OFFSET_MS, DAY_MS;
+var init_vntime = __esm({
+  "server/vntime.ts"() {
+    VN_OFFSET_MS = 7 * 60 * 60 * 1e3;
+    DAY_MS = 24 * 60 * 60 * 1e3;
+  }
+});
+
+// server/backup.ts
+import fs from "node:fs";
+import path from "node:path";
+function stamp(now) {
+  const iso = new Date(now + VN_OFFSET_MS).toISOString();
+  return { date: iso.slice(0, 10), time: iso.slice(11, 19).replace(/:/g, "") };
+}
+function backupNow(db, dir, reason, now) {
+  fs.mkdirSync(dir, { recursive: true });
+  const { date, time } = stamp(now);
+  let name;
+  if (reason === "daily") {
+    name = `attendance-${date}.db`;
+    if (fs.existsSync(path.join(dir, name))) return null;
+  } else {
+    name = `attendance-${date}-${time}-${reason}.db`;
+    for (let i = 2; fs.existsSync(path.join(dir, name)); i++) name = `attendance-${date}-${time}-${reason}-${i}.db`;
+  }
+  db.prepare("VACUUM INTO ?").run(path.join(dir, name));
+  pruneBackups(dir);
+  return name;
+}
+function listBackups(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).filter((n) => BACKUP_RE.test(n)).map((name) => {
+    const st = fs.statSync(path.join(dir, name));
+    return { name, size: st.size, createdAt: st.mtime.toISOString() };
+  }).sort((a, b) => a.createdAt === b.createdAt ? b.name.localeCompare(a.name) : b.createdAt.localeCompare(a.createdAt));
+}
+function pruneBackups(dir) {
+  if (!fs.existsSync(dir)) return;
+  const names = fs.readdirSync(dir).filter((n) => BACKUP_RE.test(n)).sort().reverse();
+  const daily = names.filter((n) => DAILY_RE.test(n));
+  const others = names.filter((n) => !DAILY_RE.test(n));
+  for (const n of [...daily.slice(BACKUP_KEEP), ...others.slice(BACKUP_KEEP)]) fs.rmSync(path.join(dir, n), { force: true });
+}
+function latestBackup(dir) {
+  const [first] = listBackups(dir);
+  return first ? path.join(dir, first.name) : null;
+}
+var BACKUP_KEEP, BACKUP_RE, DAILY_RE;
+var init_backup = __esm({
+  "server/backup.ts"() {
+    init_vntime();
+    BACKUP_KEEP = 30;
+    BACKUP_RE = /^attendance-.*\.db$/;
+    DAILY_RE = /^attendance-\d{4}-\d{2}-\d{2}\.db$/;
+  }
+});
+
+// server/migrations.ts
+function migrate3to4(db, now) {
+  db.exec(ddlShifts(false));
+  db.exec(ddlHolidays(false));
+  db.exec("ALTER TABLE departments ADD COLUMN shift_id TEXT REFERENCES shifts(id) ON DELETE RESTRICT");
+  db.exec("ALTER TABLE users ADD COLUMN shift_id TEXT REFERENCES shifts(id) ON DELETE RESTRICT");
+  db.exec(ddlRequests("requests_v4", false));
+  db.exec(`INSERT INTO requests_v4(id, user_id, work_date, end_date, type, reason, suggested_in, suggested_out, status, reviewed_by, reviewed_at, comment, created_at)
+    SELECT id, user_id, work_date, NULL, type, reason, suggested_in, suggested_out, status, reviewed_by, reviewed_at, comment, created_at FROM requests`);
+  db.exec("DROP TABLE requests");
+  db.exec("ALTER TABLE requests_v4 RENAME TO requests");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_requests_user ON requests(user_id)");
+  db.exec(ddlAttendanceDays("attendance_days_v4", false));
+  db.prepare(
+    `INSERT INTO attendance_days_v4(user_id, work_date, first_in, last_out, late_minutes, early_minutes, early_arrival_minutes, status, final,
+       late_excused, manual_in, manual_out, detection_count)
+     SELECT user_id, work_date, first_in, last_out, late_minutes, early_minutes, 0, status, CASE WHEN work_date < ? THEN 1 ELSE 0 END,
+       late_excused, manual_in, manual_out, detection_count FROM attendance_days`
+  ).run(toVnDate(now));
+  db.exec("DROP TABLE attendance_days");
+  db.exec("ALTER TABLE attendance_days_v4 RENAME TO attendance_days");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_attendance_days_date ON attendance_days(work_date)");
+  db.exec(`INSERT OR IGNORE INTO settings(key, value) VALUES ('work_days', '1,2,3,4,5'), ('early_arrival_minutes', '15'), ('early_leave_minutes', '10')`);
+}
+function runMigrations(db, file, from, opts) {
+  const backup = opts.backupDir && file !== ":memory:" ? backupNow(db, opts.backupDir, "pre-migrate", opts.now) : null;
+  db.exec("PRAGMA foreign_keys = OFF");
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (let v = from; v < SCHEMA_VERSION; v++) {
+        const step = MIGRATIONS.find((m) => m.from === v);
+        if (!step) throw new Error(`thi\u1EBFu b\u01B0\u1EDBc n\xE2ng c\u1EA5p v${v} \u2192 v${v + 1}`);
+        step.run(db, opts.now);
+      }
+      const bad = db.prepare("PRAGMA foreign_key_check").all();
+      if (bad.length) throw new Error(`d\u1EEF li\u1EC7u kh\xF3a ngo\u1EA1i kh\xF4ng h\u1EE3p l\u1EC7 (${bad.length} d\xF2ng)`);
+      db.prepare("UPDATE schema_version SET version = ?").run(SCHEMA_VERSION);
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+  } catch (err) {
+    throw new MigrationError(
+      `[MIGRATE] N\xE2ng c\u1EA5p v${from} \u2192 v${SCHEMA_VERSION} th\u1EA5t b\u1EA1i: ${err.message}. Database gi\u1EEF nguy\xEAn v${from}${backup ? ` (sao l\u01B0u: ${backup})` : ""}.`,
+      backup
+    );
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+  }
+  console.log(`[MIGRATE] v${from} \u2192 v${SCHEMA_VERSION} xong (sao l\u01B0u: ${backup ?? "kh\xF4ng"})`);
+  return backup;
+}
+var MIN_MIGRATABLE_VERSION, MigrationError, MIGRATIONS;
+var init_migrations = __esm({
+  "server/migrations.ts"() {
+    init_backup();
+    init_schema();
+    init_vntime();
+    MIN_MIGRATABLE_VERSION = 3;
+    MigrationError = class extends Error {
+      constructor(message, backup) {
+        super(message);
+        this.backup = backup;
+      }
+    };
+    MIGRATIONS = [{ from: 3, run: migrate3to4 }];
+  }
+});
+
+// server/db.ts
+import { createRequire } from "node:module";
+import fs2 from "node:fs";
+import path2 from "node:path";
+import { randomBytes } from "node:crypto";
+function openDb(file, opts = {}) {
+  if (file !== ":memory:") fs2.mkdirSync(path2.dirname(file), { recursive: true });
+  const db = new DatabaseSync(file);
+  db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
+  const hasVersionTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'").get();
+  const found = hasVersionTable ? db.prepare("SELECT version FROM schema_version").get() : void 0;
+  try {
+    if (found && found.version > SCHEMA_VERSION) throw new SchemaTooNewError(found.version);
+    if (found && found.version < MIN_MIGRATABLE_VERSION) throw new SchemaVersionError(found.version);
+    if (found && found.version < SCHEMA_VERSION) {
+      runMigrations(db, file, found.version, {
+        backupDir: file === ":memory:" ? null : opts.backupDir ?? path2.join(path2.dirname(file), "backups"),
+        now: (opts.now ?? Date.now)()
+      });
+    }
+  } catch (err) {
+    db.close();
+    throw err;
+  }
+  db.exec(SCHEMA);
+  if (!found) db.prepare("INSERT INTO schema_version(version) VALUES (?)").run(SCHEMA_VERSION);
+  return db;
+}
+function tx(db, fn) {
+  if (db.isTransaction) return fn();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = fn();
+    db.exec("COMMIT");
+    return result;
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+}
+function newId(prefix) {
+  return `${prefix}-${randomBytes(6).toString("hex")}`;
+}
+var require2, DatabaseSync, SchemaVersionError, SchemaTooNewError;
+var init_db = __esm({
+  "server/db.ts"() {
+    init_schema();
+    init_migrations();
+    init_schema();
+    require2 = createRequire(import.meta.url);
+    ({ DatabaseSync } = require2("node:sqlite"));
     SchemaVersionError = class extends Error {
       constructor(found) {
         super(`[STARTUP] Database phi\xEAn b\u1EA3n c\u0169 (v${found}). Sao l\u01B0u r\u1ED3i x\xF3a data/attendance.db \u0111\u1EC3 h\u1EC7 th\u1ED1ng t\u1EA1o m\u1EDBi.`);
+        this.found = found;
+      }
+    };
+    SchemaTooNewError = class extends Error {
+      constructor(found) {
+        super(`[STARTUP] Database \u0111\u01B0\u1EE3c t\u1EA1o b\u1EDFi phi\xEAn b\u1EA3n m\u1EDBi h\u01A1n (v${found}). H\xE3y c\u1EADp nh\u1EADt code.`);
         this.found = found;
       }
     };
@@ -420,45 +642,6 @@ var init_auth = __esm({
   }
 });
 
-// server/vntime.ts
-function toVnDate(ts) {
-  return new Date(ts + VN_OFFSET_MS).toISOString().slice(0, 10);
-}
-function vnMinutesOfDay(ts) {
-  const d = new Date(ts + VN_OFFSET_MS);
-  return d.getUTCHours() * 60 + d.getUTCMinutes();
-}
-function parseHHmm(s) {
-  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(s);
-  if (!m) throw new Error(`Gi\u1EDD kh\xF4ng h\u1EE3p l\u1EC7: ${s}`);
-  return Number(m[1]) * 60 + Number(m[2]);
-}
-function isValidDate(s) {
-  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
-  const t = Date.parse(`${s}T00:00:00Z`);
-  return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === s;
-}
-function vnDateTimeToTs(date, hhmm2) {
-  const [y, mo, d] = date.split("-").map(Number);
-  return Date.UTC(y, mo - 1, d, 0, parseHHmm(hhmm2)) - VN_OFFSET_MS;
-}
-function vnDayStart(date) {
-  return vnDateTimeToTs(date, "00:00");
-}
-function addDays(date, n) {
-  return new Date(Date.parse(`${date}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
-}
-function daysBetween(from, to) {
-  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS);
-}
-var VN_OFFSET_MS, DAY_MS;
-var init_vntime = __esm({
-  "server/vntime.ts"() {
-    VN_OFFSET_MS = 7 * 60 * 60 * 1e3;
-    DAY_MS = 24 * 60 * 60 * 1e3;
-  }
-});
-
 // server/bootstrap.ts
 function ensureAdminAccess(db, envPassword) {
   const usable = db.prepare("SELECT 1 FROM users WHERE role = 'hr' AND status = 'active' AND password_hash IS NOT NULL LIMIT 1").get();
@@ -500,12 +683,18 @@ function setSetting(db, key, value) {
 function deleteSetting(db, key) {
   db.prepare("DELETE FROM settings WHERE key = ?").run(key);
 }
+function daysFrom(s) {
+  return s ? s.split(",").map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 7).sort((a, b) => a - b) : DEFAULT_WORK_SETTINGS.workDays;
+}
 function getWorkSettings(db) {
   return {
     workStart: getSetting(db, "work_start") ?? DEFAULT_WORK_SETTINGS.workStart,
     lateGraceMinutes: Number(getSetting(db, "late_grace_minutes") ?? DEFAULT_WORK_SETTINGS.lateGraceMinutes),
     workEnd: getSetting(db, "work_end") ?? DEFAULT_WORK_SETTINGS.workEnd,
-    minOutGapMinutes: Number(getSetting(db, "min_out_gap_minutes") ?? DEFAULT_WORK_SETTINGS.minOutGapMinutes)
+    minOutGapMinutes: Number(getSetting(db, "min_out_gap_minutes") ?? DEFAULT_WORK_SETTINGS.minOutGapMinutes),
+    workDays: daysFrom(getSetting(db, "work_days")),
+    earlyArrivalMinutes: Number(getSetting(db, "early_arrival_minutes") ?? DEFAULT_WORK_SETTINGS.earlyArrivalMinutes),
+    earlyLeaveMinutes: Number(getSetting(db, "early_leave_minutes") ?? DEFAULT_WORK_SETTINGS.earlyLeaveMinutes)
   };
 }
 function intInRange(v, min, max, label) {
@@ -524,6 +713,12 @@ function hhmm(v, label) {
   }
   return v;
 }
+function workDaysInput(v, label = "Ng\xE0y l\xE0m trong tu\u1EA7n") {
+  if (!Array.isArray(v)) throw new HttpError(400, `${label} kh\xF4ng h\u1EE3p l\u1EC7`);
+  const days = [...new Set(v.map(Number))].sort((a, b) => a - b);
+  if (days.length === 0 || days.some((n) => !Number.isInteger(n) || n < 1 || n > 7)) throw new HttpError(400, `${label} ph\u1EA3i ch\u1ECDn \xEDt nh\u1EA5t m\u1ED9t ng\xE0y t\u1EEB th\u1EE9 2 \u0111\u1EBFn ch\u1EE7 nh\u1EADt`);
+  return days;
+}
 function validateWorkSettings(input) {
   if (!input || typeof input !== "object") throw new HttpError(400, "Thi\u1EBFu c\u1EA5u h\xECnh gi\u1EDD l\xE0m vi\u1EC7c");
   const b = input;
@@ -531,7 +726,10 @@ function validateWorkSettings(input) {
     workStart: hhmm(b.workStart, "Gi\u1EDD v\xE0o"),
     lateGraceMinutes: intInRange(b.lateGraceMinutes, 0, 120, "S\u1ED1 ph\xFAt cho ph\xE9p mu\u1ED9n"),
     workEnd: hhmm(b.workEnd, "Gi\u1EDD ra"),
-    minOutGapMinutes: intInRange(b.minOutGapMinutes, 1, 720, "Ng\u01B0\u1EE1ng gi\u1EDD ra")
+    minOutGapMinutes: intInRange(b.minOutGapMinutes, 1, 720, "Ng\u01B0\u1EE1ng gi\u1EDD ra"),
+    workDays: b.workDays === void 0 ? DEFAULT_WORK_SETTINGS.workDays : workDaysInput(b.workDays),
+    earlyArrivalMinutes: b.earlyArrivalMinutes === void 0 ? DEFAULT_WORK_SETTINGS.earlyArrivalMinutes : intInRange(b.earlyArrivalMinutes, 0, 120, "Ng\u01B0\u1EE1ng \u0111i s\u1EDBm"),
+    earlyLeaveMinutes: b.earlyLeaveMinutes === void 0 ? DEFAULT_WORK_SETTINGS.earlyLeaveMinutes : intInRange(b.earlyLeaveMinutes, 0, 120, "Cho ph\xE9p v\u1EC1 s\u1EDBm")
   };
   if (parseHHmm(ws.workEnd) <= parseHHmm(ws.workStart)) throw new HttpError(400, "Gi\u1EDD ra ph\u1EA3i sau gi\u1EDD v\xE0o");
   return ws;
@@ -541,6 +739,9 @@ function saveWorkSettings(db, ws) {
   setSetting(db, "late_grace_minutes", String(ws.lateGraceMinutes));
   setSetting(db, "work_end", ws.workEnd);
   setSetting(db, "min_out_gap_minutes", String(ws.minOutGapMinutes));
+  setSetting(db, "work_days", ws.workDays.join(","));
+  setSetting(db, "early_arrival_minutes", String(ws.earlyArrivalMinutes));
+  setSetting(db, "early_leave_minutes", String(ws.earlyLeaveMinutes));
 }
 var DEFAULT_WORK_SETTINGS;
 var init_settings = __esm({
@@ -551,22 +752,126 @@ var init_settings = __esm({
       workStart: "08:00",
       lateGraceMinutes: 15,
       workEnd: "17:00",
-      minOutGapMinutes: 30
+      minOutGapMinutes: 30,
+      workDays: [1, 2, 3, 4, 5],
+      earlyArrivalMinutes: 15,
+      earlyLeaveMinutes: 10
     };
   }
 });
 
-// server/attendance.ts
-function toDaySettings(ws) {
+// server/shifts.ts
+function parseWorkDays(s) {
+  return s.split(",").map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 7).sort((a, b) => a - b);
+}
+function formatWorkDays(days) {
+  return [...days].sort((a, b) => a - b).join(",");
+}
+function ruleFromSettings(ws) {
   return {
+    shiftId: null,
+    name: DEFAULT_SHIFT_NAME,
     workStart: parseHHmm(ws.workStart),
-    graceMinutes: ws.lateGraceMinutes,
     workEnd: parseHHmm(ws.workEnd),
+    workDays: ws.workDays,
+    graceMinutes: ws.lateGraceMinutes,
+    earlyArrivalMinutes: ws.earlyArrivalMinutes,
+    earlyLeaveMinutes: ws.earlyLeaveMinutes,
     minOutGapMinutes: ws.minOutGapMinutes
   };
 }
+function defaultShiftRule(db) {
+  return ruleFromSettings(getWorkSettings(db));
+}
+function ruleFromRow(r, minOutGapMinutes) {
+  return {
+    shiftId: r.id,
+    name: r.name,
+    workStart: parseHHmm(r.work_start),
+    workEnd: parseHHmm(r.work_end),
+    workDays: parseWorkDays(r.work_days),
+    graceMinutes: r.late_grace_minutes,
+    earlyArrivalMinutes: r.early_arrival_minutes,
+    earlyLeaveMinutes: r.early_leave_minutes,
+    minOutGapMinutes
+  };
+}
+function effectiveShift(db, userId) {
+  const base = defaultShiftRule(db);
+  const u = db.prepare("SELECT u.shift_id AS own, d.shift_id AS dept, d.area_id AS area FROM users u LEFT JOIN departments d ON d.id = u.department_id WHERE u.id = ?").get(userId);
+  if (!u || !u.area) return base;
+  const byId = db.prepare("SELECT * FROM shifts WHERE id = ? AND area_id = ?");
+  for (const id of [u.own, u.dept]) {
+    if (!id) continue;
+    const row = byId.get(id, u.area);
+    if (row) return ruleFromRow(row, base.minOutGapMinutes);
+  }
+  return base;
+}
+function isoWeekday(date) {
+  const d = new Date(vnDayStart(date) + 7 * 36e5).getUTCDay();
+  return d === 0 ? 7 : d;
+}
+function isHoliday(db, date) {
+  return Boolean(db.prepare("SELECT 1 FROM holidays WHERE date = ?").get(date));
+}
+function isWorkday(db, rule, date) {
+  return rule.workDays.includes(isoWeekday(date)) && !isHoliday(db, date);
+}
+function validateShiftInput(input) {
+  if (!input || typeof input !== "object") throw new HttpError(400, "Thi\u1EBFu th\xF4ng tin ca");
+  const b = input;
+  const name = typeof b.name === "string" ? b.name.trim() : "";
+  if (!name) throw new HttpError(400, "T\xEAn ca l\xE0 b\u1EAFt bu\u1ED9c");
+  const s = {
+    name,
+    workStart: hhmm(b.workStart, "Gi\u1EDD v\xE0o"),
+    workEnd: hhmm(b.workEnd, "Gi\u1EDD ra"),
+    workDays: workDaysInput(b.workDays),
+    lateGraceMinutes: intInRange(b.lateGraceMinutes, 0, 120, "Cho ph\xE9p \u0111i mu\u1ED9n"),
+    earlyArrivalMinutes: intInRange(b.earlyArrivalMinutes, 0, 120, "Ng\u01B0\u1EE1ng \u0111i s\u1EDBm"),
+    earlyLeaveMinutes: intInRange(b.earlyLeaveMinutes, 0, 120, "Cho ph\xE9p v\u1EC1 s\u1EDBm")
+  };
+  if (parseHHmm(s.workEnd) <= parseHHmm(s.workStart)) throw new HttpError(400, "Gi\u1EDD ra ph\u1EA3i sau gi\u1EDD v\xE0o");
+  return s;
+}
+function mapShift(r) {
+  return {
+    id: r.id,
+    areaId: r.area_id,
+    areaName: r.area_name ?? null,
+    name: r.name,
+    workStart: r.work_start,
+    workEnd: r.work_end,
+    workDays: parseWorkDays(r.work_days),
+    lateGraceMinutes: r.late_grace_minutes,
+    earlyArrivalMinutes: r.early_arrival_minutes,
+    earlyLeaveMinutes: r.early_leave_minutes,
+    departmentCount: Number(r.department_count),
+    userCount: Number(r.user_count)
+  };
+}
+function getShift(db, id) {
+  const row = db.prepare(`${SHIFT_SELECT} WHERE s.id = ?`).get(id);
+  return row ? mapShift(row) : null;
+}
+var DEFAULT_SHIFT_NAME, SHIFT_SELECT;
+var init_shifts = __esm({
+  "server/shifts.ts"() {
+    init_errors();
+    init_settings();
+    init_vntime();
+    DEFAULT_SHIFT_NAME = "Ca m\u1EB7c \u0111\u1ECBnh c\xF4ng ty";
+    SHIFT_SELECT = `SELECT s.*, a.name AS area_name,
+  (SELECT COUNT(*) FROM departments d WHERE d.shift_id = s.id) AS department_count,
+  (SELECT COUNT(*) FROM users u WHERE u.shift_id = s.id) AS user_count
+  FROM shifts s LEFT JOIN areas a ON a.id = s.area_id`;
+  }
+});
+
+// server/attendance.ts
 function computeDay(input) {
-  const { detectionTs, settings, lateExcused, manualIn, manualOut } = input;
+  const { detectionTs, settings, lateExcused, manualIn, manualOut, closed } = input;
   const minDet = detectionTs.length ? Math.min(...detectionTs) : null;
   const maxDet = detectionTs.length ? Math.max(...detectionTs) : null;
   const firstIn = manualIn ?? minDet;
@@ -577,8 +882,9 @@ function computeDay(input) {
   const inMin = vnMinutesOfDay(firstIn);
   const isLate = !lateExcused && inMin > settings.workStart + settings.graceMinutes;
   const lateMinutes = isLate ? inMin - settings.workStart : 0;
+  const earlyArrivalMinutes = inMin < settings.workStart - settings.earlyArrivalMinutes ? settings.workStart - inMin : 0;
   const outMin = lastOut === null ? null : vnMinutesOfDay(lastOut);
-  const isEarly = outMin !== null && outMin < settings.workEnd;
+  const isEarly = closed && outMin !== null && outMin < settings.workEnd - settings.earlyLeaveMinutes;
   const earlyMinutes = isEarly ? settings.workEnd - outMin : 0;
   let status;
   if (lastOut === null) status = "missing_out";
@@ -586,78 +892,154 @@ function computeDay(input) {
   else if (isLate) status = "late";
   else if (isEarly) status = "early_leave";
   else status = "on_time";
-  return { firstIn, lastOut, lateMinutes, earlyMinutes, status, detectionCount: detectionTs.length };
+  return { firstIn, lastOut, lateMinutes, earlyMinutes, earlyArrivalMinutes, status, detectionCount: detectionTs.length, final: closed };
+}
+function shiftEndTs(rule, date) {
+  return vnDayStart(date) + rule.workEnd * 6e4;
+}
+function approvedLeaveType(db, userId, date) {
+  const r = db.prepare(
+    `SELECT type FROM requests WHERE user_id = ? AND status = 'approved' AND type IN ('leave_request', 'business_trip')
+       AND work_date <= ? AND COALESCE(end_date, work_date) >= ? ORDER BY created_at DESC LIMIT 1`
+  ).get(userId, date, date);
+  if (!r) return null;
+  return r.type === "business_trip" ? "business_trip" : "leave";
 }
 function simulatorFilter() {
   return process.env.NODE_ENV === "production" ? " AND source != 'simulator'" : "";
 }
 function readAdjustment(db, userId, workDate) {
   const row = db.prepare("SELECT late_excused, manual_in, manual_out FROM attendance_days WHERE user_id = ? AND work_date = ?").get(userId, workDate);
-  return {
-    lateExcused: row?.late_excused === 1,
-    manualIn: row?.manual_in ?? null,
-    manualOut: row?.manual_out ?? null
-  };
+  return { lateExcused: row?.late_excused === 1, manualIn: row?.manual_in ?? null, manualOut: row?.manual_out ?? null };
 }
-function writeDay(db, userId, workDate, adj, settings) {
-  const detections = db.prepare(`SELECT ts FROM detections WHERE user_id = ? AND work_date = ?${simulatorFilter()}`).all(userId, workDate);
-  const result = computeDay({
-    detectionTs: detections.map((d) => d.ts),
-    settings,
-    lateExcused: adj.lateExcused,
-    manualIn: adj.manualIn,
-    manualOut: adj.manualOut
-  });
-  if (!result) {
-    db.prepare("DELETE FROM attendance_days WHERE user_id = ? AND work_date = ?").run(userId, workDate);
-    return;
-  }
+function saveDay(db, userId, workDate, adj, d) {
   db.prepare(
-    `INSERT INTO attendance_days(user_id, work_date, first_in, last_out, late_minutes, early_minutes, status,
+    `INSERT INTO attendance_days(user_id, work_date, first_in, last_out, late_minutes, early_minutes, early_arrival_minutes, status, final,
        late_excused, manual_in, manual_out, detection_count)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(user_id, work_date) DO UPDATE SET
        first_in = excluded.first_in, last_out = excluded.last_out, late_minutes = excluded.late_minutes,
-       early_minutes = excluded.early_minutes, status = excluded.status, late_excused = excluded.late_excused,
-       manual_in = excluded.manual_in, manual_out = excluded.manual_out, detection_count = excluded.detection_count`
+       early_minutes = excluded.early_minutes, early_arrival_minutes = excluded.early_arrival_minutes, status = excluded.status,
+       final = excluded.final, late_excused = excluded.late_excused, manual_in = excluded.manual_in, manual_out = excluded.manual_out,
+       detection_count = excluded.detection_count`
   ).run(
     userId,
     workDate,
-    result.firstIn,
-    result.lastOut,
-    result.lateMinutes,
-    result.earlyMinutes,
-    result.status,
+    d.firstIn,
+    d.lastOut,
+    d.lateMinutes,
+    d.earlyMinutes,
+    d.earlyArrivalMinutes,
+    d.status,
+    d.final ? 1 : 0,
     adj.lateExcused ? 1 : 0,
     adj.manualIn,
     adj.manualOut,
-    result.detectionCount
+    d.detectionCount
   );
 }
-function recomputeDay(db, userId, workDate, settings) {
-  writeDay(db, userId, workDate, readAdjustment(db, userId, workDate), settings ?? toDaySettings(getWorkSettings(db)));
-}
-function applyDayAdjustment(db, userId, workDate, patch) {
-  const adj = { ...readAdjustment(db, userId, workDate), ...patch };
-  writeDay(db, userId, workDate, adj, toDaySettings(getWorkSettings(db)));
-}
-function recomputeRange(db, from, to) {
-  const settings = toDaySettings(getWorkSettings(db));
-  const pairs = db.prepare(
-    `SELECT user_id, work_date FROM detections WHERE work_date BETWEEN ? AND ?
-       UNION
-       SELECT user_id, work_date FROM attendance_days WHERE work_date BETWEEN ? AND ?`
-  ).all(from, to, from, to);
-  tx(db, () => {
-    for (const p of pairs) recomputeDay(db, p.user_id, p.work_date, settings);
+function writeDay(db, userId, workDate, adj, now) {
+  const user = db.prepare("SELECT code, status, created_at FROM users WHERE id = ?").get(userId);
+  if (!user) return;
+  const rule = effectiveShift(db, userId);
+  const closed = now >= shiftEndTs(rule, workDate);
+  const eligible = user.status === "active" && user.code !== SYSTEM_ADMIN_CODE && workDate >= user.created_at.slice(0, 10);
+  const workday = isWorkday(db, rule, workDate);
+  const detections = db.prepare(`SELECT ts FROM detections WHERE user_id = ? AND work_date = ?${simulatorFilter()}`).all(userId, workDate);
+  const computed = computeDay({
+    detectionTs: detections.map((d) => d.ts),
+    settings: rule,
+    lateExcused: adj.lateExcused,
+    manualIn: adj.manualIn,
+    manualOut: adj.manualOut,
+    closed
   });
-  return pairs.length;
+  const leave = eligible && workday ? approvedLeaveType(db, userId, workDate) : null;
+  if (leave) {
+    saveDay(db, userId, workDate, adj, {
+      firstIn: computed?.firstIn ?? null,
+      lastOut: computed?.lastOut ?? null,
+      lateMinutes: 0,
+      earlyMinutes: 0,
+      earlyArrivalMinutes: 0,
+      status: leave,
+      final: true,
+      detectionCount: detections.length
+    });
+    return;
+  }
+  if (computed) {
+    saveDay(db, userId, workDate, adj, computed);
+    return;
+  }
+  if (eligible && workday && closed) {
+    saveDay(db, userId, workDate, adj, {
+      firstIn: null,
+      lastOut: null,
+      lateMinutes: 0,
+      earlyMinutes: 0,
+      earlyArrivalMinutes: 0,
+      status: "absent",
+      final: true,
+      detectionCount: 0
+    });
+    return;
+  }
+  db.prepare("DELETE FROM attendance_days WHERE user_id = ? AND work_date = ?").run(userId, workDate);
+}
+function recomputeDay(db, userId, workDate, now = Date.now()) {
+  writeDay(db, userId, workDate, readAdjustment(db, userId, workDate), now);
+}
+function applyDayAdjustment(db, userId, workDate, patch, now = Date.now()) {
+  writeDay(db, userId, workDate, { ...readAdjustment(db, userId, workDate), ...patch }, now);
+}
+function recomputeUsers(db, userIds, from, to, now) {
+  const span = daysBetween(from, to);
+  if (span < 0 || userIds.length === 0) return 0;
+  let n = 0;
+  tx(db, () => {
+    for (let i = 0; i <= span; i++) {
+      const date = addDays(from, i);
+      for (const id of userIds) {
+        recomputeDay(db, id, date, now);
+        n++;
+      }
+    }
+  });
+  return n;
+}
+function recomputeRange(db, from, to, now = Date.now()) {
+  const ids = db.prepare("SELECT id FROM users WHERE code != ?").all(SYSTEM_ADMIN_CODE).map((r) => r.id);
+  return recomputeUsers(db, ids, from, to, now);
+}
+function monthToDate(now) {
+  const to = toVnDate(now);
+  return { from: `${to.slice(0, 8)}01`, to };
+}
+function closeDays(db, now) {
+  const today = toVnDate(now);
+  const users = db.prepare("SELECT id FROM users WHERE status = 'active' AND code != ?").all(SYSTEM_ADMIN_CODE).map((r) => r.id);
+  const final = db.prepare("SELECT final FROM attendance_days WHERE user_id = ? AND work_date = ?");
+  let n = 0;
+  tx(db, () => {
+    for (const date of [addDays(today, -1), today]) {
+      for (const id of users) {
+        const r = final.get(id, date);
+        if (r?.final === 1) continue;
+        if (now < shiftEndTs(effectiveShift(db, id), date)) continue;
+        recomputeDay(db, id, date, now);
+        n++;
+      }
+    }
+  });
+  return n;
 }
 var init_attendance = __esm({
   "server/attendance.ts"() {
     init_vntime();
     init_db();
-    init_settings();
+    init_shifts();
+    init_bootstrap();
   }
 });
 
@@ -1362,6 +1744,7 @@ if (major < 22 || major === 22 && minor < 13) {
 
 // server/index.ts
 init_db();
+init_migrations();
 import "dotenv/config";
 import path3 from "node:path";
 import express2 from "express";
@@ -1814,8 +2197,9 @@ init_auth();
 var USER_SELECT = `SELECT u.id, u.code, u.name, u.email, u.phone, u.role, u.department_id,
   d.name AS department_name, d.area_id, ar.name AS area_name, u.position, u.avatar_url, u.hanet_person_id, u.face_registered, u.status,
   u.hanet_sync_status, u.hanet_sync_error, u.face_error, u.email_status, u.email_error, (u.password_hash IS NOT NULL) AS can_login,
+  u.shift_id, us.name AS shift_name,
   (SELECT group_concat(x.area_id) FROM admin_areas x WHERE x.user_id = u.id) AS admin_area_ids, u.created_at
-  FROM users u LEFT JOIN departments d ON d.id = u.department_id LEFT JOIN areas ar ON ar.id = d.area_id`;
+  FROM users u LEFT JOIN departments d ON d.id = u.department_id LEFT JOIN areas ar ON ar.id = d.area_id LEFT JOIN shifts us ON us.id = u.shift_id`;
 function mapUser(r) {
   return {
     id: r.id,
@@ -1839,6 +2223,8 @@ function mapUser(r) {
     faceError: r.face_error ?? null,
     emailStatus: r.email_status ?? "none",
     emailError: r.email_error ?? null,
+    shiftId: r.shift_id ?? null,
+    shiftName: r.shift_name ?? null,
     canLogin: r.can_login === 1,
     createdAt: r.created_at
   };
@@ -2125,55 +2511,10 @@ function authRoutes(ctx) {
 init_db();
 init_errors();
 import { Router as Router3 } from "express";
-
-// server/backup.ts
-init_vntime();
-import fs2 from "node:fs";
-import path2 from "node:path";
-var BACKUP_KEEP = 30;
-var BACKUP_RE = /^attendance-.*\.db$/;
-var DAILY_RE = /^attendance-\d{4}-\d{2}-\d{2}\.db$/;
-function stamp(now) {
-  const iso = new Date(now + VN_OFFSET_MS).toISOString();
-  return { date: iso.slice(0, 10), time: iso.slice(11, 19).replace(/:/g, "") };
-}
-function backupNow(db, dir, reason, now) {
-  fs2.mkdirSync(dir, { recursive: true });
-  const { date, time } = stamp(now);
-  let name;
-  if (reason === "daily") {
-    name = `attendance-${date}.db`;
-    if (fs2.existsSync(path2.join(dir, name))) return null;
-  } else {
-    name = `attendance-${date}-${time}-${reason}.db`;
-    for (let i = 2; fs2.existsSync(path2.join(dir, name)); i++) name = `attendance-${date}-${time}-${reason}-${i}.db`;
-  }
-  db.prepare("VACUUM INTO ?").run(path2.join(dir, name));
-  pruneBackups(dir);
-  return name;
-}
-function listBackups(dir) {
-  if (!fs2.existsSync(dir)) return [];
-  return fs2.readdirSync(dir).filter((n) => BACKUP_RE.test(n)).map((name) => {
-    const st = fs2.statSync(path2.join(dir, name));
-    return { name, size: st.size, createdAt: st.mtime.toISOString() };
-  }).sort((a, b) => a.createdAt === b.createdAt ? b.name.localeCompare(a.name) : b.createdAt.localeCompare(a.createdAt));
-}
-function pruneBackups(dir) {
-  if (!fs2.existsSync(dir)) return;
-  const names = fs2.readdirSync(dir).filter((n) => BACKUP_RE.test(n)).sort().reverse();
-  const daily = names.filter((n) => DAILY_RE.test(n));
-  const others = names.filter((n) => !DAILY_RE.test(n));
-  for (const n of [...daily.slice(BACKUP_KEEP), ...others.slice(BACKUP_KEEP)]) fs2.rmSync(path2.join(dir, n), { force: true });
-}
-function latestBackup(dir) {
-  const [first] = listBackups(dir);
-  return first ? path2.join(dir, first.name) : null;
-}
-
-// server/routes/users.ts
+init_backup();
 init_auth();
 init_vntime();
+init_attendance();
 init_bootstrap();
 
 // server/sightings.ts
@@ -2469,6 +2810,13 @@ function resolveDepartmentFor(db, actor, departmentId) {
   if (!managesArea(actor, deptAreaId(db, id) ?? null)) throw notFound("ph\xF2ng ban");
   return id;
 }
+function resolveUserShift(db, shiftId, departmentId) {
+  if (shiftId === void 0 || shiftId === null || shiftId === "") return null;
+  const area = departmentId ? deptAreaId(db, departmentId) ?? null : null;
+  const s = typeof shiftId === "string" ? db.prepare("SELECT area_id FROM shifts WHERE id = ?").get(shiftId) : void 0;
+  if (!s || area === null || s.area_id !== area) throw new HttpError(400, "Ca kh\xF4ng thu\u1ED9c khu c\u1EE7a nh\xE2n s\u1EF1 n\xE0y");
+  return shiftId;
+}
 function assertCanManageFace(actor, target) {
   assertCanEdit(actor, target);
   if (actor.role === "area_admin" && target.id === actor.id) throw new HttpError(403, "B\u1EA1n kh\xF4ng th\u1EC3 t\u1EF1 \u0111\u0103ng k\xFD FaceID cho ch\xEDnh m\xECnh");
@@ -2582,6 +2930,7 @@ function userRoutes(ctx) {
       const role = b.role === void 0 ? "employee" : b.role;
       assertRoleAllowed(actor, role);
       const departmentId = resolveDepartmentFor(db, actor, b.departmentId);
+      const shiftId = resolveUserShift(db, b.shiftId, departmentId);
       const email = parseEmail(b.email);
       const phone = parsePhone(b.phone);
       const adminAreaIds = role === "area_admin" ? parseAdminAreaIds(db, b.adminAreaIds) : [];
@@ -2594,9 +2943,9 @@ function userRoutes(ctx) {
       tx(db, () => {
         db.prepare(
           `INSERT INTO users(id, code, name, email, phone, role, department_id, position, avatar_url, hanet_person_id,
-             face_registered, status, password_hash, must_change_password, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, 1, ?)`
-        ).run(id, code, name, email, phone, role, departmentId, str2(b.position) ?? "", str2(b.avatarUrl) ?? "", hanetPersonId, hanetPersonId ? 1 : 0, toVnDate(ctx.now()));
+             face_registered, status, password_hash, must_change_password, shift_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, 1, ?, ?)`
+        ).run(id, code, name, email, phone, role, departmentId, str2(b.position) ?? "", str2(b.avatarUrl) ?? "", hanetPersonId, hanetPersonId ? 1 : 0, shiftId, toVnDate(ctx.now()));
         if (adminAreaIds.length) setAdminAreas(db, id, adminAreaIds);
         enqueueMail(db, id, "welcome", {}, ctx.now());
       });
@@ -2621,9 +2970,10 @@ function userRoutes(ctx) {
     const changesRole = b.role !== void 0 && b.role !== target.role;
     const changesStatus = b.status !== void 0 && b.status !== target.status;
     const changesDept = b.departmentId !== void 0 && (b.departmentId || null) !== target.departmentId;
+    const changesShift = b.shiftId !== void 0 && (b.shiftId || null) !== target.shiftId;
     const changesAreas = b.adminAreaIds !== void 0 && !(Array.isArray(b.adminAreaIds) && [...new Set(b.adminAreaIds.map(String))].sort().join(",") === target.adminAreaIds.join(","));
     if (target.id === actor.id && actor.role === "area_admin") {
-      const changesOther = changesRole || changesStatus || changesDept || changesAreas || b.hanetPersonId !== void 0 && (str2(b.hanetPersonId) || null) !== target.hanetPersonId || b.avatarUrl !== void 0 && (str2(b.avatarUrl) ?? "") !== target.avatarUrl;
+      const changesOther = changesRole || changesStatus || changesDept || changesAreas || changesShift || b.hanetPersonId !== void 0 && (str2(b.hanetPersonId) || null) !== target.hanetPersonId || b.avatarUrl !== void 0 && (str2(b.avatarUrl) ?? "") !== target.avatarUrl;
       if (changesOther) throw new HttpError(400, "B\u1EA1n ch\u1EC9 \u0111\u01B0\u1EE3c s\u1EEDa h\u1ECD t\xEAn, email, \u0111i\u1EC7n tho\u1EA1i v\xE0 ch\u1EE9c v\u1EE5 c\u1EE7a ch\xEDnh m\xECnh");
     }
     if (target.id === actor.id && (changesRole || changesStatus)) {
@@ -2663,7 +3013,9 @@ function userRoutes(ctx) {
       if (b.status !== "active" && b.status !== "inactive") throw new HttpError(400, "Tr\u1EA1ng th\xE1i kh\xF4ng h\u1EE3p l\u1EC7");
       set("status", b.status);
     }
-    if (changesDept) set("department_id", resolveDepartmentFor(db, actor, b.departmentId));
+    const deptAfter = changesDept ? resolveDepartmentFor(db, actor, b.departmentId) : target.departmentId;
+    if (changesDept) set("department_id", deptAfter);
+    if (b.shiftId !== void 0) set("shift_id", resolveUserShift(db, b.shiftId, deptAfter));
     const newRole = changesRole ? b.role : target.role;
     let adminAreas = null;
     if (newRole === "area_admin" && (changesRole || changesAreas)) {
@@ -2676,6 +3028,10 @@ function userRoutes(ctx) {
       if (sets.length) db.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).run(...params, target.id);
       if (adminAreas !== null) setAdminAreas(db, target.id, adminAreas);
     });
+    if (changesShift || changesDept) {
+      const { from, to } = monthToDate(ctx.now());
+      recomputeUsers(db, [target.id], from, to, ctx.now());
+    }
     if (b.email !== void 0 && !target.canLogin && parseEmail(b.email) !== target.email.toLowerCase()) {
       enqueueMail(db, target.id, "welcome", {}, ctx.now());
     }
@@ -2756,12 +3112,15 @@ function userRoutes(ctx) {
 init_db();
 init_errors();
 import { Router as Router4 } from "express";
+init_backup();
 init_hanet_sync();
 init_vntime();
+init_attendance();
 var DEPT_SELECT = `SELECT d.id, d.code, d.name, d.description, d.manager_id, m.name AS manager_name, d.hanet_sync_status, d.hanet_sync_error, d.created_at,
+  d.shift_id, ds.name AS shift_name,
   d.area_id, ar.name AS area_name,
   (SELECT COUNT(*) FROM users x WHERE x.department_id = d.id) AS member_count
-  FROM departments d LEFT JOIN users m ON m.id = d.manager_id LEFT JOIN areas ar ON ar.id = d.area_id`;
+  FROM departments d LEFT JOIN users m ON m.id = d.manager_id LEFT JOIN areas ar ON ar.id = d.area_id LEFT JOIN shifts ds ON ds.id = d.shift_id`;
 function mapDept(r) {
   return {
     id: r.id,
@@ -2773,6 +3132,8 @@ function mapDept(r) {
     memberCount: Number(r.member_count),
     hanetSyncStatus: r.hanet_sync_status ?? "synced",
     hanetSyncError: r.hanet_sync_error ?? null,
+    shiftId: r.shift_id ?? null,
+    shiftName: r.shift_name ?? null,
     areaId: r.area_id ?? null,
     areaName: r.area_name ?? null,
     createdAt: r.created_at
@@ -2788,6 +3149,12 @@ function resolveManager(db, actor, managerId) {
   if (!m) throw new HttpError(400, "Tr\u01B0\u1EDFng ph\xF2ng \u0111\u01B0\u1EE3c ch\u1ECDn kh\xF4ng t\u1ED3n t\u1EA1i");
   if (!managesArea(actor, m.areaId)) throw notFound("nh\xE2n s\u1EF1");
   return m.id;
+}
+function resolveDeptShift(db, shiftId, areaId) {
+  if (shiftId === void 0 || shiftId === null || shiftId === "") return null;
+  const s = typeof shiftId === "string" ? db.prepare("SELECT area_id FROM shifts WHERE id = ?").get(shiftId) : void 0;
+  if (!s || s.area_id !== areaId) throw new HttpError(400, "Ca kh\xF4ng thu\u1ED9c khu c\u1EE7a ph\xF2ng ban n\xE0y");
+  return shiftId;
 }
 function manageableDept(db, actor, id) {
   const dept = getDept(db, id);
@@ -2818,15 +3185,17 @@ function departmentRoutes(ctx) {
     if (!CODE_RE.test(code)) throw new HttpError(400, "M\xE3 ph\xF2ng ban kh\xF4ng h\u1EE3p l\u1EC7");
     if (!name) throw new HttpError(400, "T\xEAn ph\xF2ng ban l\xE0 b\u1EAFt bu\u1ED9c");
     const areaId = resolveAreaFor(db, actor, b.areaId);
+    const shiftId = resolveDeptShift(db, b.shiftId, areaId);
     const managerId = resolveManager(db, actor, b.managerId);
     if (db.prepare("SELECT 1 FROM departments WHERE code = ?").get(code)) throw new HttpError(409, "M\xE3 ph\xF2ng ban \u0111\xE3 t\u1ED3n t\u1EA1i");
     const id = newId("dep");
-    db.prepare("INSERT INTO departments(id, code, name, description, manager_id, area_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+    db.prepare("INSERT INTO departments(id, code, name, description, manager_id, shift_id, area_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
       id,
       code,
       name,
       typeof b.description === "string" ? b.description.trim() : "",
       managerId,
+      shiftId,
       areaId,
       toVnDate(ctx.now())
     );
@@ -2841,15 +3210,23 @@ function departmentRoutes(ctx) {
     const name = b.name === void 0 ? void 0 : typeof b.name === "string" ? b.name.trim() : "";
     if (name === "") throw new HttpError(400, "T\xEAn ph\xF2ng ban l\xE0 b\u1EAFt bu\u1ED9c");
     const areaId = b.areaId === void 0 ? void 0 : resolveAreaFor(db, actor, b.areaId);
+    const areaAfter = areaId === void 0 ? dept.areaId : areaId;
+    const shiftId = b.shiftId === void 0 ? void 0 : resolveDeptShift(db, b.shiftId, areaAfter);
     const managerId = b.managerId === void 0 ? void 0 : resolveManager(db, actor, b.managerId);
     tx(db, () => {
       if (name !== void 0) db.prepare("UPDATE departments SET name = ? WHERE id = ?").run(name, dept.id);
       if (b.description !== void 0) {
         db.prepare("UPDATE departments SET description = ? WHERE id = ?").run(typeof b.description === "string" ? b.description.trim() : "", dept.id);
       }
+      if (shiftId !== void 0) db.prepare("UPDATE departments SET shift_id = ? WHERE id = ?").run(shiftId, dept.id);
       if (areaId !== void 0) db.prepare("UPDATE departments SET area_id = ? WHERE id = ?").run(areaId, dept.id);
       if (managerId !== void 0) db.prepare("UPDATE departments SET manager_id = ? WHERE id = ?").run(managerId, dept.id);
     });
+    if (shiftId !== void 0 || areaId !== void 0) {
+      const members = db.prepare("SELECT id FROM users WHERE department_id = ?").all(dept.id).map((x) => x.id);
+      const { from, to } = monthToDate(ctx.now());
+      recomputeUsers(db, members, from, to, ctx.now());
+    }
     const after = getDept(db, dept.id);
     if (after.name !== dept.name || after.description !== dept.description) {
       enqueue(db, "department", dept.id, "dept.update", { name: after.name, desc: after.description }, ctx.now());
@@ -2872,10 +3249,94 @@ function departmentRoutes(ctx) {
   return r;
 }
 
-// server/routes/cameras.ts
+// server/routes/shifts.ts
 init_db();
 init_errors();
 import { Router as Router5 } from "express";
+init_bootstrap();
+init_shifts();
+init_attendance();
+init_vntime();
+function usersOfShift(db, shiftId) {
+  return db.prepare("SELECT u.id FROM users u LEFT JOIN departments d ON d.id = u.department_id WHERE u.code != ? AND (u.shift_id = ? OR d.shift_id = ?)").all(SYSTEM_ADMIN_CODE, shiftId, shiftId).map((r) => r.id);
+}
+function allStaffIds(db) {
+  return db.prepare("SELECT id FROM users WHERE code != ?").all(SYSTEM_ADMIN_CODE).map((r) => r.id);
+}
+function shiftRoutes(ctx) {
+  const { db } = ctx;
+  const r = Router5();
+  const recomputeMonth = (ids) => {
+    const { from, to } = monthToDate(ctx.now());
+    return recomputeUsers(db, ids, from, to, ctx.now());
+  };
+  r.get("/shifts", requireManager, (req, res) => {
+    const actor = currentUser(req);
+    const f = areaColumnSql(parseAreaFilter(db, actor, req.query.area), "s.area_id");
+    const scope = isGlobalHr(actor) ? { sql: "1=1", params: [] } : actor.areaIds.length ? { sql: `s.area_id IN (${actor.areaIds.map(() => "?").join(", ")})`, params: [...actor.areaIds] } : { sql: "0=1", params: [] };
+    const rows = db.prepare(`${SHIFT_SELECT} WHERE ${scope.sql} AND ${f.sql} ORDER BY a.code, s.name`).all(...scope.params, ...f.params);
+    res.json({ shifts: rows.map(mapShift) });
+  });
+  r.post("/shifts", requireManager, (req, res) => {
+    const actor = currentUser(req);
+    const b = req.body ?? {};
+    const areaId = resolveAreaFor(db, actor, b.areaId);
+    if (!areaId) throw new HttpError(400, "H\xE3y ch\u1ECDn khu v\u1EF1c cho ca");
+    const s = validateShiftInput(b);
+    if (db.prepare("SELECT 1 FROM shifts WHERE area_id = ? AND name = ?").get(areaId, s.name)) throw new HttpError(409, "Khu n\xE0y \u0111\xE3 c\xF3 ca c\xF9ng t\xEAn");
+    const id = newId("shift");
+    db.prepare(
+      `INSERT INTO shifts(id, area_id, name, work_start, work_end, work_days, late_grace_minutes, early_arrival_minutes, early_leave_minutes, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, areaId, s.name, s.workStart, s.workEnd, formatWorkDays(s.workDays), s.lateGraceMinutes, s.earlyArrivalMinutes, s.earlyLeaveMinutes, toVnDate(ctx.now()));
+    res.json({ shift: getShift(db, id) });
+  });
+  r.put("/shifts/:id", requireManager, (req, res) => {
+    const cur = getShift(db, req.params.id);
+    if (!cur || !managesArea(currentUser(req), cur.areaId)) throw notFound("ca");
+    const s = validateShiftInput({ ...cur, ...req.body ?? {} });
+    const dup = db.prepare("SELECT id FROM shifts WHERE area_id = ? AND name = ?").get(cur.areaId, s.name);
+    if (dup && dup.id !== cur.id) throw new HttpError(409, "Khu n\xE0y \u0111\xE3 c\xF3 ca c\xF9ng t\xEAn");
+    db.prepare(
+      `UPDATE shifts SET name = ?, work_start = ?, work_end = ?, work_days = ?, late_grace_minutes = ?, early_arrival_minutes = ?, early_leave_minutes = ? WHERE id = ?`
+    ).run(s.name, s.workStart, s.workEnd, formatWorkDays(s.workDays), s.lateGraceMinutes, s.earlyArrivalMinutes, s.earlyLeaveMinutes, cur.id);
+    const recomputed = recomputeMonth(usersOfShift(db, cur.id));
+    res.json({ shift: getShift(db, cur.id), recomputed });
+  });
+  r.delete("/shifts/:id", requireManager, (req, res) => {
+    const cur = getShift(db, req.params.id);
+    if (!cur || !managesArea(currentUser(req), cur.areaId)) throw notFound("ca");
+    if (cur.departmentCount > 0 || cur.userCount > 0) throw new HttpError(409, "Ca \u0111ang \u0111\u01B0\u1EE3c ph\xF2ng ban ho\u1EB7c nh\xE2n s\u1EF1 s\u1EED d\u1EE5ng");
+    db.prepare("DELETE FROM shifts WHERE id = ?").run(cur.id);
+    res.json({ success: true });
+  });
+  r.get("/holidays", (req, res) => {
+    const year = typeof req.query.year === "string" && /^\d{4}$/.test(req.query.year) ? req.query.year : toVnDate(ctx.now()).slice(0, 4);
+    const rows = db.prepare("SELECT date, name FROM holidays WHERE date LIKE ? ORDER BY date").all(`${year}-%`);
+    res.json({ holidays: rows.map((h) => ({ date: h.date, name: h.name })) });
+  });
+  const recomputeDate = (date) => date <= toVnDate(ctx.now()) ? recomputeUsers(db, allStaffIds(db), date, date, ctx.now()) : 0;
+  r.post("/holidays", requireGlobalHr, (req, res) => {
+    const b = req.body ?? {};
+    const name = typeof b.name === "string" ? b.name.trim() : "";
+    if (!isValidDate(b.date)) throw new HttpError(400, "Ng\xE0y kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng YYYY-MM-DD)");
+    if (!name) throw new HttpError(400, "T\xEAn ng\xE0y l\u1EC5 l\xE0 b\u1EAFt bu\u1ED9c");
+    if (db.prepare("SELECT 1 FROM holidays WHERE date = ?").get(b.date)) throw new HttpError(409, "Ng\xE0y n\xE0y \u0111\xE3 l\xE0 ng\xE0y l\u1EC5");
+    db.prepare("INSERT INTO holidays(date, name) VALUES (?, ?)").run(b.date, name);
+    res.json({ holiday: { date: b.date, name }, recomputed: recomputeDate(b.date) });
+  });
+  r.delete("/holidays/:date", requireGlobalHr, (req, res) => {
+    const result = db.prepare("DELETE FROM holidays WHERE date = ?").run(req.params.date);
+    if (Number(result.changes) === 0) throw notFound("ng\xE0y l\u1EC5");
+    res.json({ success: true, recomputed: recomputeDate(req.params.date) });
+  });
+  return r;
+}
+
+// server/routes/cameras.ts
+init_db();
+init_errors();
+import { Router as Router6 } from "express";
 
 // server/cameras.ts
 init_db();
@@ -2931,7 +3392,7 @@ function mapCamera(r) {
 }
 function cameraRoutes(ctx) {
   const { db } = ctx;
-  const r = Router5();
+  const r = Router6();
   const deps = { db, fetch: ctx.fetch, now: ctx.now };
   const listCameras = () => db.prepare(`${CAMERA_SELECT} ORDER BY c.name`).all().map(mapCamera);
   const requireHanet = () => {
@@ -3021,7 +3482,7 @@ function cameraRoutes(ctx) {
 
 // server/routes/attendance.ts
 init_errors();
-import { Router as Router6 } from "express";
+import { Router as Router7 } from "express";
 init_auth();
 init_attendance();
 init_bootstrap();
@@ -3183,6 +3644,7 @@ async function testConnectLogin(deps) {
 }
 
 // server/routes/attendance.ts
+init_shifts();
 init_vntime();
 var DAY_SELECT = `SELECT a.*, u.code AS employee_code, u.name AS employee_name, u.avatar_url, u.department_id,
   d.name AS department_name
@@ -3196,11 +3658,13 @@ function mapDay(r) {
     departmentId: r.department_id ?? null,
     departmentName: r.department_name ?? null,
     workDate: r.work_date,
-    firstIn: r.first_in,
+    firstIn: r.first_in ?? null,
     lastOut: r.last_out ?? null,
     lateMinutes: r.late_minutes,
     earlyMinutes: r.early_minutes,
+    earlyArrivalMinutes: r.early_arrival_minutes ?? 0,
     status: r.status,
+    final: r.final === 1,
     lateExcused: r.late_excused === 1,
     manualIn: r.manual_in ?? null,
     manualOut: r.manual_out ?? null,
@@ -3211,18 +3675,22 @@ var MAX_RECOMPUTE_DAYS = 92;
 var MAX_VIDEO_DRIFT_MS = 24 * 36e5;
 var DETAIL_FILTER = {
   total: "1 = 1",
-  present: "a.user_id IS NOT NULL",
-  on_time: "a.late_minutes = 0",
+  present: "a.first_in IS NOT NULL",
+  on_time: "a.first_in IS NOT NULL AND a.late_minutes = 0 AND a.status NOT IN ('leave', 'business_trip')",
   late: "a.late_minutes > 0",
   missing_out: "a.status = 'missing_out'",
-  not_checked_in: "a.user_id IS NULL"
+  not_checked_in: "a.user_id IS NULL",
+  absent: "a.status = 'absent'",
+  leave: "a.status = 'leave'",
+  business_trip: "a.status = 'business_trip'",
+  early_arrival: "a.early_arrival_minutes > 0"
 };
 function denySee(viewer) {
   return viewer.role === "area_admin" ? notFound("nh\xE2n s\u1EF1") : new HttpError(403, "B\u1EA1n kh\xF4ng c\xF3 quy\u1EC1n xem d\u1EEF li\u1EC7u n\xE0y");
 }
 function attendanceRoutes(ctx) {
   const { db } = ctx;
-  const r = Router6();
+  const r = Router7();
   r.get("/attendance", (req, res) => {
     const user = currentUser(req);
     const date = req.query.date === void 0 || req.query.date === "" ? toVnDate(ctx.now()) : req.query.date;
@@ -3314,13 +3782,23 @@ function attendanceRoutes(ctx) {
     const date = toVnDate(ctx.now());
     const total = db.prepare(`SELECT COUNT(*) AS c FROM users u WHERE u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${where}`).get(...params);
     const day = db.prepare(
-      `SELECT COUNT(*) AS present,
-           SUM(CASE WHEN a.late_minutes = 0 THEN 1 ELSE 0 END) AS on_time,
+      `SELECT
+           SUM(CASE WHEN a.first_in IS NOT NULL THEN 1 ELSE 0 END) AS present,
+           SUM(CASE WHEN ${DETAIL_FILTER.on_time} THEN 1 ELSE 0 END) AS on_time,
            SUM(CASE WHEN a.late_minutes > 0 THEN 1 ELSE 0 END) AS late,
-           SUM(CASE WHEN a.status = 'missing_out' THEN 1 ELSE 0 END) AS missing_out
+           SUM(CASE WHEN a.status = 'missing_out' THEN 1 ELSE 0 END) AS missing_out,
+           SUM(CASE WHEN a.early_arrival_minutes > 0 THEN 1 ELSE 0 END) AS early_arrival,
+           SUM(CASE WHEN a.status = 'absent' THEN 1 ELSE 0 END) AS absent,
+           SUM(CASE WHEN a.status = 'leave' THEN 1 ELSE 0 END) AS leave,
+           SUM(CASE WHEN a.status = 'business_trip' THEN 1 ELSE 0 END) AS business_trip
          FROM attendance_days a JOIN users u ON u.id = a.user_id
          WHERE a.work_date = ? AND u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${where}`
     ).get(date, ...params);
+    const noRow = db.prepare(
+      `SELECT u.id FROM users u LEFT JOIN attendance_days a ON a.user_id = u.id AND a.work_date = ?
+           WHERE u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${where} AND a.user_id IS NULL`
+    ).all(date, ...params).map((r2) => r2.id);
+    const notCheckedIn = noRow.filter((id) => isWorkday(db, effectiveShift(db, id), date)).length;
     const pending = db.prepare(`SELECT COUNT(*) AS c FROM requests r JOIN users u ON u.id = r.user_id WHERE r.status = 'pending' AND ${where}`).get(...params);
     const cs = cameraScopeSql(actor);
     const cf = areaColumnSql(filter, "c.area_id");
@@ -3328,11 +3806,15 @@ function attendanceRoutes(ctx) {
     const body = {
       date,
       totalEmployees: total.c,
-      presentCount: day.present,
+      presentCount: day.present ?? 0,
       onTimeCount: day.on_time ?? 0,
       lateCount: day.late ?? 0,
       missingOutCount: day.missing_out ?? 0,
-      notCheckedInCount: Math.max(0, total.c - day.present),
+      earlyArrivalCount: day.early_arrival ?? 0,
+      absentCount: day.absent ?? 0,
+      leaveCount: day.leave ?? 0,
+      businessTripCount: day.business_trip ?? 0,
+      notCheckedInCount: notCheckedIn,
       pendingRequests: pending.c,
       totalCameras: cameras.c
     };
@@ -3345,14 +3827,17 @@ function attendanceRoutes(ctx) {
     const w = scopeWhere(scopeFor(actor), "u.id", "u.department_id");
     const f = areaFilterSql(parseAreaFilter(db, actor, req.query.area), "u.department_id");
     const date = toVnDate(ctx.now());
-    const rows = db.prepare(
-      `SELECT u.id, u.code, u.name, d.name AS department_name, a.first_in, a.last_out, a.late_minutes, a.status
+    let rows = db.prepare(
+      `SELECT u.id, u.code, u.name, d.name AS department_name, a.first_in, a.last_out, a.late_minutes, a.early_minutes, a.early_arrival_minutes, a.status, a.final
          FROM users u
          LEFT JOIN departments d ON d.id = u.department_id
          LEFT JOIN attendance_days a ON a.user_id = u.id AND a.work_date = ?
          WHERE u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${w.sql} AND ${f.sql} AND ${DETAIL_FILTER[type]}
          ORDER BY a.first_in IS NULL, a.first_in, u.code`
     ).all(date, ...w.params, ...f.params);
+    if (type === "not_checked_in") {
+      rows = rows.filter((x) => isWorkday(db, effectiveShift(db, x.id), date));
+    }
     const out = rows.map((x) => ({
       userId: x.id,
       employeeCode: x.code,
@@ -3361,7 +3846,10 @@ function attendanceRoutes(ctx) {
       firstIn: x.first_in ?? null,
       lastOut: x.last_out ?? null,
       lateMinutes: x.late_minutes ?? 0,
-      status: x.status ?? null
+      earlyArrivalMinutes: x.early_arrival_minutes ?? 0,
+      earlyMinutes: x.early_minutes ?? 0,
+      status: x.status ?? null,
+      final: x.final === 1
     }));
     res.json({ date, type, rows: out });
   });
@@ -3369,27 +3857,30 @@ function attendanceRoutes(ctx) {
 }
 
 // server/routes/settings.ts
-import { Router as Router7 } from "express";
+import { Router as Router8 } from "express";
 init_settings();
+init_attendance();
 function settingsRoutes(ctx) {
   const { db } = ctx;
-  const r = Router7();
+  const r = Router8();
   r.get("/settings/work", requireGlobalHr, (_req, res) => {
     res.json({ settings: getWorkSettings(db) });
   });
   r.put("/settings/work", requireGlobalHr, (req, res) => {
     saveWorkSettings(db, validateWorkSettings(req.body));
-    res.json({ settings: getWorkSettings(db) });
+    const { from, to } = monthToDate(ctx.now());
+    const recomputed = recomputeUsers(db, allStaffIds(db), from, to, ctx.now());
+    res.json({ settings: getWorkSettings(db), recomputed });
   });
   return r;
 }
 
 // server/routes/mail.ts
 init_errors();
-import { Router as Router8 } from "express";
+import { Router as Router9 } from "express";
 function mailRoutes(ctx) {
   const { db } = ctx;
-  const r = Router8();
+  const r = Router9();
   r.get("/settings/mail", requireGlobalHr, (_req, res) => {
     res.json(getMailConfigView(db, ctx.now()));
   });
@@ -3422,11 +3913,14 @@ function mailRoutes(ctx) {
 // server/routes/requests.ts
 init_db();
 init_errors();
-import { Router as Router9 } from "express";
+import { Router as Router10 } from "express";
 init_auth();
 init_attendance();
 init_vntime();
-var TYPES = ["missed_punch", "late_explanation", "leave_request"];
+var TYPES = ["missed_punch", "late_explanation", "leave_request", "business_trip"];
+var LEAVE_TYPES = ["leave_request", "business_trip"];
+var MAX_LEAVE_DAYS = 31;
+var MAX_LEAVE_AHEAD_DAYS = 7;
 var REQUEST_SELECT = `SELECT r.*, u.name AS employee_name, u.code AS employee_code, u.department_id, rv.name AS reviewer_name
   FROM requests r JOIN users u ON u.id = r.user_id LEFT JOIN users rv ON rv.id = r.reviewed_by`;
 function mapRequest(r) {
@@ -3437,6 +3931,7 @@ function mapRequest(r) {
     employeeCode: r.employee_code,
     departmentId: r.department_id ?? null,
     workDate: r.work_date,
+    endDate: r.end_date ?? null,
     type: r.type,
     reason: r.reason,
     suggestedIn: r.suggested_in ?? null,
@@ -3464,7 +3959,7 @@ function optionalTime(v, label) {
 }
 function requestRoutes(ctx) {
   const { db } = ctx;
-  const r = Router9();
+  const r = Router10();
   r.get("/requests", (req, res) => {
     const actor = currentUser(req);
     const w = scopeWhere(scopeFor(actor), "u.id", "u.department_id");
@@ -3476,8 +3971,22 @@ function requestRoutes(ctx) {
     const user = currentUser(req);
     const b = req.body ?? {};
     if (!isValidDate(b.workDate)) throw new HttpError(400, "Ng\xE0y kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng YYYY-MM-DD)");
-    if (b.workDate > toVnDate(ctx.now())) throw new HttpError(400, "Kh\xF4ng th\u1EC3 g\u1EEDi \u0111\u01A1n cho ng\xE0y trong t\u01B0\u01A1ng lai");
     if (!TYPES.includes(b.type)) throw new HttpError(400, "Lo\u1EA1i \u0111\u01A1n kh\xF4ng h\u1EE3p l\u1EC7");
+    const today = toVnDate(ctx.now());
+    const isLeave = LEAVE_TYPES.includes(b.type);
+    let endDate = null;
+    if (isLeave) {
+      if (b.endDate !== void 0 && b.endDate !== null && b.endDate !== "") {
+        if (!isValidDate(b.endDate)) throw new HttpError(400, "Ng\xE0y k\u1EBFt th\xFAc kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng YYYY-MM-DD)");
+        if (b.endDate < b.workDate) throw new HttpError(400, "Ng\xE0y k\u1EBFt th\xFAc ph\u1EA3i t\u1EEB ng\xE0y b\u1EAFt \u0111\u1EA7u tr\u1EDF \u0111i");
+        if (daysBetween(b.workDate, b.endDate) >= MAX_LEAVE_DAYS) throw new HttpError(400, `M\u1ED7i \u0111\u01A1n t\u1ED1i \u0111a ${MAX_LEAVE_DAYS} ng\xE0y`);
+        endDate = b.endDate === b.workDate ? null : b.endDate;
+      }
+      if (daysBetween(today, b.workDate) > MAX_LEAVE_AHEAD_DAYS) throw new HttpError(400, `Ch\u1EC9 g\u1EEDi \u0111\u01A1n tr\u01B0\u1EDBc t\u1ED1i \u0111a ${MAX_LEAVE_AHEAD_DAYS} ng\xE0y`);
+    } else {
+      if (b.endDate !== void 0 && b.endDate !== null && b.endDate !== "") throw new HttpError(400, "Ch\u1EC9 \u0111\u01A1n ngh\u1EC9 ph\xE9p v\xE0 c\xF4ng t\xE1c m\u1EDBi ch\u1ECDn kho\u1EA3ng ng\xE0y");
+      if (b.workDate > today) throw new HttpError(400, "Kh\xF4ng th\u1EC3 g\u1EEDi \u0111\u01A1n cho ng\xE0y trong t\u01B0\u01A1ng lai");
+    }
     const reason = typeof b.reason === "string" ? b.reason.trim() : "";
     if (!reason) throw new HttpError(400, "Vui l\xF2ng nh\u1EADp l\xFD do");
     let suggestedIn = null;
@@ -3489,9 +3998,9 @@ function requestRoutes(ctx) {
     }
     const id = newId("req");
     db.prepare(
-      `INSERT INTO requests(id, user_id, work_date, type, reason, suggested_in, suggested_out, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
-    ).run(id, user.id, b.workDate, b.type, reason, suggestedIn, suggestedOut, new Date(ctx.now()).toISOString());
+      `INSERT INTO requests(id, user_id, work_date, end_date, type, reason, suggested_in, suggested_out, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
+    ).run(id, user.id, b.workDate, endDate, b.type, reason, suggestedIn, suggestedOut, new Date(ctx.now()).toISOString());
     res.json({ request: getRequest(db, id) });
   });
   r.put("/requests/:id", requireRole("hr", "area_admin", "dept_manager"), (req, res) => {
@@ -3534,6 +4043,14 @@ function requestRoutes(ctx) {
         if (target.suggestedIn) patch.manualIn = vnDateTimeToTs(target.workDate, target.suggestedIn);
         if (target.suggestedOut) patch.manualOut = vnDateTimeToTs(target.workDate, target.suggestedOut);
         applyDayAdjustment(db, target.userId, target.workDate, patch);
+      } else if (LEAVE_TYPES.includes(target.type)) {
+        const to = target.endDate ?? target.workDate;
+        const overlap = db.prepare(
+          `SELECT 1 FROM requests WHERE user_id = ? AND id != ? AND status = 'approved' AND type IN ('leave_request', 'business_trip')
+             AND work_date <= ? AND COALESCE(end_date, work_date) >= ?`
+        ).get(target.userId, target.id, to, target.workDate);
+        if (overlap) throw new HttpError(409, "Kho\u1EA3ng ng\xE0y tr\xF9ng v\u1EDBi \u0111\u01A1n \u0111\xE3 duy\u1EC7t");
+        recomputeUsers(db, [target.userId], target.workDate, to, ctx.now());
       }
     });
     res.json({ request: getRequest(db, target.id) });
@@ -3543,7 +4060,7 @@ function requestRoutes(ctx) {
 
 // server/routes/hanet.ts
 init_errors();
-import { Router as Router10 } from "express";
+import { Router as Router11 } from "express";
 init_auth();
 init_hanet();
 init_hanet_api();
@@ -3552,7 +4069,7 @@ init_vntime();
 init_hanet_sync();
 function hanetPublicRoutes(ctx) {
   const { db } = ctx;
-  const r = Router10();
+  const r = Router11();
   r.post("/hanet/webhook/:token", (req, res) => {
     const now = ctx.now();
     if (!safeEqualStrings(req.params.token, getWebhookToken(db))) {
@@ -3626,7 +4143,7 @@ function syncEntityInScope(db, actor, type, id) {
 }
 function hanetRoutes(ctx) {
   const { db } = ctx;
-  const r = Router10();
+  const r = Router11();
   r.get("/hanet/config", requireGlobalHr, (req, res) => {
     const config = getHanetConfigView(db);
     if (!isSystemAdmin(currentUser(req))) config.webhookPath = config.webhookPath.replace(/[^/]+$/, (t) => `\u2022\u2022\u2022\u2022${t.slice(-4)}`);
@@ -3794,12 +4311,13 @@ function hanetRoutes(ctx) {
 // server/routes/admin.ts
 init_db();
 init_errors();
-import { Router as Router11 } from "express";
+import { Router as Router12 } from "express";
 init_auth();
+init_backup();
 function adminRoutes(ctx) {
   const { db } = ctx;
   const dir = ctx.config.backupDir;
-  const r = Router11();
+  const r = Router12();
   r.get("/admin/backups", requireGlobalHr, (_req, res) => {
     res.json({ backups: listBackups(dir) });
   });
@@ -3867,6 +4385,7 @@ function createApp(ctx) {
   api.use(userRoutes(ctx));
   api.use(departmentRoutes(ctx));
   api.use(areaRoutes(ctx));
+  api.use(shiftRoutes(ctx));
   api.use(cameraRoutes(ctx));
   api.use(attendanceRoutes(ctx));
   api.use(settingsRoutes(ctx));
@@ -3885,12 +4404,14 @@ init_auth();
 init_bootstrap();
 
 // server/jobs.ts
+init_backup();
 init_auth();
 init_hanet();
 init_hanet_sync();
 init_sync_handlers();
 init_hanet_api();
 init_vntime();
+init_attendance();
 function dueJobs(now) {
   const m = vnMinutesOfDay(now);
   return {
@@ -3899,7 +4420,8 @@ function dueJobs(now) {
     reconcileYesterday: m === 5,
     purgeSessions: m % 60 === 0,
     purgeHourly: m % 60 === 30,
-    cameraStatus: m % 5 === 0
+    cameraStatus: m % 5 === 0,
+    closeDays: m % 15 === 0
   };
 }
 function startJobs(ctx) {
@@ -3924,6 +4446,7 @@ function startJobs(ctx) {
     if (due.purgeHourly) run("purge-sync-jobs", () => purgeDoneJobs(ctx.db, now));
     run("sync", () => runDueJobs(deps, SYNC_HANDLERS));
     run("mail", () => runMailJobs({ db: ctx.db, sendMail: ctx.sendMail, now: ctx.now }));
+    if (due.closeDays) run("close-days", () => closeDays(ctx.db, now));
     if (reconcileEnabled(ctx.db)) {
       if (due.cameraStatus) run("camera-status", () => refreshCameraStatus(deps));
       if (due.reconcileToday) run("reconcile-today", () => reconcileDate(deps, today));
@@ -3937,6 +4460,7 @@ function startJobs(ctx) {
       await reconcileDate(deps, today);
     });
   }
+  run("close-days-startup", () => closeDays(ctx.db, ctx.now()));
   const timer = setInterval(tick, 2e4);
   timer.unref();
   return () => clearInterval(timer);
@@ -3944,11 +4468,12 @@ function startJobs(ctx) {
 
 // server/index.ts
 var production = process.env.NODE_ENV === "production";
-var PORT = Number(process.env.PORT) || 3001;
+var defaultPort = production ? 3001 : 3e3;
+var PORT = process.env.PORT && process.env.PORT !== "8080" ? Number(process.env.PORT) : defaultPort;
 var dataDir = path3.resolve(process.cwd(), "data");
 var backupDir = path3.join(dataDir, "backups");
 async function main() {
-  const db = openDb(path3.join(dataDir, "attendance.db"));
+  const db = openDb(path3.join(dataDir, "attendance.db"), { backupDir });
   const admin = ensureAdminAccess(db, process.env.ADMIN_INITIAL_PASSWORD);
   if (admin) {
     console.log(
@@ -3983,7 +4508,7 @@ async function main() {
   app.listen(PORT, "0.0.0.0", () => console.log(`[Petrolimex Attendance] \u0110ang ch\u1EA1y t\u1EA1i http://0.0.0.0:${PORT}`));
 }
 main().catch((err) => {
-  if (err instanceof SchemaVersionError) console.error(err.message);
+  if (err instanceof SchemaVersionError || err instanceof SchemaTooNewError || err instanceof MigrationError) console.error(err.message);
   else console.error("[STARTUP] Kh\xF4ng kh\u1EDFi \u0111\u1ED9ng \u0111\u01B0\u1EE3c:", err);
   process.exit(1);
 });
