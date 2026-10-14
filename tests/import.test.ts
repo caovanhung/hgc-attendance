@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { startTestApp, seedUser, seedDepartment, loginAs, Client } from './helpers';
+import { startTestApp, seedUser, seedDepartment, loginAs, Client, contact } from './helpers';
 import { PLACE, configureHanet, fakeHanet, ok, type Reply } from './fake-hanet';
 import { fetchAllPersons, IMPORT_PAGE_SIZE } from '../server/hanet-import';
 import { runDueJobs } from '../server/hanet-sync';
@@ -100,6 +100,20 @@ test('mã tự sinh bỏ qua aliasID đang dùng bởi người khác trên Hane
     const r = await hr.post('/api/users/import', { persons: [{ personId: 'PY' }] });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.deepEqual(r.body.created.map((c: any) => c.code), ['NV0002']);
+  } finally {
+    await app.close();
+  }
+});
+
+test('mã gợi ý và mã tự sinh khi thêm nhân sự bỏ qua aliasID đang có trên Camera AI', async () => {
+  const { app, hr } = await setup({ '/person/getListByPlace': pagesRoute([[person('NV0001', 'PX')]]) });
+  try {
+    const next = await hr.get('/api/users/next-code');
+    assert.equal(next.status, 200);
+    assert.equal(next.body.code, 'NV0002');
+    const r = await hr.post('/api/users', { ...contact('moi'), code: '', name: 'Người mới' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.user.code, 'NV0002');
   } finally {
     await app.close();
   }

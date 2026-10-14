@@ -160,10 +160,6 @@ export function userRoutes(ctx: AppContext): Router {
     }),
   );
 
-  r.get('/users/next-code', requireManager, (_req, res) => {
-    res.json({ code: nextEmployeeCode(db) });
-  });
-
   /** aliasID đang có trên Camera AI để mã tự sinh không trùng; không cấu hình hoặc lỗi gọi thì bỏ qua. */
   const cameraAliases = async (): Promise<Set<string>> => {
     const placeId = getPlaceIds(db)[0];
@@ -174,6 +170,15 @@ export function userRoutes(ctx: AppContext): Router {
       return new Set();
     }
   };
+
+  // Mã gợi ý bỏ qua aliasID đang có trên Camera AI (webhook khớp theo aliasID trước)
+  r.get(
+    '/users/next-code',
+    requireManager,
+    ah(async (_req, res) => {
+      res.json({ code: nextEmployeeCode(db, await cameraAliases()) });
+    }),
+  );
 
   r.post(
     '/users/import-csv/preview',
@@ -201,7 +206,7 @@ export function userRoutes(ctx: AppContext): Router {
     ah(async (req, res) => {
       const actor = currentUser(req);
       const b = req.body ?? {};
-      const code = (str(b.code) ?? '').toUpperCase() || nextEmployeeCode(db);
+      const code = (str(b.code) ?? '').toUpperCase() || nextEmployeeCode(db, await cameraAliases());
       const name = str(b.name) ?? '';
       if (!CODE_RE.test(code)) throw new HttpError(400, CODE_ERROR);
       // Mã ADMIN mang quyền xóa dữ liệu: chỉ hệ thống được tạo, kể cả khi database chưa có tài khoản này.
