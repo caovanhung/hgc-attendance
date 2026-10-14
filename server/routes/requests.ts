@@ -6,7 +6,7 @@ import { HttpError } from '../errors';
 import { currentUser, requireRole } from '../middleware';
 import type { Row } from '../repo';
 import { scopeFor, scopeWhere } from '../auth';
-import { areaFilterSql, parseAreaFilter } from '../access';
+import { areaFilterSql, deptAreaId, managesArea, notFound, parseAreaFilter } from '../access';
 import { applyDayAdjustment, type DayAdjustment } from '../attendance';
 import { isValidDate, parseHHmm, toVnDate, vnDateTimeToTs } from '../vntime';
 import type { AttendanceRequest, RequestType } from '../../shared/types';
@@ -87,10 +87,13 @@ export function requestRoutes(ctx: AppContext): Router {
     res.json({ request: getRequest(db, id) });
   });
 
-  r.put('/requests/:id', requireRole('hr', 'dept_manager'), (req, res) => {
+  r.put('/requests/:id', requireRole('hr', 'area_admin', 'dept_manager'), (req, res) => {
     const reviewer = currentUser(req);
     const target = getRequest(db, req.params.id);
     if (!target) throw new HttpError(404, 'Không tìm thấy đơn');
+    if (reviewer.role === 'area_admin' && !managesArea(reviewer, target.departmentId ? (deptAreaId(db, target.departmentId) ?? null) : null)) {
+      throw notFound('đơn');
+    }
     if (target.userId === reviewer.id) throw new HttpError(403, 'Không thể tự duyệt đơn của mình');
     if (reviewer.role === 'dept_manager' && (!reviewer.departmentId || target.departmentId !== reviewer.departmentId)) {
       throw new HttpError(403, 'Trưởng phòng chỉ được duyệt đơn của phòng mình');

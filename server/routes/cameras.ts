@@ -5,8 +5,8 @@ import { HttpError, ah } from '../errors';
 import { importCameras, refreshCameraStatus } from '../cameras';
 import { reconcileEnabled } from '../hanet';
 import { dropEntityJobs, enqueue, kickEntity } from '../hanet-sync';
-import { currentUser, requireRole } from '../middleware';
-import { areaColumnSql, cameraScopeSql, parseAreaFilter } from '../access';
+import { currentUser } from '../middleware';
+import { areaColumnSql, cameraScopeSql, managesArea, notFound, parseAreaFilter, requireGlobalHr, requireManager, resolveAreaFor } from '../access';
 import type { Row } from '../repo';
 import type { Camera } from '../../shared/types';
 
@@ -46,7 +46,7 @@ export function cameraRoutes(ctx: AppContext): Router {
     res.json({ cameras: rows.map(mapCamera) });
   });
 
-  r.post('/cameras', requireRole('hr'), (req, res) => {
+  r.post('/cameras', requireGlobalHr, (req, res) => {
     const b = req.body ?? {};
     const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
     const name = text(b.name);
@@ -54,17 +54,18 @@ export function cameraRoutes(ctx: AppContext): Router {
     if (!name || !deviceKey) throw new HttpError(400, 'Tên camera và mã thiết bị là bắt buộc');
     const placeId = b.placeId === undefined || b.placeId === '' || b.placeId === null ? null : Number(b.placeId);
     if (placeId !== null && (!Number.isInteger(placeId) || placeId <= 0)) throw new HttpError(400, 'Place ID không hợp lệ');
+    const areaId = resolveAreaFor(db, currentUser(req), b.areaId);
     if (db.prepare('SELECT 1 FROM cameras WHERE device_key = ?').get(deviceKey)) throw new HttpError(409, 'Mã thiết bị đã tồn tại');
     const id = newId('cam');
     db.prepare(
-      'INSERT INTO cameras(id, name, device_key, place_id, place_name, location, ip_address, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    ).run(id, name, deviceKey, placeId, text(b.placeName), text(b.location), text(b.ipAddress), new Date(ctx.now()).toISOString());
+      'INSERT INTO cameras(id, name, device_key, place_id, place_name, location, ip_address, area_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(id, name, deviceKey, placeId, text(b.placeName), text(b.location), text(b.ipAddress), areaId, new Date(ctx.now()).toISOString());
     res.json({ camera: mapCamera(db.prepare(`${CAMERA_SELECT} WHERE c.id = ?`).get(id) as Row) });
   });
 
   r.post(
     '/cameras/import',
-    requireRole('hr'),
+    requireGlobalHr,
     ah(async (_req, res) => {
       requireHanet();
       let added: number;
@@ -79,7 +80,7 @@ export function cameraRoutes(ctx: AppContext): Router {
 
   r.post(
     '/cameras/refresh-status',
-    requireRole('hr'),
+    requireGlobalHr,
     ah(async (_req, res) => {
       requireHanet();
       try {
@@ -91,17 +92,20 @@ export function cameraRoutes(ctx: AppContext): Router {
     }),
   );
 
-  r.put('/cameras/:id', requireRole('hr'), (req, res) => {
+  r.put('/cameras/:id', requireManager, (req, res) => {
+    const actor = currentUser(req);
     const row = db.prepare(`${CAMERA_SELECT} WHERE c.id = ?`).get(req.params.id) as Row | undefined;
-    if (!row) throw new HttpError(404, 'Không tìm thấy camera');
+    if (!row || !managesArea(actor, row.area_id ?? null)) throw notFound('camera');
     const b = req.body ?? {};
     const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
     const name = b.name === undefined ? row.name : text(b.name);
     if (!name) throw new HttpError(400, 'Tên camera là bắt buộc');
-    db.prepare('UPDATE cameras SET name = ?, location = ?, ip_address = ? WHERE id = ?').run(
+    const areaId = b.areaId === undefined ? (row.area_id ?? null) : resolveAreaFor(db, actor, b.areaId);
+    db.prepare('UPDATE cameras SET name = ?, location = ?, ip_address = ?, area_id = ? WHERE id = ?').run(
       name,
       b.location === undefined ? row.location : text(b.location),
       b.ipAddress === undefined ? row.ip_address : text(b.ipAddress),
+      areaId,
       row.id,
     );
     if (name !== row.name) {
@@ -111,10 +115,11 @@ export function cameraRoutes(ctx: AppContext): Router {
     res.json({ camera: mapCamera(db.prepare(`${CAMERA_SELECT} WHERE c.id = ?`).get(row.id) as Row) });
   });
 
-  r.delete('/cameras/:id', requireRole('hr'), (req, res) => {
-    const result = db.prepare('DELETE FROM cameras WHERE id = ?').run(req.params.id);
-    if (Number(result.changes) === 0) throw new HttpError(404, 'Không tìm thấy camera');
-    dropEntityJobs(db, 'camera', req.params.id);
+  r.delete('/cameras/:id', requireManager, (req, res) => {
+    const row = db.prepare('SELECT id, area_id FROM cameras WHERE id = ?').get(req.params.id) as { id: string; area_id: string | null } | undefined;
+    if (!row || !managesArea(currentUser(req), row.area_id)) throw notFound('camera');
+    db.prepare('DELETE FROM cameras WHERE id = ?').run(row.id);
+    dropEntityJobs(db, 'camera', row.id);
     res.json({ success: true });
   });
 

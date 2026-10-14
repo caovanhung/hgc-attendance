@@ -3,11 +3,12 @@ import type { AppContext } from '../context';
 import type { Db } from '../db';
 import { newId } from '../db';
 import { HttpError } from '../errors';
-import { currentUser, requireRole, requireSystemAdmin } from '../middleware';
+import { currentUser } from '../middleware';
 import { backupNow } from '../backup';
-import { areaColumnSql, departmentScopeSql, parseAreaFilter } from '../access';
+import { areaColumnSql, departmentScopeSql, managesArea, notFound, parseAreaFilter, requireManager, resolveAreaFor } from '../access';
+import type { AuthUser } from '../auth';
 import { dropEntityJobs, enqueue, kickEntity } from '../hanet-sync';
-import type { Row } from '../repo';
+import { getUser, type Row } from '../repo';
 import { CODE_RE } from '../validation';
 import { toVnDate } from '../vntime';
 import type { Department } from '../../shared/types';
@@ -39,12 +40,19 @@ function getDept(db: Db, id: string): Department | null {
   return row ? mapDept(row) : null;
 }
 
-function resolveManager(db: Db, managerId: unknown): string | null {
+function resolveManager(db: Db, actor: AuthUser, managerId: unknown): string | null {
   if (managerId === undefined || managerId === null || managerId === '') return null;
-  if (typeof managerId !== 'string' || !db.prepare('SELECT 1 FROM users WHERE id = ?').get(managerId)) {
-    throw new HttpError(400, 'Trưởng phòng được chọn không tồn tại');
-  }
-  return managerId;
+  const m = typeof managerId === 'string' ? getUser(db, managerId) : null;
+  if (!m) throw new HttpError(400, 'Trưởng phòng được chọn không tồn tại');
+  if (!managesArea(actor, m.areaId)) throw notFound('nhân sự');
+  return m.id;
+}
+
+/** Phòng ban trong phạm vi quản lý, không thì 404. */
+function manageableDept(db: Db, actor: AuthUser, id: string): Department {
+  const dept = getDept(db, id);
+  if (!dept || !managesArea(actor, dept.areaId)) throw notFound('phòng ban');
+  return dept;
 }
 
 /** Mã tự sinh khi HR không nhập: PB001, PB002... (tiếp sau số lớn nhất đang có). */
@@ -66,22 +74,25 @@ export function departmentRoutes(ctx: AppContext): Router {
     res.json({ departments: rows.map(mapDept) });
   });
 
-  r.post('/departments', requireRole('hr'), (req, res) => {
+  r.post('/departments', requireManager, (req, res) => {
+    const actor = currentUser(req);
     const b = req.body ?? {};
     const given = typeof b.code === 'string' ? b.code.trim().toUpperCase() : '';
     const code = given || nextDepartmentCode(db);
     const name = typeof b.name === 'string' ? b.name.trim() : '';
     if (!CODE_RE.test(code)) throw new HttpError(400, 'Mã phòng ban không hợp lệ');
     if (!name) throw new HttpError(400, 'Tên phòng ban là bắt buộc');
-    const managerId = resolveManager(db, b.managerId);
+    const areaId = resolveAreaFor(db, actor, b.areaId);
+    const managerId = resolveManager(db, actor, b.managerId);
     if (db.prepare('SELECT 1 FROM departments WHERE code = ?').get(code)) throw new HttpError(409, 'Mã phòng ban đã tồn tại');
     const id = newId('dep');
-    db.prepare('INSERT INTO departments(id, code, name, description, manager_id, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
+    db.prepare('INSERT INTO departments(id, code, name, description, manager_id, area_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
       id,
       code,
       name,
       typeof b.description === 'string' ? b.description.trim() : '',
       managerId,
+      areaId,
       toVnDate(ctx.now()),
     );
     enqueue(db, 'department', id, 'dept.create', { name, desc: typeof b.description === 'string' ? b.description.trim() : '' }, ctx.now());
@@ -89,21 +100,21 @@ export function departmentRoutes(ctx: AppContext): Router {
     res.json({ department: getDept(db, id) });
   });
 
-  r.put('/departments/:id', requireRole('hr'), (req, res) => {
-    const dept = getDept(db, req.params.id);
-    if (!dept) throw new HttpError(404, 'Không tìm thấy phòng ban');
+  r.put('/departments/:id', requireManager, (req, res) => {
+    const actor = currentUser(req);
+    const dept = manageableDept(db, actor, req.params.id);
     const b = req.body ?? {};
-    if (b.name !== undefined) {
-      const name = typeof b.name === 'string' ? b.name.trim() : '';
-      if (!name) throw new HttpError(400, 'Tên phòng ban là bắt buộc');
-      db.prepare('UPDATE departments SET name = ? WHERE id = ?').run(name, dept.id);
-    }
+    // Kiểm tra hết trước khi ghi: bị từ chối thì không đổi gì
+    const name = b.name === undefined ? undefined : typeof b.name === 'string' ? b.name.trim() : '';
+    if (name === '') throw new HttpError(400, 'Tên phòng ban là bắt buộc');
+    const areaId = b.areaId === undefined ? undefined : resolveAreaFor(db, actor, b.areaId);
+    const managerId = b.managerId === undefined ? undefined : resolveManager(db, actor, b.managerId);
+    if (name !== undefined) db.prepare('UPDATE departments SET name = ? WHERE id = ?').run(name, dept.id);
     if (b.description !== undefined) {
       db.prepare('UPDATE departments SET description = ? WHERE id = ?').run(typeof b.description === 'string' ? b.description.trim() : '', dept.id);
     }
-    if (b.managerId !== undefined) {
-      db.prepare('UPDATE departments SET manager_id = ? WHERE id = ?').run(resolveManager(db, b.managerId), dept.id);
-    }
+    if (areaId !== undefined) db.prepare('UPDATE departments SET area_id = ? WHERE id = ?').run(areaId, dept.id);
+    if (managerId !== undefined) db.prepare('UPDATE departments SET manager_id = ? WHERE id = ?').run(managerId, dept.id);
     const after = getDept(db, dept.id)!;
     if (after.name !== dept.name || after.description !== dept.description) {
       enqueue(db, 'department', dept.id, 'dept.update', { name: after.name, desc: after.description }, ctx.now());
@@ -112,10 +123,9 @@ export function departmentRoutes(ctx: AppContext): Router {
     res.json({ department: getDept(db, dept.id) });
   });
 
-  r.delete('/departments/:id', requireSystemAdmin, (req, res) => {
+  r.delete('/departments/:id', requireManager, (req, res) => {
     const actor = currentUser(req);
-    const dept = getDept(db, req.params.id);
-    if (!dept) throw new HttpError(404, 'Không tìm thấy phòng ban');
+    const dept = manageableDept(db, actor, req.params.id);
     const backup = backupNow(db, ctx.config.backupDir, 'pre-delete', ctx.now());
     const hanetDeptId = (db.prepare('SELECT hanet_department_id FROM departments WHERE id = ?').get(dept.id) as { hanet_department_id: string | null })
       .hanet_department_id;

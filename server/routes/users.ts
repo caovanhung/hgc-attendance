@@ -1,24 +1,26 @@
 import { Router } from 'express';
 import type { AppContext } from '../context';
 import type { Db } from '../db';
-import { newId } from '../db';
+import { newId, tx } from '../db';
 import { HttpError, ah } from '../errors';
-import { currentUser, requireRole, requireSystemAdmin } from '../middleware';
+import { currentUser } from '../middleware';
 import { backupNow } from '../backup';
 import { USER_SELECT, getUser, mapUser, type Row } from '../repo';
-import { deleteUserSessions, generateTempPassword, hashPassword, scopeFor, scopeWhere } from '../auth';
+import { deleteUserSessions, generateTempPassword, hashPassword, scopeFor, scopeWhere, type AuthUser } from '../auth';
 import { toVnDate } from '../vntime';
 import { NOT_SYSTEM_ADMIN, SYSTEM_ADMIN_CODE } from '../bootstrap';
-import { areaFilterSql, parseAreaFilter } from '../access';
+import {
+  areaFilterSql, canDeleteUser, deptAreaId, deviceAreaId, isGlobalHr, isSystemAdmin, managesArea, notFound, parseAreaFilter, requireManager,
+} from '../access';
 import { deleteSighting, getSighting, listSightings, SIGHTING_TTL_MS } from '../sightings';
 import { registerFace } from '../hanet-face';
 import { dropEntityJobs, enqueue, kickAll, kickEntity } from '../hanet-sync';
 import { fetchAllPersons, hanetAliases, IMPORT_MAX, importPersons, unlinkedPersons } from '../hanet-import';
 import { getPlaceIds, reconcileEnabled } from '../hanet';
 import { CODE_ERROR, CODE_RE } from '../validation';
-import type { FaceCandidates, FaceResult, UserRole } from '../../shared/types';
+import type { FaceCandidates, FaceResult, User, UserRole } from '../../shared/types';
 
-const ROLES: UserRole[] = ['hr', 'dept_manager', 'employee'];
+const ROLES: UserRole[] = ['hr', 'area_admin', 'dept_manager', 'employee'];
 export { CODE_RE } from '../validation';
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' ? v.trim() : undefined);
@@ -43,11 +45,56 @@ function resolveDepartment(db: Db, departmentId: unknown): string | null {
   return departmentId;
 }
 
+/** Nhân sự người gọi được quản lý (chính mình luôn được). Ngoài phạm vi, hoặc tài khoản ADMIN với người khác ADMIN ⇒ 404. */
+function manageableUser(db: Db, actor: AuthUser, id: string): User {
+  const u = getUser(db, id);
+  if (!u || (u.code === SYSTEM_ADMIN_CODE && !isSystemAdmin(actor))) throw notFound('nhân sự');
+  if (u.id !== actor.id && !managesArea(actor, u.areaId)) throw notFound('nhân sự');
+  return u;
+}
+
+/** Chỉ ADMIN sửa người có vai trò hr; quản trị khu không sửa quản trị khu khác. Tự sửa mình luôn qua bước này. */
+function assertCanEdit(actor: AuthUser, target: User): void {
+  if (target.id === actor.id) return;
+  if (target.role === 'hr' && !isSystemAdmin(actor)) throw new HttpError(403, 'Chỉ tài khoản ADMIN được sửa tài khoản HR toàn hệ thống');
+  if (actor.role === 'area_admin' && target.role === 'area_admin') throw new HttpError(403, 'Bạn không có quyền sửa tài khoản quản trị khu vực khác');
+}
+
+function assertRoleAllowed(actor: AuthUser, role: unknown): asserts role is UserRole {
+  if (!ROLES.includes(role as UserRole)) throw new HttpError(400, 'Vai trò không hợp lệ');
+  if (role === 'hr' && !isSystemAdmin(actor)) throw new HttpError(403, 'Chỉ tài khoản ADMIN được cấp vai trò HR toàn hệ thống');
+  if (role === 'area_admin' && !isGlobalHr(actor)) throw new HttpError(403, 'Chỉ HR toàn hệ thống được cấp quyền quản trị khu vực');
+}
+
+/** Phòng ban cho nhân sự: phải thuộc khu người gọi quản lý; quản trị khu bắt buộc chọn. */
+function resolveDepartmentFor(db: Db, actor: AuthUser, departmentId: unknown): string | null {
+  const id = resolveDepartment(db, departmentId);
+  if (id === null) {
+    if (actor.role === 'area_admin') throw new HttpError(400, 'Hãy chọn phòng ban thuộc khu bạn quản lý');
+    return null;
+  }
+  if (!managesArea(actor, deptAreaId(db, id) ?? null)) throw notFound('phòng ban');
+  return id;
+}
+
+function parseAdminAreaIds(db: Db, raw: unknown): string[] {
+  const ids = Array.isArray(raw) ? [...new Set(raw.map(String))] : [];
+  if (ids.length === 0) throw new HttpError(400, 'Hãy chọn ít nhất một khu cho quản trị khu vực');
+  for (const id of ids) if (!db.prepare('SELECT 1 FROM areas WHERE id = ?').get(id)) throw new HttpError(400, 'Khu vực không tồn tại');
+  return ids;
+}
+
+function setAdminAreas(db: Db, userId: string, areaIds: string[]): void {
+  db.prepare('DELETE FROM admin_areas WHERE user_id = ?').run(userId);
+  const ins = db.prepare('INSERT INTO admin_areas(user_id, area_id) VALUES (?, ?)');
+  for (const id of areaIds) ins.run(userId, id);
+}
+
 /** Ảnh để đăng ký FaceID: lượt chụp chưa khớp (sightingId) hoặc lượt quẹt của chính người đó trong 24 giờ (detectionId). */
-function resolveFaceImage(db: Db, userId: string | null, b: Record<string, unknown>, now: number): { url: string; sightingId: number | null } | null {
+function resolveFaceImage(db: Db, actor: AuthUser, userId: string | null, b: Record<string, unknown>, now: number): { url: string; sightingId: number | null } | null {
   if (b.sightingId !== undefined && b.sightingId !== null && b.sightingId !== '') {
     const s = getSighting(db, Number(b.sightingId));
-    if (!s) throw new HttpError(404, 'Không tìm thấy lượt chụp này, hãy chọn lượt mới hơn');
+    if (!s || !managesArea(actor, deviceAreaId(db, s.deviceId))) throw new HttpError(404, 'Không tìm thấy lượt chụp này, hãy chọn lượt mới hơn');
     return { url: s.imageUrl, sightingId: s.id };
   }
   if (b.detectionId !== undefined && b.detectionId !== null && userId) {
@@ -77,7 +124,7 @@ export function userRoutes(ctx: AppContext): Router {
 
   r.post(
     '/users/import',
-    requireRole('hr'),
+    requireManager,
     ah(async (req, res) => {
       const b = req.body ?? {};
       const wanted = new Set(
@@ -85,7 +132,7 @@ export function userRoutes(ctx: AppContext): Router {
       );
       if (wanted.size === 0) throw new HttpError(400, 'Chưa chọn người nào để nhập');
       if (wanted.size > IMPORT_MAX) throw new HttpError(400, `Mỗi lần nhập tối đa ${IMPORT_MAX} người`);
-      const departmentId = resolveDepartment(db, b.departmentId);
+      const departmentId = resolveDepartmentFor(db, currentUser(req), b.departmentId);
       const placeId = getPlaceIds(db)[0];
       if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, 'Chưa cấu hình kết nối Camera AI (Client ID, Refresh Token, địa điểm)');
       let all;
@@ -106,8 +153,9 @@ export function userRoutes(ctx: AppContext): Router {
 
   r.post(
     '/users',
-    requireRole('hr'),
+    requireManager,
     ah(async (req, res) => {
+      const actor = currentUser(req);
       const b = req.body ?? {};
       const code = (str(b.code) ?? '').toUpperCase();
       const name = str(b.name) ?? '';
@@ -115,11 +163,12 @@ export function userRoutes(ctx: AppContext): Router {
       // Mã ADMIN mang quyền xóa dữ liệu: chỉ hệ thống được tạo, kể cả khi database chưa có tài khoản này.
       if (code === SYSTEM_ADMIN_CODE) throw new HttpError(400, 'Mã ADMIN dành riêng cho tài khoản quản trị hệ thống');
       if (!name) throw new HttpError(400, 'Họ tên là bắt buộc');
-      const role: UserRole = b.role === undefined ? 'employee' : b.role;
-      if (!ROLES.includes(role)) throw new HttpError(400, 'Vai trò không hợp lệ');
-      const departmentId = resolveDepartment(db, b.departmentId);
+      const role = b.role === undefined ? 'employee' : b.role;
+      assertRoleAllowed(actor, role);
+      const departmentId = resolveDepartmentFor(db, actor, b.departmentId);
+      const adminAreaIds = role === 'area_admin' ? parseAdminAreaIds(db, b.adminAreaIds) : [];
       if (db.prepare('SELECT 1 FROM users WHERE code = ?').get(code)) throw new HttpError(409, 'Mã nhân viên đã tồn tại');
-      const image = resolveFaceImage(db, null, b, ctx.now());
+      const image = resolveFaceImage(db, actor, null, b, ctx.now());
       const hanetPersonId = str(b.hanetPersonId) || null;
       assertPersonIdFree(db, hanetPersonId, null);
 
@@ -144,6 +193,7 @@ export function userRoutes(ctx: AppContext): Router {
         hashPassword(tempPassword),
         toVnDate(ctx.now()),
       );
+      if (adminAreaIds.length) setAdminAreas(db, id, adminAreaIds);
       // Việc gán aliasID phải đứng trước việc phòng ban/thông tin của người này
       if (hanetPersonId) enqueueAlias(db, id, hanetPersonId, code, ctx.now());
       if (hanetPersonId && departmentId) {
@@ -159,15 +209,19 @@ export function userRoutes(ctx: AppContext): Router {
     }),
   );
 
-  r.put('/users/:id', requireRole('hr'), (req, res) => {
+  r.put('/users/:id', requireManager, (req, res) => {
     const actor = currentUser(req);
-    const target = getUser(db, req.params.id);
-    if (!target) throw new HttpError(404, 'Không tìm thấy nhân sự');
+    const target = manageableUser(db, actor, req.params.id);
+    assertCanEdit(actor, target);
     const b = req.body ?? {};
     const changesRole = b.role !== undefined && b.role !== target.role;
     const changesStatus = b.status !== undefined && b.status !== target.status;
+    const changesDept = b.departmentId !== undefined && (b.departmentId || null) !== target.departmentId;
     if (target.id === actor.id && (changesRole || changesStatus)) {
       throw new HttpError(400, 'Không thể tự đổi vai trò hoặc trạng thái của chính mình');
+    }
+    if (target.id === actor.id && actor.role === 'area_admin' && changesDept) {
+      throw new HttpError(400, 'Không thể tự đổi phòng ban của chính mình');
     }
 
     const sets: string[] = [];
@@ -190,17 +244,28 @@ export function userRoutes(ctx: AppContext): Router {
       set('hanet_person_id', pid);
       set('face_registered', pid ? 1 : 0);
     }
-    if (b.role !== undefined) {
-      if (!ROLES.includes(b.role)) throw new HttpError(400, 'Vai trò không hợp lệ');
+    if (changesRole) {
+      assertRoleAllowed(actor, b.role);
       set('role', b.role);
     }
     if (b.status !== undefined) {
       if (b.status !== 'active' && b.status !== 'inactive') throw new HttpError(400, 'Trạng thái không hợp lệ');
       set('status', b.status);
     }
-    if (b.departmentId !== undefined) set('department_id', resolveDepartment(db, b.departmentId));
+    if (changesDept) set('department_id', resolveDepartmentFor(db, actor, b.departmentId));
+    const newRole: UserRole = changesRole ? b.role : target.role;
+    let adminAreas: string[] | null = null;
+    if (newRole === 'area_admin' && (changesRole || b.adminAreaIds !== undefined)) {
+      if (!isGlobalHr(actor)) throw new HttpError(403, 'Chỉ HR toàn hệ thống được cấp quyền quản trị khu vực');
+      adminAreas = parseAdminAreaIds(db, b.adminAreaIds);
+    } else if (changesRole && target.role === 'area_admin') {
+      adminAreas = [];
+    }
 
-    if (sets.length) db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...params, target.id);
+    tx(db, () => {
+      if (sets.length) db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...params, target.id);
+      if (adminAreas !== null) setAdminAreas(db, target.id, adminAreas);
+    });
     if (b.status === 'inactive' && target.status !== 'inactive') deleteUserSessions(db, target.id);
     const after = getUser(db, target.id)!;
     const now = ctx.now();
@@ -222,10 +287,10 @@ export function userRoutes(ctx: AppContext): Router {
     res.json({ user: getUser(db, target.id) });
   });
 
-  r.post('/users/:id/reset-password', requireRole('hr'), (req, res) => {
+  r.post('/users/:id/reset-password', requireManager, (req, res) => {
     const actor = currentUser(req);
-    const target = getUser(db, req.params.id);
-    if (!target) throw new HttpError(404, 'Không tìm thấy nhân sự');
+    const target = manageableUser(db, actor, req.params.id);
+    assertCanEdit(actor, target);
     const tempPassword = generateTempPassword();
     db.prepare('UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?').run(hashPassword(tempPassword), target.id);
     deleteUserSessions(db, target.id);
@@ -235,11 +300,11 @@ export function userRoutes(ctx: AppContext): Router {
 
   r.post(
     '/users/:id/face',
-    requireRole('hr'),
+    requireManager,
     ah(async (req, res) => {
-      const target = getUser(db, req.params.id);
-      if (!target) throw new HttpError(404, 'Không tìm thấy nhân sự');
-      const image = resolveFaceImage(db, target.id, req.body ?? {}, ctx.now());
+      const actor = currentUser(req);
+      const target = manageableUser(db, actor, req.params.id);
+      const image = resolveFaceImage(db, actor, target.id, req.body ?? {}, ctx.now());
       if (!image) throw new HttpError(400, 'Hãy chọn một lượt camera chụp');
       const face = await registerFace(deps, target.id, image.url);
       if (face.ok && image.sightingId !== null) deleteSighting(db, image.sightingId);
@@ -248,9 +313,9 @@ export function userRoutes(ctx: AppContext): Router {
     }),
   );
 
-  r.get('/users/:id/face-candidates', requireRole('hr'), (req, res) => {
-    const target = getUser(db, req.params.id);
-    if (!target) throw new HttpError(404, 'Không tìm thấy nhân sự');
+  r.get('/users/:id/face-candidates', requireManager, (req, res) => {
+    const actor = currentUser(req);
+    const target = manageableUser(db, actor, req.params.id);
     const now = ctx.now();
     const rows = db
       .prepare(
@@ -260,16 +325,16 @@ export function userRoutes(ctx: AppContext): Router {
       .all(target.id, now - SIGHTING_TTL_MS) as Row[];
     const body: FaceCandidates = {
       detections: rows.map((d) => ({ id: d.id, ts: d.ts, imageUrl: d.image_url, deviceName: d.device_name ?? d.device_id })),
-      strangers: listSightings(db, now, 'stranger'),
+      strangers: listSightings(db, now, 'stranger').filter((s) => managesArea(actor, deviceAreaId(db, s.deviceId))),
     };
     res.json(body);
   });
 
-  r.delete('/users/:id', requireSystemAdmin, (req, res) => {
+  r.delete('/users/:id', requireManager, (req, res) => {
     const actor = currentUser(req);
-    const target = getUser(db, req.params.id);
-    if (!target) throw new HttpError(404, 'Không tìm thấy nhân sự');
+    const target = manageableUser(db, actor, req.params.id);
     if (target.id === actor.id) throw new HttpError(400, 'Không thể tự xóa tài khoản đang đăng nhập');
+    if (!canDeleteUser(actor, target)) throw new HttpError(403, 'Bạn không có quyền xóa tài khoản này');
     const backup = backupNow(db, ctx.config.backupDir, 'pre-delete', ctx.now());
     if (target.faceRegistered || target.hanetPersonId) {
       enqueue(db, 'user', target.id, 'user.remove', { code: target.code, name: target.name, personId: target.hanetPersonId }, ctx.now());

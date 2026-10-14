@@ -169,14 +169,12 @@ test('danh sách nhân sự không gồm tài khoản hệ thống ADMIN', async
   }
 });
 
-test('chỉ tài khoản ADMIN xóa được nhân sự; xóa kèm lịch sử và có sao lưu trước', async () => {
+test('xóa nhân sự kèm lịch sử, có sao lưu trước; trưởng phòng không xóa được', async () => {
   const { app, ids } = await setup();
   try {
     seedUser(app.db, { code: 'ADMIN', role: 'hr' });
     addDetection(app.db, ids.nv1, Date.now());
-    const hr = await loginAs(app, 'HR01');
     const tp = await loginAs(app, 'TP01');
-    assert.equal((await hr.del(`/api/users/${ids.nv1}`)).status, 403);
     assert.equal((await tp.del(`/api/users/${ids.nv1}`)).status, 403);
 
     const admin = await loginAs(app, 'ADMIN');
@@ -201,12 +199,12 @@ test('chỉ tài khoản ADMIN xóa được nhân sự; xóa kèm lịch sử v
   }
 });
 
-test('chỉ tài khoản ADMIN xóa được phòng ban; thành viên chuyển về chưa có phòng', async () => {
+test('xóa phòng ban: thành viên chuyển về chưa có phòng; trưởng phòng không xóa được', async () => {
   const { app, ids, kt } = await setup();
   try {
     seedUser(app.db, { code: 'ADMIN', role: 'hr' });
-    const hr = await loginAs(app, 'HR01');
-    assert.equal((await hr.del(`/api/departments/${kt}`)).status, 403);
+    const tp = await loginAs(app, 'TP01');
+    assert.equal((await tp.del(`/api/departments/${kt}`)).status, 403);
 
     const admin = await loginAs(app, 'ADMIN');
     const r = await admin.del(`/api/departments/${kt}`);

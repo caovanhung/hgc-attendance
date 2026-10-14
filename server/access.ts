@@ -104,3 +104,13 @@ export function canDeleteUser(actor: AuthUser, target: User): boolean {
   if (isGlobalHr(actor)) return true;
   return actor.role === 'area_admin' && (target.role === 'employee' || target.role === 'dept_manager') && managesArea(actor, target.areaId);
 }
+
+/** Khu cho phòng ban/camera: phải tồn tại và trong phạm vi (không thì 404); quản trị khu không được để "chưa gán khu". */
+export function resolveAreaFor(db: Db, u: AuthUser, raw: unknown): string | null {
+  if (raw === undefined || raw === null || raw === '') {
+    if (u.role === 'area_admin') throw new HttpError(400, 'Hãy chọn khu vực');
+    return null;
+  }
+  if (typeof raw !== 'string' || !db.prepare('SELECT 1 FROM areas WHERE id = ?').get(raw) || !managesArea(u, raw)) throw notFound('khu vực');
+  return raw;
+}
