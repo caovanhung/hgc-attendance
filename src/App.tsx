@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { Navbar } from './components/Navbar';
 import { StatsCards } from './components/StatsCards';
@@ -11,6 +11,9 @@ import { AttendanceTable } from './components/AttendanceTable';
 import { CamerasTab } from './components/CamerasTab';
 import { DepartmentsTab } from './components/DepartmentsTab';
 import { EmployeesTab } from './components/EmployeesTab';
+import { AreasTab } from './components/AreasTab';
+import { AreaSelect } from './components/AreaSelect';
+import { areaParam, loadArea, saveArea } from './area';
 import { RequestsTab } from './components/RequestsTab';
 import { HanetConfigTab } from './components/HanetConfigTab';
 import { HanetSimulatorModal } from './components/HanetSimulatorModal';
@@ -33,6 +36,7 @@ export default function App() {
   const [authState, setAuthState] = useState<AuthState>('loading');
   const [me, setMe] = useState<MeResponse | null>(null);
   const [changingPassword, setChangingPassword] = useState(false);
+  const [area, setAreaState] = useState(loadArea);
 
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -85,17 +89,29 @@ export default function App() {
     return () => window.removeEventListener(AUTH_EVENT, onAuth);
   }, []);
 
+  const setArea = (v: string) => {
+    setAreaState(v);
+    saveArea(v);
+  };
+  // Khu đã lưu không còn trong phạm vi (bị gỡ quyền, khu bị xóa) thì về "tất cả"
+  const activeArea = useMemo(() => {
+    if (!me || area === 'all') return 'all';
+    if (area === 'none') return me.user.role === 'hr' ? 'none' : 'all';
+    return me.areas.some((a) => a.id === area) ? area : 'all';
+  }, [me, area]);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const q = new URLSearchParams({ date: selectedDate || vnToday(), departmentId: selectedDept, search: searchQuery });
+      const ap = areaParam(activeArea);
+      const q = new URLSearchParams({ date: selectedDate || vnToday(), departmentId: selectedDept, search: searchQuery, area: ap });
       const [u, d, c, a, r, s] = await Promise.all([
-        api<{ users: User[] }>('/api/users'),
-        api<{ departments: Department[] }>('/api/departments'),
-        api<{ cameras: Camera[] }>('/api/cameras'),
+        api<{ users: User[] }>(`/api/users?area=${ap}`),
+        api<{ departments: Department[] }>(`/api/departments?area=${ap}`),
+        api<{ cameras: Camera[] }>(`/api/cameras?area=${ap}`),
         api<{ records: AttendanceDay[] }>(`/api/attendance?${q}`),
-        api<{ requests: AttendanceRequest[] }>('/api/requests'),
-        api<StatsData>('/api/stats'),
+        api<{ requests: AttendanceRequest[] }>(`/api/requests?area=${ap}`),
+        api<StatsData>(`/api/stats?area=${ap}`),
       ]);
       setUsers(u.users);
       setDepartments(d.departments);
@@ -110,7 +126,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [selectedDate, selectedDept, searchQuery]);
+  }, [selectedDate, selectedDept, searchQuery, activeArea]);
 
   useEffect(() => {
     if (authState === 'ready') fetchData();
@@ -164,6 +180,7 @@ export default function App() {
         onLogout={logout}
         activeTab={tab}
         setActiveTab={setActiveTab}
+        extra={<AreaSelect me={me} value={activeArea} onChange={setArea} />}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -197,10 +214,13 @@ export default function App() {
           />
         )}
         {tab === 'requests' && <RequestsTab requests={requests} currentUser={currentUser} onRefresh={fetchData} />}
-        {tab === 'cameras' && <CamerasTab cameras={cameras} currentUser={currentUser} onRefresh={fetchData} />}
-        {tab === 'departments' && <DepartmentsTab departments={departments} users={users} currentUser={currentUser} onRefresh={refreshAll} />}
-        {tab === 'employees' && <EmployeesTab users={users} departments={departments} currentUser={currentUser} onRefresh={refreshAll} />}
-        {tab === 'hanet_config' && <HanetConfigTab onRefresh={fetchData} />}
+        {tab === 'cameras' && <CamerasTab cameras={cameras} currentUser={currentUser} areas={me.areas} onRefresh={fetchData} />}
+        {tab === 'departments' && <DepartmentsTab departments={departments} users={users} currentUser={currentUser} areas={me.areas} onRefresh={refreshAll} />}
+        {tab === 'employees' && (
+          <EmployeesTab users={users} departments={departments} currentUser={currentUser} isSystemAdmin={me.isSystemAdmin} areas={me.areas} onRefresh={refreshAll} />
+        )}
+        {tab === 'areas' && <AreasTab onChanged={refreshAll} />}
+        {tab === 'hanet_config' && <HanetConfigTab isSystemAdmin={me.isSystemAdmin} onRefresh={fetchData} />}
       </main>
 
       {me.simulatorEnabled && currentUser.role === 'hr' && (

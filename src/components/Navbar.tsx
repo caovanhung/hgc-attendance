@@ -12,6 +12,7 @@ interface NavbarProps {
   onLogout: () => void;
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  extra?: React.ReactNode;
 }
 
 const ROLE_BADGE: Record<User['role'], string> = {
@@ -30,13 +31,16 @@ export const Navbar: React.FC<NavbarProps> = ({
   onLogout,
   activeTab,
   setActiveTab,
+  extra,
 }) => {
+  const isManager = currentUser.role === 'hr' || currentUser.role === 'area_admin';
   const tabs: { id: string; label: string; visible: boolean }[] = [
     { id: 'attendance', label: '📊 Bảng công', visible: true },
     { id: 'requests', label: '📝 Đơn giải trình / Xin phép', visible: true },
     { id: 'cameras', label: `📹 Camera AI (${totalCameraCount})`, visible: currentUser.role !== 'employee' },
     { id: 'departments', label: '🏢 Phòng ban', visible: currentUser.role !== 'employee' },
-    { id: 'employees', label: '👤 Nhân sự', visible: currentUser.role === 'hr' },
+    { id: 'employees', label: '👤 Nhân sự', visible: isManager },
+    { id: 'areas', label: '🗺️ Khu vực', visible: currentUser.role === 'hr' },
     { id: 'hanet_config', label: '⚡ Cấu hình', visible: currentUser.role === 'hr' },
   ];
 
@@ -52,6 +56,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {extra}
             {showSimulator && (
               <button
                 onClick={onOpenSimulator}

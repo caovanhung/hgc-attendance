@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Building, Pencil, Plus, Shield, Trash2, Users } from 'lucide-react';
-import type { Department, User } from '../types';
+import type { Area, Department, User } from '../types';
 import { api, errorMessage } from '../api';
-import { ROLE_LABEL, SYSTEM_ADMIN_CODE } from '../format';
+import { ROLE_LABEL } from '../format';
 import { ConfirmDeleteDialog, Field, Modal, inputCls, primaryBtn, secondaryBtn } from './ui';
 import { SyncBadge, SyncRetryButton } from './SyncBadge';
 
@@ -10,16 +10,16 @@ interface DepartmentsTabProps {
   departments: Department[];
   users: User[];
   currentUser: User;
+  areas: Area[];
   onRefresh: () => void;
 }
 
-export const DepartmentsTab: React.FC<DepartmentsTabProps> = ({ departments, users, currentUser, onRefresh }) => {
-  const isHR = currentUser.role === 'hr';
+export const DepartmentsTab: React.FC<DepartmentsTabProps> = ({ departments, users, currentUser, areas, onRefresh }) => {
+  const isManager = currentUser.role === 'hr' || currentUser.role === 'area_admin';
   const [selectedId, setSelectedId] = useState('');
-  const [form, setForm] = useState<{ id?: string; code: string; name: string; description: string; managerId: string } | null>(null);
+  const [form, setForm] = useState<{ id?: string; code: string; name: string; description: string; managerId: string; areaId: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<Department | null>(null);
-  const isSystemAdmin = currentUser.code === SYSTEM_ADMIN_CODE;
 
   const active = departments.find((d) => d.id === selectedId) ?? departments[0];
   const members = users.filter((u) => u.departmentId === active?.id);
@@ -30,9 +30,9 @@ export const DepartmentsTab: React.FC<DepartmentsTabProps> = ({ departments, use
     setError(null);
     try {
       if (form.id) {
-        await api(`/api/departments/${form.id}`, { method: 'PUT', body: { name: form.name, description: form.description, managerId: form.managerId || null } });
+        await api(`/api/departments/${form.id}`, { method: 'PUT', body: { name: form.name, description: form.description, managerId: form.managerId || null, areaId: form.areaId || null } });
       } else {
-        await api('/api/departments', { method: 'POST', body: { code: form.code, name: form.name, description: form.description, managerId: form.managerId || null } });
+        await api('/api/departments', { method: 'POST', body: { code: form.code, name: form.name, description: form.description, managerId: form.managerId || null, areaId: form.areaId || null } });
       }
       setForm(null);
       onRefresh();
@@ -48,8 +48,8 @@ export const DepartmentsTab: React.FC<DepartmentsTabProps> = ({ departments, use
           <h2 className="text-base font-bold text-slate-900">Phòng ban</h2>
           <p className="text-xs text-slate-500 mt-0.5">Trưởng phòng chỉ xem và duyệt dữ liệu của nhân viên trong phòng mình.</p>
         </div>
-        {isHR && (
-          <button onClick={() => setForm({ code: '', name: '', description: '', managerId: '' })} className={primaryBtn}>
+        {isManager && (
+          <button onClick={() => setForm({ code: '', name: '', description: '', managerId: '', areaId: currentUser.role === 'area_admin' ? (areas[0]?.id ?? '') : '' })} className={primaryBtn}>
             <Plus className="w-4 h-4" /> Thêm phòng ban
           </button>
         )}
@@ -77,6 +77,7 @@ export const DepartmentsTab: React.FC<DepartmentsTabProps> = ({ departments, use
                 </span>
               </div>
               <h3 className="font-bold text-sm text-slate-900">{d.name}</h3>
+              <p className="text-[11px] text-violet-700">{d.areaName ?? 'Chưa gán khu'}</p>
               <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">{d.description || 'Chưa có mô tả'}</p>
               <div className="mt-2">
                 <SyncBadge status={d.hanetSyncStatus} error={d.hanetSyncError} />
@@ -94,16 +95,16 @@ export const DepartmentsTab: React.FC<DepartmentsTabProps> = ({ departments, use
           <div className="p-4 border-b border-slate-100 flex items-center justify-between">
             <h3 className="font-bold text-sm text-slate-900">Nhân sự: {active.name}</h3>
             <div className="flex gap-2">
-              {isHR && active.hanetSyncStatus === 'error' && <SyncRetryButton entityType="department" entityId={active.id} onDone={onRefresh} />}
-              {isHR && (
+              {isManager && active.hanetSyncStatus === 'error' && <SyncRetryButton entityType="department" entityId={active.id} onDone={onRefresh} />}
+              {isManager && (
                 <button
-                  onClick={() => setForm({ id: active.id, code: active.code, name: active.name, description: active.description, managerId: active.managerId ?? '' })}
+                  onClick={() => setForm({ id: active.id, code: active.code, name: active.name, description: active.description, managerId: active.managerId ?? '', areaId: active.areaId ?? '' })}
                   className={`${secondaryBtn} py-1.5`}
                 >
                   <Pencil className="w-3.5 h-3.5" /> Sửa phòng ban
                 </button>
               )}
-              {isSystemAdmin && (
+              {isManager && (
                 <button onClick={() => setDeleting(active)} className={`${secondaryBtn} py-1.5 text-rose-600 hover:bg-rose-50 hover:border-rose-200`}>
                   <Trash2 className="w-3.5 h-3.5" /> Xóa phòng ban
                 </button>
@@ -175,6 +176,16 @@ export const DepartmentsTab: React.FC<DepartmentsTabProps> = ({ departments, use
             </Field>
             <Field label="Mô tả">
               <textarea rows={2} className={inputCls} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+            </Field>
+            <Field label="Khu vực">
+              <select className={inputCls} value={form.areaId} onChange={(e) => setForm({ ...form, areaId: e.target.value })} required={currentUser.role === 'area_admin'}>
+                {currentUser.role === 'hr' && <option value="">— Chưa gán khu —</option>}
+                {areas.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
             </Field>
             <Field label="Trưởng phòng" hint="Nhớ đặt vai trò Trưởng phòng và phòng ban cho người này ở tab Nhân sự">
               <select className={inputCls} value={form.managerId} onChange={(e) => setForm({ ...form, managerId: e.target.value })}>

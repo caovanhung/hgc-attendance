@@ -23,7 +23,13 @@ export const StatsCards: React.FC<StatsCardsProps> = ({ stats, currentUser, onOp
   const [open, setOpen] = useState<{ type: StatsDetailType; label: string } | null>(null);
   if (!stats) return null;
   const scopeLabel =
-    currentUser.role === 'hr' ? 'Toàn công ty' : currentUser.role === 'dept_manager' ? `Phòng ${currentUser.departmentName ?? ''}` : 'Cá nhân';
+    currentUser.role === 'hr'
+      ? 'Toàn công ty'
+      : currentUser.role === 'area_admin'
+        ? 'Khu bạn quản lý'
+        : currentUser.role === 'dept_manager'
+          ? `Phòng ${currentUser.departmentName ?? ''}`
+          : 'Cá nhân';
   const cards: Card[] = [
     { label: 'Nhân sự đang làm', value: stats.totalEmployees, icon: Users, tone: 'bg-slate-100 text-slate-700', detail: 'total' },
     { label: 'Có mặt hôm nay', value: stats.presentCount, icon: CheckCircle, tone: 'bg-emerald-100 text-emerald-700', detail: 'present' },

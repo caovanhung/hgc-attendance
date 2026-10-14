@@ -11,10 +11,11 @@ import { WebhookLogsCard } from './config/WebhookLogsCard';
 import { DangerZoneCard } from './config/DangerZoneCard';
 
 interface HanetConfigTabProps {
+  isSystemAdmin: boolean;
   onRefresh: () => void;
 }
 
-export const HanetConfigTab: React.FC<HanetConfigTabProps> = ({ onRefresh }) => {
+export const HanetConfigTab: React.FC<HanetConfigTabProps> = ({ isSystemAdmin, onRefresh }) => {
   const [config, setConfig] = useState<HanetConfigView | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,16 +30,25 @@ export const HanetConfigTab: React.FC<HanetConfigTabProps> = ({ onRefresh }) => 
 
   return (
     <div className="space-y-6">
-      <WebhookCard config={config} onChange={setConfig} />
+      {!isSystemAdmin && (
+        <p className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-xl p-3">
+          Chỉ tài khoản ADMIN được thay đổi cấu hình kỹ thuật (kết nối Camera AI, webhook, đồng bộ, sao lưu). Bạn đang xem ở chế độ chỉ đọc; riêng giờ làm việc bạn vẫn sửa được.
+        </p>
+      )}
+      <fieldset disabled={!isSystemAdmin} className="contents">
+        <WebhookCard config={config} onChange={setConfig} />
+      </fieldset>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <HanetCredentialsCard config={config} onChange={setConfig} onReconciled={onRefresh} />
-        <HanetConnectCard />
-        <SyncStatusCard />
+        <fieldset disabled={!isSystemAdmin} className="contents">
+          <HanetCredentialsCard config={config} onChange={setConfig} onReconciled={onRefresh} />
+          <HanetConnectCard />
+          <SyncStatusCard />
+        </fieldset>
         <WorkSettingsCard onRecomputed={onRefresh} />
-        <BackupsCard />
+        <BackupsCard canWrite={isSystemAdmin} />
         <WebhookLogsCard />
       </div>
-      <DangerZoneCard />
+      {isSystemAdmin && <DangerZoneCard />}
     </div>
   );
 };

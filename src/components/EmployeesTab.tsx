@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { CloudDownload, KeyRound, Pencil, Search, Trash2, UserPlus } from 'lucide-react';
-import type { Department, FaceResult, User } from '../types';
+import type { Area, Department, FaceResult, User } from '../types';
 import { api, errorMessage } from '../api';
-import { ROLE_LABEL, SYSTEM_ADMIN_CODE } from '../format';
+import { ROLE_LABEL } from '../format';
+import { canDeleteUserUi } from '../permissions';
 import { UserFormModal } from './UserFormModal';
 import { ImportFromHanetModal } from './ImportFromHanetModal';
 import { TempPasswordDialog } from './TempPasswordDialog';
@@ -13,10 +14,12 @@ interface EmployeesTabProps {
   users: User[];
   departments: Department[];
   currentUser: User;
+  isSystemAdmin: boolean;
+  areas: Area[];
   onRefresh: () => void;
 }
 
-export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, currentUser, onRefresh }) => {
+export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, currentUser, isSystemAdmin, areas, onRefresh }) => {
   const [editing, setEditing] = useState<User | 'new' | null>(null);
   const [tempPassword, setTempPassword] = useState<{ label: string; password: string } | null>(null);
   const [importing, setImporting] = useState(false);
@@ -24,13 +27,13 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
   const [search, setSearch] = useState('');
   const [deleting, setDeleting] = useState<User | null>(null);
   const [faceNotice, setFaceNotice] = useState<FaceResult | null>(null);
-  const isSystemAdmin = currentUser.code === SYSTEM_ADMIN_CODE;
 
   const resetPassword = async (u: User) => {
     if (!window.confirm(`Đặt lại mật khẩu cho ${u.name} (${u.code})? Mật khẩu cũ và các phiên đăng nhập của người này sẽ mất hiệu lực.`)) return;
     try {
-      const r = await api<{ tempPassword: string }>(`/api/users/${u.id}/reset-password`, { method: 'POST' });
-      setTempPassword({ label: `${u.name} (${u.code})`, password: r.tempPassword });
+      const r = await api<{ tempPassword?: string; queued?: boolean }>(`/api/users/${u.id}/reset-password`, { method: 'POST' });
+      if (r.tempPassword) setTempPassword({ label: `${u.name} (${u.code})`, password: r.tempPassword });
+      else window.alert('Đã xếp hàng gửi mật khẩu mới qua email.');
     } catch (err) {
       window.alert(errorMessage(err));
     }
@@ -107,6 +110,13 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
               <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-slate-50 text-slate-700 border-slate-200 shrink-0">{ROLE_LABEL[u.role]}</span>
             </div>
             <div className="mt-3 pt-3 border-t border-slate-100 space-y-1">
+              <div className="flex justify-between"><span className="text-slate-400">Khu vực</span><span>{u.areaName ?? '—'}</span></div>
+              {u.role === 'area_admin' && (
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Khu quản lý</span>
+                  <span>{areas.filter((a) => u.adminAreaIds.includes(a.id)).map((a) => a.name).join(', ') || '—'}</span>
+                </div>
+              )}
               <div className="flex justify-between"><span className="text-slate-400">Phòng ban</span><span>{u.departmentName ?? '—'}</span></div>
               <div className="flex justify-between"><span className="text-slate-400">Person ID (Camera AI)</span><span className="font-mono">{u.hanetPersonId ?? '—'}</span></div>
               <div className="flex justify-between">
@@ -117,13 +127,18 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
               <div className="flex justify-between"><span className="text-slate-400">Trạng thái</span><span>{u.status === 'active' ? 'Đang làm việc' : 'Đã nghỉ'}</span></div>
             </div>
             <div className="mt-3 pt-3 border-t border-slate-100 flex gap-2">
-              <button onClick={() => setEditing(u)} className={`${secondaryBtn} flex-1 py-1.5`}>
-                <Pencil className="w-3.5 h-3.5" /> Sửa
-              </button>
-              <button onClick={() => resetPassword(u)} className={`${secondaryBtn} flex-1 py-1.5`}>
-                <KeyRound className="w-3.5 h-3.5" /> Đặt lại mật khẩu
-              </button>
-              {isSystemAdmin && (
+              {/* Quản trị khu không sửa người quản trị khác/HR (chỉ sửa chính mình) */}
+              {(currentUser.role !== 'area_admin' || u.id === currentUser.id || (u.role !== 'hr' && u.role !== 'area_admin')) && (
+                <button onClick={() => setEditing(u)} className={`${secondaryBtn} flex-1 py-1.5`}>
+                  <Pencil className="w-3.5 h-3.5" /> Sửa
+                </button>
+              )}
+              {(currentUser.role !== 'area_admin' || (u.id !== currentUser.id && u.role !== 'hr' && u.role !== 'area_admin')) && (
+                <button onClick={() => resetPassword(u)} className={`${secondaryBtn} flex-1 py-1.5`}>
+                  <KeyRound className="w-3.5 h-3.5" /> Đặt lại mật khẩu
+                </button>
+              )}
+              {canDeleteUserUi(currentUser, isSystemAdmin, u) && (
                 <button
                   onClick={() => setDeleting(u)}
                   className={`${secondaryBtn} py-1.5 px-2.5 text-rose-600 hover:bg-rose-50 hover:border-rose-200`}
@@ -142,7 +157,9 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
         <UserFormModal
           user={editing === 'new' ? undefined : editing}
           departments={departments}
-          currentUserId={currentUser.id}
+          me={currentUser}
+          isSystemAdmin={isSystemAdmin}
+          areas={areas}
           onClose={() => setEditing(null)}
           onSaved={({ user, tempPassword: pw, face }) => {
             setEditing(null);

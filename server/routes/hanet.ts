@@ -104,8 +104,11 @@ export function hanetRoutes(ctx: AppContext): Router {
   const { db } = ctx;
   const r = Router();
 
-  r.get('/hanet/config', requireGlobalHr, (_req, res) => {
-    res.json({ config: getHanetConfigView(db) });
+  r.get('/hanet/config', requireGlobalHr, (req, res) => {
+    const config = getHanetConfigView(db);
+    // Token webhook là bí mật: chỉ ADMIN thấy đầy đủ
+    if (!isSystemAdmin(currentUser(req))) config.webhookPath = config.webhookPath.replace(/[^/]+$/, (t) => `••••${t.slice(-4)}`);
+    res.json({ config });
   });
 
   r.put('/hanet/config', requireSystemAdmin, (req, res) => {

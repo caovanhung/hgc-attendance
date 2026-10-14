@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { Camera, RefreshCw, ScanFace } from 'lucide-react';
-import type { Department, FaceCandidates, FaceResult, FaceSighting, User, UserRole, UserStatus } from '../types';
+import type { Area, Department, FaceCandidates, FaceResult, FaceSighting, User, UserRole, UserStatus } from '../types';
 import { api, errorMessage } from '../api';
 import { ROLE_LABEL, fmtTime } from '../format';
+import { assignableRoles } from '../permissions';
 import { Field, Modal, inputCls, primaryBtn, secondaryBtn } from './ui';
 
 export interface UserSaved {
@@ -14,7 +15,9 @@ export interface UserSaved {
 interface Props {
   user?: User; // không có = tạo mới
   departments: Department[];
-  currentUserId: string;
+  me: User;
+  isSystemAdmin: boolean;
+  areas: Area[];
   onClose: () => void;
   onSaved: (result: UserSaved) => void;
 }
@@ -35,9 +38,13 @@ const Thumb: React.FC<{ url: string; title: string; sub: string; selected: boole
   </button>
 );
 
-export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserId, onClose, onSaved }) => {
+export const UserFormModal: React.FC<Props> = ({ user, departments, me, isSystemAdmin, areas, onClose, onSaved }) => {
   const isEdit = Boolean(user);
-  const isSelf = user?.id === currentUserId;
+  const isSelf = user?.id === me.id;
+  const roles = assignableRoles(me, isSystemAdmin);
+  const roleLocked = isSelf || (user !== undefined && !roles.includes(user.role));
+  // Quản trị khu: không đăng ký FaceID cho hr/area_admin hoặc cho chính mình (server vẫn kiểm tra)
+  const faceAllowed = me.role !== 'area_admin' || (!isSelf && user?.role !== 'hr' && user?.role !== 'area_admin');
   const [code, setCode] = useState(user?.code ?? '');
   const [name, setName] = useState(user?.name ?? '');
   const [email, setEmail] = useState(user?.email ?? '');
@@ -45,6 +52,7 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
   const [position, setPosition] = useState(user?.position ?? '');
   const [role, setRole] = useState<UserRole>(user?.role ?? 'employee');
   const [departmentId, setDepartmentId] = useState(user?.departmentId ?? '');
+  const [adminAreaIds, setAdminAreaIds] = useState<string[]>(user?.adminAreaIds ?? []);
   const [hanetPersonId, setHanetPersonId] = useState(user?.hanetPersonId ?? '');
   const [status, setStatus] = useState<UserStatus>(user?.status ?? 'active');
   const [error, setError] = useState<string | null>(null);
@@ -89,7 +97,21 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const body = { name, email, phone, position, role, departmentId: departmentId || null, hanetPersonId, status };
+    // Quản trị khu tự sửa mình: chỉ họ tên, email, điện thoại, chức vụ
+    const body =
+      isSelf && me.role === 'area_admin'
+        ? { name, email, phone, position }
+        : {
+            name,
+            email,
+            phone,
+            position,
+            role,
+            departmentId: departmentId || null,
+            hanetPersonId,
+            status,
+            ...(role === 'area_admin' && !roleLocked ? { adminAreaIds } : {}),
+          };
     try {
       if (user) {
         const r = await api<{ user: User }>(`/api/users/${user.id}`, { method: 'PUT', body });
@@ -134,6 +156,7 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
   return (
     <Modal title={isEdit ? `Sửa nhân sự ${user?.code}` : 'Thêm nhân sự'} onClose={onClose} wide>
       <form onSubmit={submit} className="space-y-3.5">
+        {faceAllowed && (
         <div className="rounded-2xl border border-orange-200 bg-orange-50/60 p-3 space-y-2.5">
           <div className="flex items-center justify-between gap-2">
             <p className="text-[11px] text-slate-600">
@@ -226,6 +249,7 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
           )}
           {faceMsg && <p className={faceMsg.ok ? 'text-emerald-700' : 'text-rose-600'}>{faceMsg.message}</p>}
         </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Mã nhân viên" hint={isEdit ? undefined : 'Phải trùng aliasID trên Camera AI nếu người này đã có trên Camera AI'}>
@@ -235,8 +259,8 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
             <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} required />
           </Field>
           <Field label="Phòng ban">
-            <select className={inputCls} value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}>
-              <option value="">— Chưa phân phòng —</option>
+            <select className={inputCls} value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} required={me.role === 'area_admin'} disabled={isSelf && me.role === 'area_admin'}>
+              {me.role === 'hr' && <option value="">— Chưa phân phòng —</option>}
               {departments.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name}
@@ -245,8 +269,8 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
             </select>
           </Field>
           <Field label="Vai trò">
-            <select className={inputCls} value={role} onChange={(e) => setRole(e.target.value as UserRole)} disabled={isSelf}>
-              {(Object.keys(ROLE_LABEL) as UserRole[]).map((r) => (
+            <select className={inputCls} value={role} onChange={(e) => setRole(e.target.value as UserRole)} disabled={roleLocked}>
+              {(roleLocked ? [role] : roles).map((r) => (
                 <option key={r} value={r}>
                   {ROLE_LABEL[r]}
                 </option>
@@ -264,13 +288,31 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, currentUserI
           </Field>
           {isEdit && (
             <Field label="Trạng thái">
-              <select className={inputCls} value={status} onChange={(e) => setStatus(e.target.value as UserStatus)} disabled={isSelf}>
+              <select className={inputCls} value={status} onChange={(e) => setStatus(e.target.value as UserStatus)} disabled={roleLocked}>
                 <option value="active">Đang làm việc</option>
                 <option value="inactive">Đã nghỉ (khóa đăng nhập, bỏ qua nhận diện)</option>
               </select>
             </Field>
           )}
         </div>
+        {role === 'area_admin' && !roleLocked && (
+          <div className="rounded-2xl border border-violet-200 bg-violet-50/60 p-3">
+            <div className="text-[11px] font-semibold text-slate-700 mb-1.5">Khu được giao quản lý</div>
+            <div className="flex flex-wrap gap-3">
+              {areas.map((a) => (
+                <label key={a.id} className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={adminAreaIds.includes(a.id)}
+                    onChange={(e) => setAdminAreaIds(e.target.checked ? [...adminAreaIds, a.id] : adminAreaIds.filter((x) => x !== a.id))}
+                  />
+                  {a.name}
+                </label>
+              ))}
+              {areas.length === 0 && <span className="text-slate-500">Chưa có khu vực nào — tạo ở tab Khu vực.</span>}
+            </div>
+          </div>
+        )}
         {isSelf && <p className="text-[11px] text-slate-500">Bạn không thể tự đổi vai trò hoặc trạng thái của mình.</p>}
         {error && <p className="text-rose-600">{error}</p>}
         <div className="flex gap-2 pt-1">

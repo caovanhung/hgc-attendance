@@ -8,7 +8,7 @@ import {
   Trash2,
   Video,
 } from "lucide-react";
-import type { Camera, User } from "../types";
+import type { Area, Camera, User } from "../types";
 import { api, errorMessage } from "../api";
 import { fmtDateTime } from "../format";
 import {
@@ -23,6 +23,7 @@ import {
 interface CamerasTabProps {
   cameras: Camera[];
   currentUser: User;
+  areas: Area[];
   onRefresh: () => void;
 }
 
@@ -33,6 +34,7 @@ const EMPTY = {
   placeName: "",
   location: "",
   ipAddress: "",
+  areaId: "",
 };
 type Form = typeof EMPTY & { id?: string };
 
@@ -66,6 +68,7 @@ const StatusDot: React.FC<{ camera: Camera }> = ({ camera }) => {
 export const CamerasTab: React.FC<CamerasTabProps> = ({
   cameras,
   currentUser,
+  areas,
   onRefresh,
 }) => {
   const [form, setForm] = useState<Form | null>(null);
@@ -74,7 +77,8 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
   const [notice, setNotice] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const isHr = currentUser.role === "hr";
+  const isGlobalHr = currentUser.role === "hr";
+  const canManage = isGlobalHr || currentUser.role === "area_admin";
 
   const confirmDelete = async () => {
     if (!deleting) return;
@@ -103,10 +107,14 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
             name: form.name,
             location: form.location,
             ipAddress: form.ipAddress,
+            areaId: form.areaId || null,
           },
         });
       } else {
-        await api("/api/cameras", { method: "POST", body: form });
+        await api("/api/cameras", {
+          method: "POST",
+          body: { ...form, areaId: form.areaId || null },
+        });
       }
       setForm(null);
       onRefresh();
@@ -149,7 +157,7 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
             đổi luôn trên Camera AI.
           </p>
         </div>
-        {isHr && (
+        {isGlobalHr && (
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() =>
@@ -210,7 +218,7 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
                   <span className="font-mono text-[10px] px-1.5 rounded bg-slate-100 text-slate-600">
                     {c.deviceKey}
                   </span>
-                  {isHr && (
+                  {canManage && (
                     <button
                       onClick={() =>
                         setForm({
@@ -221,6 +229,7 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
                           placeName: c.placeName,
                           location: c.location,
                           ipAddress: c.ipAddress,
+                          areaId: c.areaId ?? "",
                         })
                       }
                       className="p-1 rounded-lg text-slate-400 hover:text-slate-900 hover:bg-slate-100 cursor-pointer"
@@ -230,7 +239,7 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
                   )}
-                  {isHr && (
+                  {canManage && (
                     <button
                       onClick={() => {
                         setDeleteError(null);
@@ -252,6 +261,12 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
                 </div>
               )}
               <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2 rounded-xl">
+                <div className="col-span-2">
+                  <span className="block text-[10px] text-slate-400">
+                    Khu vực
+                  </span>
+                  {c.areaName ?? "Chưa gán khu"}
+                </div>
                 <div>
                   <span className="block text-[10px] text-slate-400">
                     Địa điểm
@@ -365,6 +380,21 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
                 value={form.location}
                 onChange={set("location")}
               />
+            </Field>
+            <Field label="Khu vực">
+              <select
+                className={inputCls}
+                value={form.areaId}
+                onChange={(e) => setForm({ ...form, areaId: e.target.value })}
+                required={!isGlobalHr}
+              >
+                {isGlobalHr && <option value="">— Chưa gán khu —</option>}
+                {areas.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
             </Field>
             <Field label="Địa chỉ IP nội bộ">
               <input

@@ -5,7 +5,7 @@ import { api, errorMessage } from '../../api';
 import { fmtDateTime } from '../../format';
 import { secondaryBtn } from '../ui';
 
-export const BackupsCard: React.FC = () => {
+export const BackupsCard: React.FC<{ canWrite: boolean }> = ({ canWrite }) => {
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,10 +39,12 @@ export const BackupsCard: React.FC = () => {
           <Database className="w-4 h-4 text-orange-500" /> Sao lưu
         </h3>
         <div className="flex gap-2">
-          <button onClick={backupNow} disabled={busy} className={`${secondaryBtn} py-1.5`}>
-            Sao lưu ngay
-          </button>
-          {backups.length > 0 && (
+          {canWrite && (
+            <button onClick={backupNow} disabled={busy} className={`${secondaryBtn} py-1.5`}>
+              Sao lưu ngay
+            </button>
+          )}
+          {canWrite && backups.length > 0 && (
             <a href="/api/admin/backups/latest" className={`${secondaryBtn} py-1.5`}>
               <Download className="w-3.5 h-3.5" /> Tải bản mới nhất
             </a>

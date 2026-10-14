@@ -76,6 +76,7 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
         <span className="flex items-center gap-2">
           <Lock className="w-3.5 h-3.5" />
           {role === 'hr' && 'Bạn xem được bảng công của toàn công ty.'}
+          {role === 'area_admin' && 'Bạn xem được bảng công của các khu bạn quản lý.'}
           {role === 'dept_manager' && `Bạn xem được bảng công của phòng ${currentUser.departmentName ?? ''}.`}
           {role === 'employee' && 'Bạn xem được bảng công của chính mình.'}
         </span>
@@ -97,7 +98,7 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
             </div>
           )}
           <input type="date" value={selectedDate} onChange={(e) => e.target.value && setSelectedDate(e.target.value)} className={`${inputCls} w-auto`} />
-          {role === 'hr' && (
+          {(role === 'hr' || role === 'area_admin') && (
             <select value={selectedDept} onChange={(e) => setSelectedDept(e.target.value)} className={`${inputCls} w-auto`}>
               <option value="">Tất cả phòng ban</option>
               {departments.map((d) => (
