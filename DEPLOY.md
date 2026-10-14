@@ -106,7 +106,7 @@ Sau khi nâng cấp (tài khoản HR toàn hệ thống):
 
 - [ ] Log có `[MIGRATE] v3 → v4 xong`; khu vực, phòng ban, nhân sự, ngày công cũ còn nguyên.
 - [ ] Một nhân viên không quẹt cả ngày làm việc ⇒ sau giờ ra của ca (tối đa 15 phút) bảng công hiện **Vắng**.
-- [ ] Người quẹt giữa giờ chiều: trước giờ ra bảng công hiện "Gần nhất HH:mm", không bị gắn về sớm; sau giờ ra mới hiện về sớm (nếu ra sớm quá 10 phút).
+- [ ] Người quẹt giữa giờ chiều: trước giờ ra bảng công hiện "Lần quẹt gần nhất HH:mm", không bị gắn về sớm; sau giờ ra mới hiện về sớm (nếu ra sớm quá 10 phút).
 - [ ] Đơn nghỉ phép 2 ngày làm việc được duyệt ⇒ hai ngày đó hiện **Nghỉ phép**; cuối tuần trong khoảng không bị đánh dấu.
 - [ ] Quản trị khu thêm ca cho khu mình và gán cho một phòng; không thấy ca của khu khác.
 

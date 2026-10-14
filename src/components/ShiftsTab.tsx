@@ -16,6 +16,7 @@ export const ShiftsTab: React.FC<{ me: MeResponse; area: string; onChanged: () =
   const [form, setForm] = useState<Form | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<Shift | null>(null);
   const [deletingHoliday, setDeletingHoliday] = useState<string | null>(null);
   const [year, setYear] = useState(() => new Date().getFullYear());
@@ -51,6 +52,12 @@ export const ShiftsTab: React.FC<{ me: MeResponse; area: string; onChanged: () =
     earlyLeaveMinutes: 10,
   });
 
+  /** Thông báo thành công (xanh) và lỗi (đỏ) loại trừ nhau. */
+  const showNotice = (msg: string) => {
+    setActionError(null);
+    setNotice(msg);
+  };
+
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form) return;
@@ -58,10 +65,10 @@ export const ShiftsTab: React.FC<{ me: MeResponse; area: string; onChanged: () =
     try {
       if (form.id) {
         const r = await api<{ recomputed: number }>(`/api/shifts/${form.id}`, { method: 'PUT', body: form });
-        setNotice(`Đã lưu ca. Đã tính lại ${r.recomputed} ngày công từ đầu tháng.`);
+        showNotice(`Đã lưu ca. Đã tính lại ${r.recomputed} ngày công từ đầu tháng.`);
       } else {
         await api('/api/shifts', { method: 'POST', body: form });
-        setNotice('Đã thêm ca. Gán ca cho phòng ban ở tab Phòng ban.');
+        showNotice('Đã thêm ca. Gán ca cho phòng ban ở tab Phòng ban.');
       }
       setForm(null);
       void load();
@@ -76,23 +83,22 @@ export const ShiftsTab: React.FC<{ me: MeResponse; area: string; onChanged: () =
     try {
       const r = await api<{ recomputed: number }>('/api/holidays', { method: 'POST', body: newHoliday });
       setNewHoliday({ date: '', name: '' });
-      setNotice(r.recomputed ? `Đã thêm ngày lễ, tính lại ${r.recomputed} ngày công.` : 'Đã thêm ngày lễ.');
+      showNotice(r.recomputed ? `Đã thêm ngày lễ, tính lại ${r.recomputed} ngày công.` : 'Đã thêm ngày lễ.');
       void load();
       onChanged();
     } catch (err) {
-      setNotice(`Lỗi: ${errorMessage(err)}`);
+      setNotice(null);
+      setActionError(errorMessage(err));
     }
   };
 
+  /** Lỗi được ném ra để hộp xác nhận xóa hiện (hộp vẫn mở). */
   const removeHoliday = async (date: string) => {
-    try {
-      await api(`/api/holidays/${date}`, { method: 'DELETE' });
-      setDeletingHoliday(null);
-      void load();
-      onChanged();
-    } catch (err) {
-      setNotice(`Lỗi: ${errorMessage(err)}`);
-    }
+    const r = await api<{ recomputed: number }>(`/api/holidays/${date}`, { method: 'DELETE' });
+    setDeletingHoliday(null);
+    showNotice(r.recomputed ? `Đã xóa ngày lễ, tính lại ${r.recomputed} ngày công.` : 'Đã xóa ngày lễ.');
+    void load();
+    onChanged();
   };
 
   if (error) return <p className="text-xs text-rose-600">{error}</p>;
@@ -112,6 +118,11 @@ export const ShiftsTab: React.FC<{ me: MeResponse; area: string; onChanged: () =
         </button>
       </div>
       {notice && <p className="text-xs text-emerald-800 bg-emerald-50 rounded-xl p-3">{notice}</p>}
+      {actionError && (
+        <p role="alert" className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-3">
+          {actionError}
+        </p>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {shifts.map((s) => (
@@ -144,35 +155,38 @@ export const ShiftsTab: React.FC<{ me: MeResponse; area: string; onChanged: () =
         {shifts.length === 0 && <p className="text-xs text-slate-500">Chưa có ca nào trong khu đang chọn.</p>}
       </div>
 
-      {isHr && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <WorkSettingsCard onRecomputed={onChanged} />
-          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 text-xs space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-                <CalendarDays className="w-4 h-4 text-orange-500" /> Ngày lễ
-              </h3>
-              <select className={`${inputCls} w-auto`} value={year} onChange={(e) => setYear(Number(e.target.value))}>
-                {[year - 1, year, year + 1].map((y) => (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <ul className="divide-y divide-slate-100">
-              {holidays.map((h) => (
-                <li key={h.date} className="py-1.5 flex items-center justify-between">
-                  <span>
-                    <span className="font-mono">{h.date.split('-').reverse().join('/')}</span> · {h.name}
-                  </span>
+      {/* Ngày lễ: mọi quản lý xem được; chỉ HR toàn hệ thống thêm/xóa (spec mục 9) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {isHr && <WorkSettingsCard onRecomputed={onChanged} />}
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 text-xs space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+              <CalendarDays className="w-4 h-4 text-orange-500" /> Ngày lễ
+            </h3>
+            <select className={`${inputCls} w-auto`} value={year} onChange={(e) => setYear(Number(e.target.value))}>
+              {[year - 1, year, year + 1].map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+          </div>
+          <ul className="divide-y divide-slate-100">
+            {holidays.map((h) => (
+              <li key={h.date} className="py-1.5 flex items-center justify-between">
+                <span>
+                  <span className="font-mono">{h.date.split('-').reverse().join('/')}</span> · {h.name}
+                </span>
+                {isHr && (
                   <button onClick={() => setDeletingHoliday(h.date)} className="text-rose-600 hover:underline cursor-pointer">
                     Xóa
                   </button>
-                </li>
-              ))}
-              {holidays.length === 0 && <li className="py-1.5 text-slate-500">Chưa có ngày lễ nào trong năm {year}.</li>}
-            </ul>
+                )}
+              </li>
+            ))}
+            {holidays.length === 0 && <li className="py-1.5 text-slate-500">Chưa có ngày lễ nào trong năm {year}.</li>}
+          </ul>
+          {isHr && (
             <form onSubmit={addHoliday} className="flex flex-wrap gap-2">
               <input type="date" className={`${inputCls} w-auto`} value={newHoliday.date} onChange={(e) => setNewHoliday({ ...newHoliday, date: e.target.value })} required />
               <input className={`${inputCls} flex-1 min-w-[140px]`} placeholder="Tên ngày lễ" value={newHoliday.name} onChange={(e) => setNewHoliday({ ...newHoliday, name: e.target.value })} required />
@@ -180,9 +194,9 @@ export const ShiftsTab: React.FC<{ me: MeResponse; area: string; onChanged: () =
                 Thêm
               </button>
             </form>
-          </div>
+          )}
         </div>
-      )}
+      </div>
 
       {form && (
         <Modal title={form.id ? 'Sửa ca' : 'Thêm ca'} onClose={() => setForm(null)}>

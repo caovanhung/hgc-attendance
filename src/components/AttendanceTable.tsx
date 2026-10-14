@@ -170,7 +170,10 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
                   <td className="py-3 px-4 font-mono">
                     {!r.final ? (
                       r.lastOut !== null ? (
-                        <span className="text-slate-400 text-[11px]">Gần nhất {fmtTime(r.lastOut)}</span>
+                        <span className="text-slate-400 text-[11px]">
+                          Lần quẹt gần nhất {fmtTime(r.lastOut)}
+                          {r.manualOut !== null && <span className="ml-1 text-[10px] text-blue-600">(bổ sung)</span>}
+                        </span>
                       ) : (
                         '—'
                       )

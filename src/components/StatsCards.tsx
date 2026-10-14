@@ -341,7 +341,13 @@ const StatsDetailModal: React.FC<{
                       </td>
 
                       <td className="px-4 py-3 font-mono text-sm tabular-nums text-text-primary">
-                        {fmtTime(row.lastOut)}
+                        {!row.final && row.lastOut !== null ? (
+                          <span className="text-xs text-text-secondary">
+                            Lần quẹt gần nhất {fmtTime(row.lastOut)}
+                          </span>
+                        ) : (
+                          fmtTime(row.lastOut)
+                        )}
                       </td>
 
                       <td className="px-4 py-3">
