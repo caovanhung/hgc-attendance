@@ -27,6 +27,7 @@ export const RequestsTab: React.FC<RequestsTabProps> = ({ requests, currentUser,
   const [suggestedOut, setSuggestedOut] = useState('');
   const [reason, setReason] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const canReview = (req: AttendanceRequest) => currentUser.role !== 'employee' && req.userId !== currentUser.id;
@@ -61,12 +62,13 @@ export const RequestsTab: React.FC<RequestsTabProps> = ({ requests, currentUser,
   const review = async (id: string, status: 'approved' | 'rejected') => {
     const comment = window.prompt(status === 'approved' ? 'Ghi chú khi duyệt (có thể để trống):' : 'Lý do từ chối:') ?? null;
     if (comment === null) return;
+    setReviewError(null);
     setBusyId(id);
     try {
       await api(`/api/requests/${id}`, { method: 'PUT', body: { status, comment } });
       onRefresh();
     } catch (err) {
-      setFormError(errorMessage(err));
+      setReviewError(errorMessage(err));
     } finally {
       setBusyId(null);
     }
@@ -90,6 +92,11 @@ export const RequestsTab: React.FC<RequestsTabProps> = ({ requests, currentUser,
 
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="p-4 border-b border-slate-100 text-xs font-bold text-slate-800">Danh sách đơn ({requests.length})</div>
+        {reviewError && (
+          <div role="alert" className="mx-4 mt-4 p-3 rounded-xl border border-rose-200 bg-rose-50 text-xs text-rose-700">
+            Không duyệt được đơn: {reviewError}
+          </div>
+        )}
         {requests.length === 0 ? (
           <div className="p-12 text-center text-slate-400 text-xs">Chưa có đơn nào</div>
         ) : (
