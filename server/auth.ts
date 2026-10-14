@@ -56,6 +56,8 @@ export interface AuthUser {
   role: UserRole;
   departmentId: string | null;
   mustChangePassword: boolean;
+  /** Khu được giao (chỉ với area_admin), đọc lại mỗi request để gỡ quyền có hiệu lực ngay. */
+  areaIds: string[];
 }
 
 export function createSession(db: Db, userId: string, now: number): string {
@@ -78,6 +80,10 @@ export function findSessionUser(db: Db, token: string, now: number): AuthUser | 
     )
     .get(sha256(token), now) as Record<string, any> | undefined;
   if (!row || row.status !== 'active') return null;
+  const areaIds =
+    row.role === 'area_admin'
+      ? (db.prepare('SELECT area_id FROM admin_areas WHERE user_id = ? ORDER BY area_id').all(row.id) as { area_id: string }[]).map((r) => r.area_id)
+      : [];
   return {
     id: row.id,
     code: row.code,
@@ -85,6 +91,7 @@ export function findSessionUser(db: Db, token: string, now: number): AuthUser | 
     role: row.role,
     departmentId: row.department_id ?? null,
     mustChangePassword: row.must_change_password === 1,
+    areaIds,
   };
 }
 
@@ -134,11 +141,13 @@ export class LoginLimiter {
 
 export type Scope =
   | { kind: 'all' }
+  | { kind: 'areas'; areaIds: string[] }
   | { kind: 'department'; departmentId: string | null }
   | { kind: 'self'; userId: string };
 
 export function scopeFor(user: AuthUser): Scope {
   if (user.role === 'hr') return { kind: 'all' };
+  if (user.role === 'area_admin') return { kind: 'areas', areaIds: user.areaIds };
   if (user.role === 'dept_manager') return { kind: 'department', departmentId: user.departmentId };
   return { kind: 'self', userId: user.id };
 }
@@ -147,6 +156,10 @@ export function scopeWhere(scope: Scope, userIdCol: string, deptCol: string): { 
   switch (scope.kind) {
     case 'all':
       return { sql: '1=1', params: [] };
+    case 'areas':
+      return scope.areaIds.length
+        ? { sql: `${deptCol} IN (SELECT id FROM departments WHERE area_id IN (${scope.areaIds.map(() => '?').join(', ')}))`, params: [...scope.areaIds] }
+        : { sql: '0=1', params: [] };
     case 'department':
       return scope.departmentId ? { sql: `${deptCol} = ?`, params: [scope.departmentId] } : { sql: '0=1', params: [] };
     case 'self':

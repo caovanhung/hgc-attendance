@@ -52,7 +52,7 @@ test('phiên: tạo, tìm, hết hạn, xóa', () => {
   assert.notEqual(stored.token_hash, token, 'không lưu token gốc');
 
   const u = findSessionUser(db, token, now + 1)!;
-  assert.deepEqual(u, { id: uid, code: 'NV01', name: 'NV01', role: 'dept_manager', departmentId: dep, mustChangePassword: true });
+  assert.deepEqual(u, { id: uid, code: 'NV01', name: 'NV01', role: 'dept_manager', departmentId: dep, mustChangePassword: true, areaIds: [] });
   assert.equal(findSessionUser(db, token, now + SESSION_TTL_MS), null, 'hết hạn');
   assert.equal(findSessionUser(db, 'sai', now), null);
 
@@ -95,7 +95,7 @@ test('LoginLimiter: khóa sau 5 lần sai trong 15 phút, tự mở sau cửa s�
 });
 
 test('scopeFor và scopeWhere', () => {
-  const base: Omit<AuthUser, 'role' | 'departmentId'> = { id: 'u1', code: 'X', name: 'X', mustChangePassword: false };
+  const base: Omit<AuthUser, 'role' | 'departmentId'> = { id: 'u1', code: 'X', name: 'X', mustChangePassword: false, areaIds: [] };
   assert.deepEqual(scopeWhere(scopeFor({ ...base, role: 'hr', departmentId: null }), 'u.id', 'u.department_id'), { sql: '1=1', params: [] });
   assert.deepEqual(scopeWhere(scopeFor({ ...base, role: 'dept_manager', departmentId: 'd1' }), 'u.id', 'u.department_id'), { sql: 'u.department_id = ?', params: ['d1'] });
   assert.deepEqual(scopeWhere(scopeFor({ ...base, role: 'dept_manager', departmentId: null }), 'u.id', 'u.department_id'), { sql: '0=1', params: [] });
