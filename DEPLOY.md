@@ -97,6 +97,7 @@ Sau khi khởi động, vì database mới hoàn toàn:
 3. **Token webhook đã đổi**: chép URL webhook mới dán lên Hanet.
 4. Tab **Camera** → **Nhập camera từ Hanet**.
 5. Tab **Nhân sự** → **Nhập từ Hanet** để tạo nhân sự từ những người đã có trên Hanet (mỗi lần nhập tối đa 100 người; đông hơn thì nhập nhiều lần); người mới thì **Thêm nhân sự → Lấy từ camera**.
+6. Tab **Cấu hình** → thẻ **Tài khoản xem video**: nhập email và mật khẩu tài khoản Hanet Connect (nên là tài khoản riêng chỉ có quyền xem) → **Lưu** → **Kiểm tra**, phải báo đăng nhập thành công.
 
 ## Kiểm tra sau khi nâng cấp (trên host)
 
@@ -105,7 +106,7 @@ Sau khi khởi động, vì database mới hoàn toàn:
 - [ ] Nhập "Dương Đức Văn" từ Hanet; người này quẹt mặt thì bảng công có dòng của họ.
 - [ ] Một người chưa đăng ký đứng trước camera → **Thêm nhân sự → Lấy từ camera** → chọn ảnh người lạ → **Tạo nhân sự** → thông báo "FaceID: Đã đăng ký FaceID trên Hanet". Người đó đứng lại trước camera và được chấm công. Nếu báo lỗi ảnh (ví dụ kích thước), ghi lại thông báo để xử lý ở bản sau.
 - [ ] Tạo phòng ban trên web, thấy phòng ban đó trên app Hanet; xếp người thử vào phòng.
-- [ ] Bảng công → chi tiết lượt quẹt → **Xem video lúc này** mở Hanet Connect đúng camera C21272C952, đúng ngày.
+- [ ] Bảng công → chi tiết lượt quẹt → **Xem video lúc này** mở popup phát video ngay trên web: đúng camera C21272C952, tự tua đến đúng lúc quẹt; nút **◀ Đoạn trước** / **Đoạn sau ▶** chuyển được sang đoạn liền kề.
 - [ ] Xóa người thử bằng tài khoản ADMIN; người đó biến mất khỏi Hanet. Tab **Cấu hình › Đồng bộ Hanet** không còn việc lỗi.
 
 ## Cấu hình webhook trên Hanet

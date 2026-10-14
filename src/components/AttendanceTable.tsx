@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { AlertCircle, Download, ExternalLink, Eye, Lock, Search } from 'lucide-react';
+import { AlertCircle, Download, Eye, Lock, Search, Video } from 'lucide-react';
 import type { AttendanceDay, DayStatus, Department, Detection, User } from '../types';
 import { api, errorMessage } from '../api';
 import { DAY_STATUS_LABEL, fmtTime } from '../format';
 import { Modal, inputCls } from './ui';
+import { VideoModal } from './VideoModal';
 
 interface AttendanceTableProps {
   records: AttendanceDay[];
@@ -39,6 +40,7 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
   setSearchQuery,
 }) => {
   const [detail, setDetail] = useState<{ day: AttendanceDay; detections: Detection[] | null; error: string | null } | null>(null);
+  const [videoOf, setVideoOf] = useState<Detection | null>(null);
   const role = currentUser.role;
 
   const openDetail = async (day: AttendanceDay) => {
@@ -194,18 +196,15 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
                     <div className="font-mono font-semibold">{fmtTime(d.ts)}</div>
                     <div className="text-[11px] text-slate-500 truncate">{d.deviceName ?? d.deviceId}</div>
                     <div className="text-[10px] text-slate-400">{SOURCE_LABEL[d.source]}</div>
-                    {d.videoUrl && (
-                      <a
-                        href={d.videoUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:underline"
-                        title={`Mở Hanet Connect, chọn đoạn gần ${fmtTime(d.ts)}`}
+                    {d.hasVideo && (
+                      <button
+                        type="button"
+                        onClick={() => setVideoOf(d)}
+                        className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:underline cursor-pointer"
                       >
-                        <ExternalLink className="w-3 h-3" /> Xem video lúc này
-                      </a>
+                        <Video className="w-3 h-3" /> Xem video lúc này
+                      </button>
                     )}
-                    {d.videoUrl && <div className="text-[10px] text-slate-400">Mở Hanet Connect, chọn đoạn gần {fmtTime(d.ts)}</div>}
                   </div>
                 </div>
               ))}
@@ -213,6 +212,7 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
           )}
         </Modal>
       )}
+      {videoOf && <VideoModal detection={videoOf} onClose={() => setVideoOf(null)} />}
     </div>
   );
 };

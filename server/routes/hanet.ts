@@ -10,6 +10,7 @@ import {
 } from '../hanet';
 import { hanetApi, reconcileDate } from '../hanet-api';
 import { getSetting } from '../settings';
+import { getConnectConfig, saveConnectConfig, testConnectLogin } from '../hanet-connect';
 import { isValidDate, toVnDate, vnDateTimeToTs } from '../vntime';
 import { fetchAllPersons, unlinkedPersons } from '../hanet-import';
 import { listSightings, recordSighting } from '../sightings';
@@ -120,6 +121,23 @@ export function hanetRoutes(ctx: AppContext): Router {
       } catch (err) {
         res.json(fail((err as Error).message));
       }
+    }),
+  );
+
+  r.get('/hanet/connect', hr, (_req, res) => {
+    res.json(getConnectConfig(db));
+  });
+
+  r.put('/hanet/connect', hr, (req, res) => {
+    const b = req.body ?? {};
+    res.json(saveConnectConfig(db, { email: b.email, password: b.password }));
+  });
+
+  r.post(
+    '/hanet/connect/test',
+    hr,
+    ah(async (_req, res) => {
+      res.json(await testConnectLogin({ db, fetch: ctx.fetch, now: ctx.now }));
     }),
   );
 

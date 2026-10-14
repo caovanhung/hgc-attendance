@@ -1,14 +1,14 @@
 import { Router } from 'express';
 import type { AppContext } from '../context';
-import { HttpError } from '../errors';
+import { HttpError, ah } from '../errors';
 import { currentUser, requireRole } from '../middleware';
 import { canSeeUser, getUser, type Row } from '../repo';
 import { scopeFor, scopeWhere } from '../auth';
 import { recomputeRange } from '../attendance';
 import { NOT_SYSTEM_ADMIN } from '../bootstrap';
-import { getPlaceIds, hanetVideoUrl } from '../hanet';
+import { getVideoAt } from '../hanet-connect';
 import { daysBetween, isValidDate, toVnDate } from '../vntime';
-import type { AttendanceDay, Detection, StatsData, StatsDetailRow, StatsDetailType } from '../../shared/types';
+import type { AttendanceDay, Detection, DetectionVideo, StatsData, StatsDetailRow, StatsDetailType } from '../../shared/types';
 
 const DAY_SELECT = `SELECT a.*, u.code AS employee_code, u.name AS employee_name, u.avatar_url, u.department_id,
   d.name AS department_name
@@ -36,6 +36,8 @@ function mapDay(r: Row): AttendanceDay {
 }
 
 export const MAX_RECOMPUTE_DAYS = 92;
+/** Nút đoạn trước/sau chỉ đi xa tối đa 24 giờ quanh lượt quẹt (trưởng phòng không duyệt camera tùy ý). */
+const MAX_VIDEO_DRIFT_MS = 24 * 3_600_000;
 
 /** Điều kiện lọc của từng thẻ thống kê, dùng chung để danh sách chi tiết khớp đúng con số. */
 const DETAIL_FILTER: Record<StatsDetailType, string> = {
@@ -82,8 +84,7 @@ export function attendanceRoutes(ctx: AppContext): Router {
       .prepare('SELECT id, device_id, device_name, place_id, ts, work_date, image_url, source FROM detections WHERE user_id = ? AND work_date = ? ORDER BY ts')
       .all(target.id, req.params.date) as Row[];
     const viewer = currentUser(req);
-    const placeId = getPlaceIds(db)[0];
-    const canWatch = (viewer.role === 'hr' || viewer.role === 'dept_manager') && placeId !== undefined;
+    const canWatch = viewer.role === 'hr' || viewer.role === 'dept_manager';
     const detections: Detection[] = rows.map((x) => ({
       id: x.id,
       deviceId: x.device_id,
@@ -92,10 +93,39 @@ export function attendanceRoutes(ctx: AppContext): Router {
       ts: x.ts,
       imageUrl: x.image_url ?? null,
       source: x.source,
-      videoUrl: canWatch && x.source !== 'simulator' ? hanetVideoUrl(placeId as number, x.device_id, x.work_date) : null,
+      hasVideo: canWatch && x.source !== 'simulator',
     }));
     res.json({ detections });
   });
+
+  r.get(
+    '/detections/:id/video',
+    requireRole('hr', 'dept_manager'),
+    ah(async (req, res) => {
+      const det = db.prepare('SELECT user_id, device_id, ts, source FROM detections WHERE id = ?').get(Number(req.params.id) || 0) as Row | undefined;
+      if (!det) throw new HttpError(404, 'Không tìm thấy lượt nhận diện');
+      const target = getUser(db, det.user_id);
+      if (!target || !canSeeUser(currentUser(req), target)) throw new HttpError(403, 'Bạn không có quyền xem dữ liệu này');
+      if (det.source === 'simulator') throw new HttpError(404, 'Lượt mô phỏng không có video');
+      let at: number = det.ts;
+      if (req.query.at !== undefined) {
+        at = Number(req.query.at);
+        if (!Number.isInteger(at) || at <= 0) throw new HttpError(400, 'Thời điểm xem video không hợp lệ');
+        if (Math.abs(at - det.ts) > MAX_VIDEO_DRIFT_MS) throw new HttpError(400, 'Chỉ xem được video trong vòng 24 giờ quanh lượt quẹt');
+      }
+      const clip = await getVideoAt({ db, fetch: ctx.fetch, now: ctx.now }, det.device_id, at);
+      const body: DetectionVideo = {
+        url: clip.url,
+        startTs: clip.startTs,
+        duration: clip.duration,
+        offsetSeconds: Math.min(Math.max((at - clip.startTs) / 1000, 0), clip.duration),
+        deviceName: clip.deviceName,
+        prevAt: clip.startTs - 1000,
+        nextAt: clip.startTs + clip.duration * 1000 + 1000,
+      };
+      res.json(body);
+    }),
+  );
 
   r.post('/attendance/recompute', requireRole('hr'), (req, res) => {
     const { from, to } = req.body ?? {};

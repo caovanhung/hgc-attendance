@@ -78,7 +78,24 @@ export interface Detection {
   ts: number;
   imageUrl: string | null;
   source: DetectionSource;
-  videoUrl: string | null; // trang xem lại video trên Hanet Connect; null nếu người xem không được phép
+  hasVideo: boolean; // HR/Trưởng phòng xem được video lượt này (GET /api/detections/:id/video); lượt mô phỏng luôn false
+}
+
+/** Đoạn video camera chứa một lượt quẹt (GET /api/detections/:id/video). */
+export interface DetectionVideo {
+  url: string; // MP4 ký sẵn, hạn khoảng 1 giờ
+  startTs: number; // giờ bắt đầu đoạn (ms)
+  duration: number; // giây
+  offsetSeconds: number; // vị trí lượt quẹt (hoặc `at`) trong đoạn
+  deviceName: string | null;
+  prevAt: number; // gọi lại với ?at= để lấy đoạn trước
+  nextAt: number; // gọi lại với ?at= để lấy đoạn sau
+}
+
+/** Tài khoản xem video (tab Cấu hình); không bao giờ trả mật khẩu. */
+export interface VideoAccountView {
+  email: string | null;
+  hasPassword: boolean;
 }
 
 export type RequestType = 'missed_punch' | 'late_explanation' | 'leave_request';
