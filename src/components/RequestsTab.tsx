@@ -15,6 +15,7 @@ const TYPE_META: Record<RequestType, { label: string; badge: string }> = {
   late_explanation: { label: 'Giải trình đi muộn', badge: 'bg-amber-100 text-amber-800' },
   missed_punch: { label: 'Quên quẹt mặt', badge: 'bg-blue-100 text-blue-800' },
   leave_request: { label: 'Xin nghỉ', badge: 'bg-purple-100 text-purple-800' },
+  business_trip: { label: 'Công tác', badge: 'bg-sky-100 text-sky-800' },
 };
 
 export const RequestsTab: React.FC<RequestsTabProps> = ({ requests, currentUser, onRefresh }) => {

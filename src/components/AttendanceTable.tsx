@@ -24,6 +24,9 @@ const STATUS_STYLE: Record<DayStatus, string> = {
   early_leave: 'bg-amber-50 text-amber-700 border-amber-200',
   late_and_early: 'bg-rose-50 text-rose-700 border-rose-200',
   missing_out: 'bg-slate-100 text-slate-700 border-slate-200',
+  absent: 'bg-rose-50 text-rose-700 border-rose-200',
+  leave: 'bg-purple-50 text-purple-700 border-purple-200',
+  business_trip: 'bg-sky-50 text-sky-700 border-sky-200',
 };
 
 const SOURCE_LABEL: Record<Detection['source'], string> = { webhook: 'Webhook', reconcile: 'Đối soát', simulator: 'Mô phỏng' };

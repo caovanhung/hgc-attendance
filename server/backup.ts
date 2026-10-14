@@ -4,7 +4,7 @@ import type { Db } from './db';
 import { VN_OFFSET_MS } from './vntime';
 import type { BackupInfo } from '../shared/types';
 
-export type BackupReason = 'daily' | 'manual' | 'pre-reset' | 'pre-delete';
+export type BackupReason = 'daily' | 'manual' | 'pre-reset' | 'pre-delete' | 'pre-migrate';
 export const BACKUP_KEEP = 30;
 
 const BACKUP_RE = /^attendance-.*\.db$/;

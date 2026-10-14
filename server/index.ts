@@ -2,7 +2,8 @@ import './check-node';
 import 'dotenv/config';
 import path from 'node:path';
 import express from 'express';
-import { openDb, SchemaVersionError } from './db';
+import { openDb, SchemaTooNewError, SchemaVersionError } from './db';
+import { MigrationError } from './migrations';
 import { createApp } from './app';
 import { LoginLimiter } from './auth';
 import { DEFAULT_ADMIN_PASSWORD, ensureAdminAccess } from './bootstrap';
@@ -11,12 +12,13 @@ import { nodemailerSend } from './mail';
 import type { AppContext } from './context';
 
 const production = process.env.NODE_ENV === 'production';
-const PORT = Number(process.env.PORT) || 3001;
+const defaultPort = production ? 3001 : 3000;
+const PORT = process.env.PORT && process.env.PORT !== '8080' ? Number(process.env.PORT) : defaultPort;
 const dataDir = path.resolve(process.cwd(), 'data');
 const backupDir = path.join(dataDir, 'backups');
 
 async function main() {
-  const db = openDb(path.join(dataDir, 'attendance.db'));
+  const db = openDb(path.join(dataDir, 'attendance.db'), { backupDir });
 
   const admin = ensureAdminAccess(db, process.env.ADMIN_INITIAL_PASSWORD);
   if (admin) {
@@ -58,7 +60,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  if (err instanceof SchemaVersionError) console.error(err.message);
+  if (err instanceof SchemaVersionError || err instanceof SchemaTooNewError || err instanceof MigrationError) console.error(err.message);
   else console.error('[STARTUP] Không khởi động được:', err);
   process.exit(1);
 });

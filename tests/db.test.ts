@@ -52,11 +52,11 @@ test('newId có prefix và không trùng', () => {
   assert.notEqual(a, b);
 });
 
-test('schema v3: bảng khu vực, thư, token đặt lại và các cột mới', () => {
+test('schema v4: bảng ca, ngày lễ, cột shift_id, early_arrival_minutes, final, end_date', () => {
   const db = openDb(':memory:');
   const cols = (t: string) => (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
-  for (const c of ['hanet_sync_status', 'hanet_sync_error', 'face_error', 'email_status', 'email_error']) assert.ok(cols('users').includes(c), `users thiếu ${c}`);
-  for (const c of ['hanet_department_id', 'area_id']) assert.ok(cols('departments').includes(c), `departments thiếu ${c}`);
+  for (const c of ['hanet_sync_status', 'hanet_sync_error', 'face_error', 'email_status', 'email_error', 'shift_id']) assert.ok(cols('users').includes(c), `users thiếu ${c}`);
+  for (const c of ['hanet_department_id', 'area_id', 'shift_id']) assert.ok(cols('departments').includes(c), `departments thiếu ${c}`);
   for (const c of ['online', 'status_checked_at', 'area_id']) assert.ok(cols('cameras').includes(c), `cameras thiếu ${c}`);
   for (const c of ['id', 'code', 'name', 'note', 'created_at']) assert.ok(cols('areas').includes(c), `areas thiếu ${c}`);
   for (const c of ['user_id', 'area_id']) assert.ok(cols('admin_areas').includes(c), `admin_areas thiếu ${c}`);
@@ -64,9 +64,11 @@ test('schema v3: bảng khu vực, thư, token đặt lại và các cột mới
     assert.ok(cols('email_jobs').includes(c), `email_jobs thiếu ${c}`);
   }
   for (const c of ['token_hash', 'user_id', 'expires_at', 'used_at']) assert.ok(cols('password_resets').includes(c), `password_resets thiếu ${c}`);
-  for (const t of ['sync_jobs', 'face_sightings']) assert.ok(cols(t).length > 0, `thiếu bảng ${t}`);
-  assert.equal(SCHEMA_VERSION, 3);
-  assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 3);
+  for (const c of ['early_arrival_minutes', 'final']) assert.ok(cols('attendance_days').includes(c), `attendance_days thiếu ${c}`);
+  for (const c of ['end_date']) assert.ok(cols('requests').includes(c), `requests thiếu ${c}`);
+  for (const t of ['sync_jobs', 'face_sightings', 'shifts', 'holidays']) assert.ok(cols(t).length > 0, `thiếu bảng ${t}`);
+  assert.equal(SCHEMA_VERSION, 4);
+  assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 4);
 });
 
 test('schema v3: vai trò area_admin hợp lệ, email không trùng (không phân biệt hoa thường), khu còn phòng ban thì không xóa được', () => {

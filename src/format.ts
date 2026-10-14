@@ -23,6 +23,9 @@ export const DAY_STATUS_LABEL: Record<DayStatus, string> = {
   early_leave: 'Về sớm',
   late_and_early: 'Muộn & về sớm',
   missing_out: 'Thiếu giờ ra',
+  absent: 'Vắng',
+  leave: 'Nghỉ phép',
+  business_trip: 'Công tác',
 };
 
 export const ROLE_LABEL: Record<UserRole, string> = {

@@ -71,7 +71,7 @@ export interface Area {
   createdAt: string;
 }
 
-export type DayStatus = 'on_time' | 'late' | 'early_leave' | 'late_and_early' | 'missing_out';
+export type DayStatus = 'on_time' | 'late' | 'early_leave' | 'late_and_early' | 'missing_out' | 'absent' | 'leave' | 'business_trip';
 export type DetectionSource = 'webhook' | 'reconcile' | 'simulator';
 
 export interface AttendanceDay {
@@ -82,11 +82,13 @@ export interface AttendanceDay {
   departmentId: string | null;
   departmentName: string | null;
   workDate: string;
-  firstIn: number;
+  firstIn: number | null;
   lastOut: number | null;
   lateMinutes: number;
   earlyMinutes: number;
+  earlyArrivalMinutes: number; // phút đến sớm (0 = không)
   status: DayStatus;
+  final: boolean; // false: còn trong giờ làm, giờ ra là lần quẹt gần nhất
   lateExcused: boolean;
   manualIn: number | null;
   manualOut: number | null;
@@ -121,7 +123,7 @@ export interface VideoAccountView {
   hasPassword: boolean;
 }
 
-export type RequestType = 'missed_punch' | 'late_explanation' | 'leave_request';
+export type RequestType = 'missed_punch' | 'late_explanation' | 'leave_request' | 'business_trip';
 export type RequestStatus = 'pending' | 'approved' | 'rejected';
 
 export interface AttendanceRequest {
@@ -131,6 +133,7 @@ export interface AttendanceRequest {
   employeeCode: string;
   departmentId: string | null;
   workDate: string;
+  endDate: string | null; // đến ngày (đơn nghỉ phép/công tác)
   type: RequestType;
   reason: string;
   suggestedIn: string | null;

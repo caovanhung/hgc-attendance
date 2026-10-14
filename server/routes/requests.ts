@@ -24,6 +24,7 @@ function mapRequest(r: Row): AttendanceRequest {
     employeeCode: r.employee_code,
     departmentId: r.department_id ?? null,
     workDate: r.work_date,
+    endDate: r.end_date ?? null,
     type: r.type,
     reason: r.reason,
     suggestedIn: r.suggested_in ?? null,
