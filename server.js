@@ -727,10 +727,7 @@ function updateHanetConfig(db, body) {
     setSetting(db, "hanet.place_ids", JSON.stringify(ids));
   }
 }
-function hanetVideoUrl(placeId, deviceId, day) {
-  return `${HANET_CONNECT_BASE}/${placeId}/video?id_device=${encodeURIComponent(deviceId)}&day=${day}`;
-}
-var str, num, STRANGER_MESSAGE, UNMATCHED_MESSAGE, WEBHOOK_LOG_LIMIT, WEBHOOK_TOKEN_KEY, HANET_DEFAULT_API_BASE, TEXT_FIELDS, HANET_CONNECT_BASE;
+var str, num, STRANGER_MESSAGE, UNMATCHED_MESSAGE, WEBHOOK_LOG_LIMIT, WEBHOOK_TOKEN_KEY, HANET_DEFAULT_API_BASE, TEXT_FIELDS;
 var init_hanet = __esm({
   "server/hanet.ts"() {
     init_db();
@@ -757,7 +754,6 @@ var init_hanet = __esm({
       ["refreshToken", "hanet.refresh_token"],
       ["apiBase", "hanet.api_base"]
     ];
-    HANET_CONNECT_BASE = "https://connect.hanet.ai";
   }
 });
 
@@ -2199,7 +2195,164 @@ import { Router as Router5 } from "express";
 init_auth();
 init_attendance();
 init_bootstrap();
-init_hanet();
+
+// server/hanet-connect.ts
+init_errors();
+init_hanet_api();
+init_settings();
+var CONNECT_BASE = "https://connect.hanet.ai";
+var EMAIL_KEY = "hanet.connect_email";
+var PASSWORD_KEY = "hanet.connect_password";
+var VIDEO_NOT_CONFIGURED = "Ch\u01B0a c\u1EA5u h\xECnh t\xE0i kho\u1EA3n xem video (tab C\u1EA5u h\xECnh)";
+var VIDEO_LOGIN_FAILED = "\u0110\u0103ng nh\u1EADp t\xE0i kho\u1EA3n xem video th\u1EA5t b\u1EA1i, ki\u1EC3m tra email/m\u1EADt kh\u1EA9u";
+var VIDEO_NOT_FOUND = "Kh\xF4ng c\xF3 video ghi l\u1EA1i v\xE0o th\u1EDDi \u0111i\u1EC3m n\xE0y";
+var VIDEO_UNAVAILABLE = "Kh\xF4ng l\u1EA5y \u0111\u01B0\u1EE3c video, th\u1EED l\u1EA1i sau";
+var notConfigured = () => new HttpError(400, VIDEO_NOT_CONFIGURED);
+var loginFailed = () => new HttpError(502, VIDEO_LOGIN_FAILED);
+var unavailable = () => new HttpError(502, VIDEO_UNAVAILABLE);
+function getConnectConfig(db) {
+  return { email: getSetting(db, EMAIL_KEY) ?? null, hasPassword: Boolean(getSetting(db, PASSWORD_KEY)) };
+}
+function saveConnectConfig(db, input) {
+  const email = typeof input.email === "string" ? input.email.trim() : "";
+  const password = typeof input.password === "string" ? input.password : "";
+  if (input.email !== void 0 && input.email !== null && typeof input.email !== "string") throw new HttpError(400, "Email kh\xF4ng h\u1EE3p l\u1EC7");
+  if (input.password !== void 0 && input.password !== null && typeof input.password !== "string") throw new HttpError(400, "M\u1EADt kh\u1EA9u kh\xF4ng h\u1EE3p l\u1EC7");
+  if (!email) {
+    deleteSetting(db, EMAIL_KEY);
+    deleteSetting(db, PASSWORD_KEY);
+  } else {
+    if (!/^[^\s@]+@[^\s@]+$/.test(email)) throw new HttpError(400, "Email kh\xF4ng h\u1EE3p l\u1EC7");
+    setSetting(db, EMAIL_KEY, email);
+    if (password) setSetting(db, PASSWORD_KEY, password);
+  }
+  clearConnectSession(db);
+  return getConnectConfig(db);
+}
+var sessions = /* @__PURE__ */ new WeakMap();
+var logins = /* @__PURE__ */ new WeakMap();
+function clearConnectSession(db) {
+  sessions.delete(db);
+  logins.delete(db);
+}
+function readCookies(res, into) {
+  for (const line of res.headers.getSetCookie()) {
+    const pair = line.split(";", 1)[0];
+    const eq = pair.indexOf("=");
+    if (eq <= 0) continue;
+    const name = pair.slice(0, eq).trim();
+    const value = pair.slice(eq + 1).trim();
+    if (value) into.set(name, value);
+    else into.delete(name);
+  }
+  return into;
+}
+var cookieHeader = (jar) => [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
+var hasSessionToken = (jar) => [...jar.keys()].some((k) => /authjs\.session-token/.test(k));
+async function doLogin(deps) {
+  const email = getSetting(deps.db, EMAIL_KEY);
+  const password = getSetting(deps.db, PASSWORD_KEY);
+  if (!email || !password) throw notConfigured();
+  const jar = /* @__PURE__ */ new Map();
+  let res;
+  try {
+    const csrfRes = await deps.fetch(`${CONNECT_BASE}/api/auth/csrf`, { redirect: "manual", signal: AbortSignal.timeout(HANET_TIMEOUT_MS) });
+    if (!csrfRes.ok) throw unavailable();
+    const csrfToken = (await csrfRes.json())?.csrfToken;
+    if (typeof csrfToken !== "string" || !csrfToken) throw unavailable();
+    readCookies(csrfRes, jar);
+    res = await deps.fetch(`${CONNECT_BASE}/api/auth/callback/credentials`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: cookieHeader(jar) },
+      body: new URLSearchParams({ csrfToken, username: email, password, json: "true" }).toString(),
+      redirect: "manual",
+      signal: AbortSignal.timeout(HANET_TIMEOUT_MS)
+    });
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    throw unavailable();
+  }
+  readCookies(res, jar);
+  if (hasSessionToken(jar)) return jar;
+  if (res.status >= 500) throw unavailable();
+  throw loginFailed();
+}
+function ensureSession(deps) {
+  const { db } = deps;
+  const current = sessions.get(db);
+  if (current) return Promise.resolve(current);
+  const pending = logins.get(db);
+  if (pending) return pending;
+  const p = doLogin(deps).then((jar) => {
+    if (logins.get(db) === p) sessions.set(db, jar);
+    return jar;
+  }).finally(() => {
+    if (logins.get(db) === p) logins.delete(db);
+  });
+  logins.set(db, p);
+  return p;
+}
+function parseClip(body) {
+  if (!body || typeof body !== "object") return null;
+  const b = body;
+  const d = b.data && typeof b.data === "object" && !Array.isArray(b.data) ? b.data : b;
+  const url = typeof d.file === "string" && /^https:\/\//.test(d.file) ? d.file : null;
+  let startTs = Number(d.timestamp);
+  if (!url || !Number.isFinite(startTs) || startTs <= 0) return null;
+  if (startTs < 1e12) startTs = Math.round(startTs * 1e3);
+  const duration = Number(d.duration);
+  return {
+    url,
+    startTs,
+    duration: Number.isFinite(duration) && duration > 0 ? duration : 60,
+    deviceName: typeof d.device_name === "string" && d.device_name.trim() ? d.device_name.trim() : null
+  };
+}
+async function getVideoAt(deps, deviceId, ts) {
+  const { db } = deps;
+  if (!getSetting(db, EMAIL_KEY) || !getSetting(db, PASSWORD_KEY)) throw notConfigured();
+  for (let attempt = 0; ; attempt++) {
+    const jar = await ensureSession(deps);
+    let res;
+    let body = null;
+    try {
+      res = await deps.fetch(`${CONNECT_BASE}/api/video/get`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: cookieHeader(jar) },
+        body: JSON.stringify({ device_id: deviceId, timestamp: ts }),
+        redirect: "manual",
+        signal: AbortSignal.timeout(HANET_TIMEOUT_MS)
+      });
+      body = await res.json().catch(() => null);
+    } catch {
+      throw unavailable();
+    }
+    if (res.status === 401) {
+      if (sessions.get(db) === jar) sessions.delete(db);
+      if (attempt === 0) continue;
+      throw loginFailed();
+    }
+    readCookies(res, jar);
+    const clip = res.ok ? parseClip(body) : null;
+    if (clip) return clip;
+    const code = body && typeof body === "object" ? body.error_code : void 0;
+    if (typeof code === "string" && code.startsWith("VIDEO_") || res.ok && body && typeof body === "object") {
+      throw new HttpError(404, VIDEO_NOT_FOUND);
+    }
+    throw unavailable();
+  }
+}
+async function testConnectLogin(deps) {
+  clearConnectSession(deps.db);
+  try {
+    await ensureSession(deps);
+    return { ok: true, message: `\u0110\u0103ng nh\u1EADp th\xE0nh c\xF4ng b\u1EB1ng ${getSetting(deps.db, EMAIL_KEY)}` };
+  } catch (err) {
+    return { ok: false, message: err instanceof HttpError ? err.message : VIDEO_UNAVAILABLE };
+  }
+}
+
+// server/routes/attendance.ts
 init_vntime();
 var DAY_SELECT = `SELECT a.*, u.code AS employee_code, u.name AS employee_name, u.avatar_url, u.department_id,
   d.name AS department_name
@@ -2225,6 +2378,7 @@ function mapDay(r) {
   };
 }
 var MAX_RECOMPUTE_DAYS = 92;
+var MAX_VIDEO_DRIFT_MS = 24 * 36e5;
 var DETAIL_FILTER = {
   total: "1 = 1",
   present: "a.user_id IS NOT NULL",
@@ -2264,8 +2418,7 @@ function attendanceRoutes(ctx) {
     if (!isValidDate(req.params.date)) throw new HttpError(400, "Ng\xE0y kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng YYYY-MM-DD)");
     const rows = db.prepare("SELECT id, device_id, device_name, place_id, ts, work_date, image_url, source FROM detections WHERE user_id = ? AND work_date = ? ORDER BY ts").all(target.id, req.params.date);
     const viewer = currentUser(req);
-    const placeId = getPlaceIds(db)[0];
-    const canWatch = (viewer.role === "hr" || viewer.role === "dept_manager") && placeId !== void 0;
+    const canWatch = viewer.role === "hr" || viewer.role === "dept_manager";
     const detections = rows.map((x) => ({
       id: x.id,
       deviceId: x.device_id,
@@ -2274,10 +2427,38 @@ function attendanceRoutes(ctx) {
       ts: x.ts,
       imageUrl: x.image_url ?? null,
       source: x.source,
-      videoUrl: canWatch && x.source !== "simulator" ? hanetVideoUrl(placeId, x.device_id, x.work_date) : null
+      hasVideo: canWatch && x.source !== "simulator"
     }));
     res.json({ detections });
   });
+  r.get(
+    "/detections/:id/video",
+    requireRole("hr", "dept_manager"),
+    ah(async (req, res) => {
+      const det = db.prepare("SELECT user_id, device_id, ts, source FROM detections WHERE id = ?").get(Number(req.params.id) || 0);
+      if (!det) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y l\u01B0\u1EE3t nh\u1EADn di\u1EC7n");
+      const target = getUser(db, det.user_id);
+      if (!target || !canSeeUser(currentUser(req), target)) throw new HttpError(403, "B\u1EA1n kh\xF4ng c\xF3 quy\u1EC1n xem d\u1EEF li\u1EC7u n\xE0y");
+      if (det.source === "simulator") throw new HttpError(404, "L\u01B0\u1EE3t m\xF4 ph\u1ECFng kh\xF4ng c\xF3 video");
+      let at = det.ts;
+      if (req.query.at !== void 0) {
+        at = Number(req.query.at);
+        if (!Number.isInteger(at) || at <= 0) throw new HttpError(400, "Th\u1EDDi \u0111i\u1EC3m xem video kh\xF4ng h\u1EE3p l\u1EC7");
+        if (Math.abs(at - det.ts) > MAX_VIDEO_DRIFT_MS) throw new HttpError(400, "Ch\u1EC9 xem \u0111\u01B0\u1EE3c video trong v\xF2ng 24 gi\u1EDD quanh l\u01B0\u1EE3t qu\u1EB9t");
+      }
+      const clip = await getVideoAt({ db, fetch: ctx.fetch, now: ctx.now }, det.device_id, at);
+      const body = {
+        url: clip.url,
+        startTs: clip.startTs,
+        duration: clip.duration,
+        offsetSeconds: Math.min(Math.max((at - clip.startTs) / 1e3, 0), clip.duration),
+        deviceName: clip.deviceName,
+        prevAt: clip.startTs - 1e3,
+        nextAt: clip.startTs + clip.duration * 1e3 + 1e3
+      };
+      res.json(body);
+    })
+  );
   r.post("/attendance/recompute", requireRole("hr"), (req, res) => {
     const { from, to } = req.body ?? {};
     if (!isValidDate(from) || !isValidDate(to)) throw new HttpError(400, "Ng\xE0y kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng YYYY-MM-DD)");
@@ -2573,6 +2754,20 @@ function hanetRoutes(ctx) {
       } catch (err) {
         res.json(fail(err.message));
       }
+    })
+  );
+  r.get("/hanet/connect", hr, (_req, res) => {
+    res.json(getConnectConfig(db));
+  });
+  r.put("/hanet/connect", hr, (req, res) => {
+    const b = req.body ?? {};
+    res.json(saveConnectConfig(db, { email: b.email, password: b.password }));
+  });
+  r.post(
+    "/hanet/connect/test",
+    hr,
+    ah(async (_req, res) => {
+      res.json(await testConnectLogin({ db, fetch: ctx.fetch, now: ctx.now }));
     })
   );
   r.post("/hanet/webhook-token/rotate", hr, (req, res) => {
