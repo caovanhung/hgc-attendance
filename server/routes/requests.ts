@@ -7,11 +7,14 @@ import { currentUser, requireRole } from '../middleware';
 import type { Row } from '../repo';
 import { scopeFor, scopeWhere } from '../auth';
 import { areaFilterSql, deptAreaId, managesArea, notFound, parseAreaFilter } from '../access';
-import { applyDayAdjustment, type DayAdjustment } from '../attendance';
-import { isValidDate, parseHHmm, toVnDate, vnDateTimeToTs } from '../vntime';
+import { applyDayAdjustment, recomputeUsers, type DayAdjustment } from '../attendance';
+import { daysBetween, isValidDate, parseHHmm, toVnDate, vnDateTimeToTs } from '../vntime';
 import type { AttendanceRequest, RequestType } from '../../shared/types';
 
-const TYPES: RequestType[] = ['missed_punch', 'late_explanation', 'leave_request'];
+const TYPES: RequestType[] = ['missed_punch', 'late_explanation', 'leave_request', 'business_trip'];
+export const LEAVE_TYPES: RequestType[] = ['leave_request', 'business_trip'];
+export const MAX_LEAVE_DAYS = 31;
+export const MAX_LEAVE_AHEAD_DAYS = 7;
 
 const REQUEST_SELECT = `SELECT r.*, u.name AS employee_name, u.code AS employee_code, u.department_id, rv.name AS reviewer_name
   FROM requests r JOIN users u ON u.id = r.user_id LEFT JOIN users rv ON rv.id = r.reviewed_by`;
@@ -69,8 +72,22 @@ export function requestRoutes(ctx: AppContext): Router {
     const user = currentUser(req);
     const b = req.body ?? {};
     if (!isValidDate(b.workDate)) throw new HttpError(400, 'Ngày không hợp lệ (định dạng YYYY-MM-DD)');
-    if (b.workDate > toVnDate(ctx.now())) throw new HttpError(400, 'Không thể gửi đơn cho ngày trong tương lai');
     if (!TYPES.includes(b.type)) throw new HttpError(400, 'Loại đơn không hợp lệ');
+    const today = toVnDate(ctx.now());
+    const isLeave = LEAVE_TYPES.includes(b.type);
+    let endDate: string | null = null;
+    if (isLeave) {
+      if (b.endDate !== undefined && b.endDate !== null && b.endDate !== '') {
+        if (!isValidDate(b.endDate)) throw new HttpError(400, 'Ngày kết thúc không hợp lệ (định dạng YYYY-MM-DD)');
+        if (b.endDate < b.workDate) throw new HttpError(400, 'Ngày kết thúc phải từ ngày bắt đầu trở đi');
+        if (daysBetween(b.workDate, b.endDate) >= MAX_LEAVE_DAYS) throw new HttpError(400, `Mỗi đơn tối đa ${MAX_LEAVE_DAYS} ngày`);
+        endDate = b.endDate === b.workDate ? null : b.endDate;
+      }
+      if (daysBetween(today, b.workDate) > MAX_LEAVE_AHEAD_DAYS) throw new HttpError(400, `Chỉ gửi đơn trước tối đa ${MAX_LEAVE_AHEAD_DAYS} ngày`);
+    } else {
+      if (b.endDate !== undefined && b.endDate !== null && b.endDate !== '') throw new HttpError(400, 'Chỉ đơn nghỉ phép và công tác mới chọn khoảng ngày');
+      if (b.workDate > today) throw new HttpError(400, 'Không thể gửi đơn cho ngày trong tương lai');
+    }
     const reason = typeof b.reason === 'string' ? b.reason.trim() : '';
     if (!reason) throw new HttpError(400, 'Vui lòng nhập lý do');
     let suggestedIn: string | null = null;
@@ -82,9 +99,9 @@ export function requestRoutes(ctx: AppContext): Router {
     }
     const id = newId('req');
     db.prepare(
-      `INSERT INTO requests(id, user_id, work_date, type, reason, suggested_in, suggested_out, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-    ).run(id, user.id, b.workDate, b.type, reason, suggestedIn, suggestedOut, new Date(ctx.now()).toISOString());
+      `INSERT INTO requests(id, user_id, work_date, end_date, type, reason, suggested_in, suggested_out, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+    ).run(id, user.id, b.workDate, endDate, b.type, reason, suggestedIn, suggestedOut, new Date(ctx.now()).toISOString());
     res.json({ request: getRequest(db, id) });
   });
 
@@ -129,8 +146,17 @@ export function requestRoutes(ctx: AppContext): Router {
         if (target.suggestedIn) patch.manualIn = vnDateTimeToTs(target.workDate, target.suggestedIn);
         if (target.suggestedOut) patch.manualOut = vnDateTimeToTs(target.workDate, target.suggestedOut);
         applyDayAdjustment(db, target.userId, target.workDate, patch);
+      } else if (LEAVE_TYPES.includes(target.type)) {
+        const to = target.endDate ?? target.workDate;
+        const overlap = db
+          .prepare(
+            `SELECT 1 FROM requests WHERE user_id = ? AND id != ? AND status = 'approved' AND type IN ('leave_request', 'business_trip')
+             AND work_date <= ? AND COALESCE(end_date, work_date) >= ?`,
+          )
+          .get(target.userId, target.id, to, target.workDate);
+        if (overlap) throw new HttpError(409, 'Khoảng ngày trùng với đơn đã duyệt');
+        recomputeUsers(db, [target.userId], target.workDate, to, ctx.now());
       }
-      // leave_request: chỉ đổi trạng thái đơn (nghỉ phép đầy đủ làm ở dự án sau)
     });
     res.json({ request: getRequest(db, target.id) });
   });

@@ -126,7 +126,7 @@ test('quên quẹt cho ngày không có lượt nào mà thiếu giờ vào → 
   }
 });
 
-test('từ chối và duyệt nghỉ phép không đổi dữ liệu công', async () => {
+test('từ chối không đổi công; duyệt nghỉ phép cập nhật trạng thái ngày thành leave', async () => {
   const { app, ids } = await setup();
   try {
     addDetection(app.db, ids.nv1, at('08:40'));
@@ -135,8 +135,9 @@ test('từ chối và duyệt nghỉ phép không đổi dữ liệu công', asy
     const leave = (await nv.post('/api/requests', { workDate: D, type: 'leave_request', reason: 'y' })).body.request;
     const hr = await loginAs(app, 'HR01');
     assert.equal((await hr.put(`/api/requests/${late.id}`, { status: 'rejected' })).status, 200);
-    assert.equal((await hr.put(`/api/requests/${leave.id}`, { status: 'approved' })).status, 200);
     assert.equal(dayStatus(app, ids.nv1)!.late_minutes, 40);
+    assert.equal((await hr.put(`/api/requests/${leave.id}`, { status: 'approved' })).status, 200);
+    assert.equal(dayStatus(app, ids.nv1)!.status, 'leave');
   } finally {
     await app.close();
   }
