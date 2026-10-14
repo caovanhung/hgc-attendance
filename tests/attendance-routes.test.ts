@@ -127,7 +127,7 @@ test('giờ làm việc: HR đọc/sửa, dữ liệu sai 400, tính lại áp d
   }
 });
 
-test('camera: mọi vai trò xem, HR thêm, trùng mã thiết bị 409', async () => {
+test('camera: HR thêm và xem, nhân viên không thấy, trùng mã thiết bị 409', async () => {
   const { app } = await setup();
   try {
     const nv = await loginAs(app, 'NV01');
@@ -138,7 +138,9 @@ test('camera: mọi vai trò xem, HR thêm, trùng mã thiết bị 409', async 
     assert.equal(c.body.camera.placeId, 143);
     assert.equal((await hr.post('/api/cameras', { name: 'Trùng', deviceKey: 'C20371B239' })).status, 409);
     assert.equal((await hr.post('/api/cameras', { name: '', deviceKey: 'X' })).status, 400);
-    assert.equal((await nv.get('/api/cameras')).body.cameras.length, 1);
+    // Nhân viên không xem camera (theo phạm vi khu); HR thấy tất cả
+    assert.equal((await nv.get('/api/cameras')).body.cameras.length, 0);
+    assert.equal((await hr.get('/api/cameras')).body.cameras.length, 1);
   } finally {
     await app.close();
   }

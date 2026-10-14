@@ -3,7 +3,8 @@ import type { AppContext } from '../context';
 import { HttpError, ah } from '../errors';
 import { currentUser, requireRole } from '../middleware';
 import { canSeeUser, getUser, type Row } from '../repo';
-import { scopeFor, scopeWhere } from '../auth';
+import { scopeFor, scopeWhere, type AuthUser } from '../auth';
+import { areaColumnSql, areaFilterSql, cameraScopeSql, notFound, parseAreaFilter } from '../access';
 import { recomputeRange } from '../attendance';
 import { NOT_SYSTEM_ADMIN } from '../bootstrap';
 import { getVideoAt } from '../hanet-connect';
@@ -49,6 +50,11 @@ const DETAIL_FILTER: Record<StatsDetailType, string> = {
   not_checked_in: 'a.user_id IS NULL',
 };
 
+/** Không được xem người này: quản trị khu nhận 404 (không lộ dữ liệu khu khác), vai trò khác 403 như trước. */
+function denySee(viewer: AuthUser): HttpError {
+  return viewer.role === 'area_admin' ? notFound('nhân sự') : new HttpError(403, 'Bạn không có quyền xem dữ liệu này');
+}
+
 export function attendanceRoutes(ctx: AppContext): Router {
   const { db } = ctx;
   const r = Router();
@@ -58,10 +64,11 @@ export function attendanceRoutes(ctx: AppContext): Router {
     const date = req.query.date === undefined || req.query.date === '' ? toVnDate(ctx.now()) : req.query.date;
     if (!isValidDate(date)) throw new HttpError(400, 'Ngày không hợp lệ (định dạng YYYY-MM-DD)');
     const w = scopeWhere(scopeFor(user), 'u.id', 'u.department_id');
-    let sql = `${DAY_SELECT} WHERE a.work_date = ? AND ${w.sql}`;
-    const params: string[] = [date, ...w.params];
+    const f = areaFilterSql(parseAreaFilter(db, user, req.query.area), 'u.department_id');
+    let sql = `${DAY_SELECT} WHERE a.work_date = ? AND ${w.sql} AND ${f.sql}`;
+    const params: string[] = [date, ...w.params, ...f.params];
     const departmentId = req.query.departmentId;
-    if (user.role === 'hr' && typeof departmentId === 'string' && departmentId) {
+    if ((user.role === 'hr' || user.role === 'area_admin') && typeof departmentId === 'string' && departmentId) {
       sql += ' AND u.department_id = ?';
       params.push(departmentId);
     }
@@ -76,15 +83,15 @@ export function attendanceRoutes(ctx: AppContext): Router {
   });
 
   r.get('/attendance/:userId/:date/detections', (req, res) => {
+    const viewer = currentUser(req);
     const target = getUser(db, req.params.userId);
     if (!target) throw new HttpError(404, 'Không tìm thấy nhân sự');
-    if (!canSeeUser(currentUser(req), target)) throw new HttpError(403, 'Bạn không có quyền xem dữ liệu này');
+    if (!canSeeUser(viewer, target)) throw denySee(viewer);
     if (!isValidDate(req.params.date)) throw new HttpError(400, 'Ngày không hợp lệ (định dạng YYYY-MM-DD)');
     const rows = db
       .prepare('SELECT id, device_id, device_name, place_id, ts, work_date, image_url, source FROM detections WHERE user_id = ? AND work_date = ? ORDER BY ts')
       .all(target.id, req.params.date) as Row[];
-    const viewer = currentUser(req);
-    const canWatch = viewer.role === 'hr' || viewer.role === 'dept_manager';
+    const canWatch = viewer.role === 'hr' || viewer.role === 'area_admin' || viewer.role === 'dept_manager';
     const detections: Detection[] = rows.map((x) => ({
       id: x.id,
       deviceId: x.device_id,
@@ -100,12 +107,14 @@ export function attendanceRoutes(ctx: AppContext): Router {
 
   r.get(
     '/detections/:id/video',
-    requireRole('hr', 'dept_manager'),
+    requireRole('hr', 'area_admin', 'dept_manager'),
     ah(async (req, res) => {
       const det = db.prepare('SELECT user_id, device_id, ts, source FROM detections WHERE id = ?').get(Number(req.params.id) || 0) as Row | undefined;
       if (!det) throw new HttpError(404, 'Không tìm thấy lượt nhận diện');
       const target = getUser(db, det.user_id);
-      if (!target || !canSeeUser(currentUser(req), target)) throw new HttpError(403, 'Bạn không có quyền xem dữ liệu này');
+      if (!target) throw new HttpError(404, 'Không tìm thấy lượt nhận diện');
+      const viewer = currentUser(req);
+      if (!canSeeUser(viewer, target)) throw denySee(viewer);
       if (det.source === 'simulator') throw new HttpError(404, 'Lượt mô phỏng không có video');
       let at: number = det.ts;
       if (req.query.at !== undefined) {
@@ -138,9 +147,14 @@ export function attendanceRoutes(ctx: AppContext): Router {
   });
 
   r.get('/stats', (req, res) => {
-    const w = scopeWhere(scopeFor(currentUser(req)), 'u.id', 'u.department_id');
+    const actor = currentUser(req);
+    const filter = parseAreaFilter(db, actor, req.query.area);
+    const w = scopeWhere(scopeFor(actor), 'u.id', 'u.department_id');
+    const f = areaFilterSql(filter, 'u.department_id');
+    const where = `${w.sql} AND ${f.sql}`;
+    const params = [...w.params, ...f.params];
     const date = toVnDate(ctx.now());
-    const total = db.prepare(`SELECT COUNT(*) AS c FROM users u WHERE u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${w.sql}`).get(...w.params) as { c: number };
+    const total = db.prepare(`SELECT COUNT(*) AS c FROM users u WHERE u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${where}`).get(...params) as { c: number };
     const day = db
       .prepare(
         `SELECT COUNT(*) AS present,
@@ -148,13 +162,15 @@ export function attendanceRoutes(ctx: AppContext): Router {
            SUM(CASE WHEN a.late_minutes > 0 THEN 1 ELSE 0 END) AS late,
            SUM(CASE WHEN a.status = 'missing_out' THEN 1 ELSE 0 END) AS missing_out
          FROM attendance_days a JOIN users u ON u.id = a.user_id
-         WHERE a.work_date = ? AND u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${w.sql}`,
+         WHERE a.work_date = ? AND u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${where}`,
       )
-      .get(date, ...w.params) as { present: number; on_time: number | null; late: number | null; missing_out: number | null };
+      .get(date, ...params) as { present: number; on_time: number | null; late: number | null; missing_out: number | null };
     const pending = db
-      .prepare(`SELECT COUNT(*) AS c FROM requests r JOIN users u ON u.id = r.user_id WHERE r.status = 'pending' AND ${w.sql}`)
-      .get(...w.params) as { c: number };
-    const cameras = db.prepare('SELECT COUNT(*) AS c FROM cameras').get() as { c: number };
+      .prepare(`SELECT COUNT(*) AS c FROM requests r JOIN users u ON u.id = r.user_id WHERE r.status = 'pending' AND ${where}`)
+      .get(...params) as { c: number };
+    const cs = cameraScopeSql(actor);
+    const cf = areaColumnSql(filter, 'c.area_id');
+    const cameras = db.prepare(`SELECT COUNT(*) AS c FROM cameras c WHERE ${cs.sql} AND ${cf.sql}`).get(...cs.params, ...cf.params) as { c: number };
     const body: StatsData = {
       date,
       totalEmployees: total.c,
@@ -172,7 +188,9 @@ export function attendanceRoutes(ctx: AppContext): Router {
   r.get('/stats/details', (req, res) => {
     const type = req.query.type as StatsDetailType;
     if (typeof type !== 'string' || !Object.hasOwn(DETAIL_FILTER, type)) throw new HttpError(400, 'Loại thống kê không hợp lệ');
-    const w = scopeWhere(scopeFor(currentUser(req)), 'u.id', 'u.department_id');
+    const actor = currentUser(req);
+    const w = scopeWhere(scopeFor(actor), 'u.id', 'u.department_id');
+    const f = areaFilterSql(parseAreaFilter(db, actor, req.query.area), 'u.department_id');
     const date = toVnDate(ctx.now());
     const rows = db
       .prepare(
@@ -180,10 +198,10 @@ export function attendanceRoutes(ctx: AppContext): Router {
          FROM users u
          LEFT JOIN departments d ON d.id = u.department_id
          LEFT JOIN attendance_days a ON a.user_id = u.id AND a.work_date = ?
-         WHERE u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${w.sql} AND ${DETAIL_FILTER[type]}
+         WHERE u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${w.sql} AND ${f.sql} AND ${DETAIL_FILTER[type]}
          ORDER BY a.first_in IS NULL, a.first_in, u.code`,
       )
-      .all(date, ...w.params) as Row[];
+      .all(date, ...w.params, ...f.params) as Row[];
     const out: StatsDetailRow[] = rows.map((x) => ({
       userId: x.id,
       employeeCode: x.code,

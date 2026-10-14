@@ -6,6 +6,7 @@ import { HttpError } from '../errors';
 import { currentUser, requireRole } from '../middleware';
 import type { Row } from '../repo';
 import { scopeFor, scopeWhere } from '../auth';
+import { areaFilterSql, parseAreaFilter } from '../access';
 import { applyDayAdjustment, type DayAdjustment } from '../attendance';
 import { isValidDate, parseHHmm, toVnDate, vnDateTimeToTs } from '../vntime';
 import type { AttendanceRequest, RequestType } from '../../shared/types';
@@ -56,8 +57,10 @@ export function requestRoutes(ctx: AppContext): Router {
   const r = Router();
 
   r.get('/requests', (req, res) => {
-    const w = scopeWhere(scopeFor(currentUser(req)), 'u.id', 'u.department_id');
-    const rows = db.prepare(`${REQUEST_SELECT} WHERE ${w.sql} ORDER BY r.created_at DESC`).all(...w.params) as Row[];
+    const actor = currentUser(req);
+    const w = scopeWhere(scopeFor(actor), 'u.id', 'u.department_id');
+    const f = areaFilterSql(parseAreaFilter(db, actor, req.query.area), 'u.department_id');
+    const rows = db.prepare(`${REQUEST_SELECT} WHERE ${w.sql} AND ${f.sql} ORDER BY r.created_at DESC`).all(...w.params, ...f.params) as Row[];
     res.json({ requests: rows.map(mapRequest) });
   });
 

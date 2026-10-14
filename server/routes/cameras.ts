@@ -5,7 +5,8 @@ import { HttpError, ah } from '../errors';
 import { importCameras, refreshCameraStatus } from '../cameras';
 import { reconcileEnabled } from '../hanet';
 import { dropEntityJobs, enqueue, kickEntity } from '../hanet-sync';
-import { requireRole } from '../middleware';
+import { currentUser, requireRole } from '../middleware';
+import { areaColumnSql, cameraScopeSql, parseAreaFilter } from '../access';
 import type { Row } from '../repo';
 import type { Camera } from '../../shared/types';
 
@@ -37,8 +38,12 @@ export function cameraRoutes(ctx: AppContext): Router {
     if (!reconcileEnabled(db)) throw new HttpError(400, 'Chưa cấu hình kết nối Camera AI (Client ID, Refresh Token, địa điểm)');
   };
 
-  r.get('/cameras', (_req, res) => {
-    res.json({ cameras: listCameras() });
+  r.get('/cameras', (req, res) => {
+    const actor = currentUser(req);
+    const s = cameraScopeSql(actor);
+    const f = areaColumnSql(parseAreaFilter(db, actor, req.query.area), 'c.area_id');
+    const rows = db.prepare(`${CAMERA_SELECT} WHERE ${s.sql} AND ${f.sql} ORDER BY c.name`).all(...s.params, ...f.params) as Row[];
+    res.json({ cameras: rows.map(mapCamera) });
   });
 
   r.post('/cameras', requireRole('hr'), (req, res) => {

@@ -9,6 +9,7 @@ import { USER_SELECT, getUser, mapUser, type Row } from '../repo';
 import { deleteUserSessions, generateTempPassword, hashPassword, scopeFor, scopeWhere } from '../auth';
 import { toVnDate } from '../vntime';
 import { NOT_SYSTEM_ADMIN, SYSTEM_ADMIN_CODE } from '../bootstrap';
+import { areaFilterSql, parseAreaFilter } from '../access';
 import { deleteSighting, getSighting, listSightings, SIGHTING_TTL_MS } from '../sightings';
 import { registerFace } from '../hanet-face';
 import { dropEntityJobs, enqueue, kickAll, kickEntity } from '../hanet-sync';
@@ -65,8 +66,12 @@ export function userRoutes(ctx: AppContext): Router {
   const deps = { db, fetch: ctx.fetch, now: ctx.now };
 
   r.get('/users', (req, res) => {
-    const w = scopeWhere(scopeFor(currentUser(req)), 'u.id', 'u.department_id');
-    const rows = db.prepare(`${USER_SELECT} WHERE ${NOT_SYSTEM_ADMIN} AND ${w.sql} ORDER BY u.code`).all(...w.params) as Row[];
+    const actor = currentUser(req);
+    const w = scopeWhere(scopeFor(actor), 'u.id', 'u.department_id');
+    const f = areaFilterSql(parseAreaFilter(db, actor, req.query.area), 'u.department_id');
+    const rows = db
+      .prepare(`${USER_SELECT} WHERE ${NOT_SYSTEM_ADMIN} AND ${w.sql} AND ${f.sql} ORDER BY u.code`)
+      .all(...w.params, ...f.params) as Row[];
     res.json({ users: rows.map(mapUser) });
   });
 

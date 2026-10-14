@@ -5,6 +5,7 @@ import { newId } from '../db';
 import { HttpError } from '../errors';
 import { currentUser, requireRole, requireSystemAdmin } from '../middleware';
 import { backupNow } from '../backup';
+import { areaColumnSql, departmentScopeSql, parseAreaFilter } from '../access';
 import { dropEntityJobs, enqueue, kickEntity } from '../hanet-sync';
 import type { Row } from '../repo';
 import { CODE_RE } from '../validation';
@@ -57,8 +58,11 @@ export function departmentRoutes(ctx: AppContext): Router {
   const { db } = ctx;
   const r = Router();
 
-  r.get('/departments', (_req, res) => {
-    const rows = db.prepare(`${DEPT_SELECT} ORDER BY d.code`).all() as Row[];
+  r.get('/departments', (req, res) => {
+    const actor = currentUser(req);
+    const s = departmentScopeSql(actor);
+    const f = areaColumnSql(parseAreaFilter(db, actor, req.query.area), 'd.area_id');
+    const rows = db.prepare(`${DEPT_SELECT} WHERE ${s.sql} AND ${f.sql} ORDER BY d.code`).all(...s.params, ...f.params) as Row[];
     res.json({ departments: rows.map(mapDept) });
   });
 

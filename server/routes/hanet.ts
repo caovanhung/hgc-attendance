@@ -4,6 +4,7 @@ import { HttpError, ah } from '../errors';
 import { currentUser, requireRole } from '../middleware';
 import { getUser, type Row } from '../repo';
 import { safeEqualStrings } from '../auth';
+import { deviceAreaId, isGlobalHr, managesArea, requireManager } from '../access';
 import {
   getHanetConfigView, getWebhookToken, ingestCheckin, logWebhook, parseCheckin, rotateWebhookToken, updateHanetConfig,
   reconcileEnabled, getPlaceIds, parseStranger, STRANGER_MESSAGE, UNMATCHED_MESSAGE, type CheckinInput, type IngestResult,
@@ -147,10 +148,14 @@ export function hanetRoutes(ctx: AppContext): Router {
     res.json({ config: getHanetConfigView(db) });
   });
 
-  r.get('/hanet/sightings', hr, (req, res) => {
+  r.get('/hanet/sightings', requireManager, (req, res) => {
+    const actor = currentUser(req);
     const kind = req.query.kind;
     if (kind !== undefined && kind !== 'stranger' && kind !== 'unlinked') throw new HttpError(400, 'Loại lượt chụp không hợp lệ');
-    res.json({ sightings: listSightings(db, ctx.now(), kind as SightingKind | undefined) });
+    const all = listSightings(db, ctx.now(), kind as SightingKind | undefined);
+    // Quản trị khu chỉ thấy ảnh chụp từ camera thuộc khu mình
+    const sightings = isGlobalHr(actor) ? all : all.filter((s) => managesArea(actor, deviceAreaId(db, s.deviceId)));
+    res.json({ sightings });
   });
 
   r.get(
