@@ -53,6 +53,18 @@ test('pruneBackups giữ 30 bản hằng ngày và 30 bản khác', () => {
   assert.ok(names.includes('attendance-2026-09-04.db'));
 });
 
+test('pruneBackups không bao giờ xóa bản pre-migrate', () => {
+  const dir = tmp();
+  for (let i = 0; i < 35; i++) fs.writeFileSync(path.join(dir, `attendance-${addDays('2026-08-01', i)}-120000-manual.db`), '');
+  fs.writeFileSync(path.join(dir, 'attendance-pre-migrate-v3.db'), '');
+  fs.writeFileSync(path.join(dir, 'attendance-2026-07-01-120000-pre-migrate-v2.db'), '');
+  pruneBackups(dir);
+  const names = fs.readdirSync(dir);
+  assert.ok(names.includes('attendance-pre-migrate-v3.db'));
+  assert.ok(names.includes('attendance-2026-07-01-120000-pre-migrate-v2.db'));
+  assert.equal(names.filter((n) => n.endsWith('-manual.db')).length, BACKUP_KEEP);
+});
+
 test('API sao lưu: chỉ HR; tạo, liệt kê, tải về', async () => {
   const app = await startTestApp({ now: () => NOW });
   try {

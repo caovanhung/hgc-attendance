@@ -57,7 +57,7 @@ test('nâng cấp v3 → v4: giữ nguyên dữ liệu, thêm bảng/cột, sao 
   assert.equal((db.prepare("SELECT shift_id FROM users WHERE id = 'u1'").get() as { shift_id: string | null }).shift_id, null);
   const backups = fs.readdirSync(backupDir);
   assert.equal(backups.length, 1);
-  assert.match(backups[0], /pre-migrate\.db$/);
+  assert.equal(backups[0], 'attendance-pre-migrate-v3.db');
   db.close();
   openDb(file, { backupDir, now: () => NOW }).close();
   assert.equal(fs.readdirSync(backupDir).length, 1, 'mở lại không sao lưu/nâng cấp lại');
@@ -87,6 +87,19 @@ test('nâng cấp lỗi (dữ liệu khóa ngoại hỏng) ⇒ hoàn tác, DB gi
   assert.equal((raw.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 3);
   assert.equal(raw.prepare("SELECT 1 FROM sqlite_master WHERE name = 'shifts'").get(), undefined);
   raw.close();
+});
+
+test('nâng cấp lỗi hai lần ⇒ chỉ một file sao lưu pre-migrate, dùng lại tên đó trong thông báo', () => {
+  const { file, backupDir } = makeV3((raw) => {
+    raw.exec("PRAGMA foreign_keys = OFF; INSERT INTO attendance_days(user_id, work_date, first_in, status, detection_count) VALUES ('khong-co', '2026-10-10', 1, 'on_time', 1);");
+  });
+  for (let i = 0; i < 2; i++) {
+    assert.throws(
+      () => openDb(file, { backupDir, now: () => NOW + i * 60_000 }),
+      (e: unknown) => e instanceof MigrationError && e.backup === 'attendance-pre-migrate-v3.db' && e.message.includes('attendance-pre-migrate-v3.db'),
+    );
+  }
+  assert.deepEqual(fs.readdirSync(backupDir), ['attendance-pre-migrate-v3.db']);
 });
 
 test('DB phiên bản mới hơn (v5) ⇒ SchemaTooNewError, không đụng vào', () => {

@@ -1,5 +1,5 @@
 import type { Db } from './db';
-import { backupNow } from './backup';
+import { backupPreMigrate } from './backup';
 import { ddlAttendanceDays, ddlHolidays, ddlRequests, ddlShifts, SCHEMA_VERSION } from './schema';
 import { toVnDate } from './vntime';
 
@@ -54,7 +54,7 @@ export const MIGRATIONS: Migration[] = [{ from: 3, run: migrate3to4 }];
  * Tắt foreign_keys trong lúc dựng lại bảng; kiểm tra foreign_key_check trước khi COMMIT.
  */
 export function runMigrations(db: Db, file: string, from: number, opts: { backupDir: string | null; now: number }): string | null {
-  const backup = opts.backupDir && file !== ':memory:' ? backupNow(db, opts.backupDir, 'pre-migrate', opts.now) : null;
+  const backup = opts.backupDir && file !== ':memory:' ? backupPreMigrate(db, opts.backupDir, from) : null;
   db.exec('PRAGMA foreign_keys = OFF');
   try {
     db.exec('BEGIN IMMEDIATE');

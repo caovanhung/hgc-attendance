@@ -78,14 +78,14 @@ Sau đó đăng nhập `ADMIN` / `Admin@123`, đổi mật khẩu, rồi tạo l
 
 ## Nâng cấp lên bản ca làm việc (database v4)
 
-Bản này **tự nâng cấp database v3 lên v4 và giữ nguyên dữ liệu** (khu vực, phòng ban, nhân sự, ngày công, đơn). Server tự sao lưu trước khi nâng cấp vào `data/backups/attendance-<ngày>-<giờ>-pre-migrate.db`. **Không xóa database.**
+Bản này **tự nâng cấp database v3 lên v4 và giữ nguyên dữ liệu** (khu vực, phòng ban, nhân sự, ngày công, đơn). Server tự sao lưu trước khi nâng cấp vào `data/backups/attendance-pre-migrate-v3.db` (nếu file này đã có từ lần thử trước thì giữ nguyên bản đó; bản này không bao giờ bị tự xóa). **Không xóa database.**
 
 ```bash
 cd /home/ubuntu/hgc-attendance
 pm2 stop hanet-attendance
 git pull && npm ci --omit=dev
 pm2 restart hanet-attendance
-pm2 logs hanet-attendance --lines 20 --nostream    # thấy: [MIGRATE] v3 → v4 xong (sao lưu: attendance-…-pre-migrate.db)
+pm2 logs hanet-attendance --lines 20 --nostream    # thấy: [MIGRATE] v3 → v4 xong (sao lưu: attendance-pre-migrate-v3.db)
 ```
 
 Nếu log có `[MIGRATE] Nâng cấp v3 → v4 thất bại …`: database vẫn là v3, không mất gì; gửi dòng log đó cho bộ phận kỹ thuật và chạy lại bản cũ bằng `git checkout <commit cũ> && npm ci --omit=dev && pm2 restart hanet-attendance`.
