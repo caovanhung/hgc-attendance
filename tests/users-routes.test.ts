@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { startTestApp, seedUser, seedDepartment, loginAs, addDetection, Client, type TestApp } from './helpers';
+import { startTestApp, seedUser, seedDepartment, loginAs, addDetection, Client, contact, type TestApp } from './helpers';
 import fs from 'node:fs';
+import { saveMailConfig } from '../server/mail';
+import { runMailJobs } from '../server/mail-queue';
 
 async function setup(): Promise<{ app: TestApp; kt: string; kd: string; ids: Record<string, string> }> {
   const app = await startTestApp();
@@ -35,16 +37,21 @@ test('GET /users theo phạm vi vai trò', async () => {
 test('HR tạo nhân viên → mật khẩu tạm dùng được và bị bắt đổi', async () => {
   const { app, kt } = await setup();
   try {
+    saveMailConfig(app.db, {
+      host: 'smtp.gmail.com', port: 465, secure: 'ssl', user: 'hr@gmail.com', password: 'p', fromName: 'P', fromEmail: 'hr@gmail.com',
+      appUrl: 'https://petrolimex.hgcvn.cloud', dailyLimit: 450,
+    });
     const hr = await loginAs(app, 'HR01');
-    const r = await hr.post('/api/users', { code: 'nv03', name: 'Lê Văn C', departmentId: kt, position: 'Kế toán viên' });
+    const r = await hr.post('/api/users', { ...contact('nv03'), code: 'nv03', name: 'Lê Văn C', departmentId: kt, position: 'Kế toán viên' });
     assert.equal(r.status, 200);
     assert.equal(r.body.user.code, 'NV03');
     assert.equal(r.body.user.departmentName, 'Kế toán');
-    assert.equal(r.body.user.email, '');
     assert.equal(r.body.user.hanetPersonId, null);
     assert.equal(r.body.user.faceRegistered, false);
-    assert.equal(r.body.tempPassword.length, 10);
-    const nv = await loginAs(app, 'NV03', r.body.tempPassword);
+    assert.equal(r.body.tempPassword, undefined);
+    await runMailJobs({ db: app.db, sendMail: app.ctx.sendMail, now: app.ctx.now });
+    const pw = /Mật khẩu tạm: (\S+)/.exec(app.mails[0].text)![1];
+    const nv = await loginAs(app, 'NV03', pw);
     assert.equal((await nv.get('/api/auth/me')).body.mustChangePassword, true);
   } finally {
     await app.close();
@@ -55,11 +62,11 @@ test('tạo nhân viên: trùng mã (không phân biệt hoa thường) 409, d�
   const { app } = await setup();
   try {
     const hr = await loginAs(app, 'HR01');
-    assert.equal((await hr.post('/api/users', { code: 'nv01', name: 'Trùng' })).status, 409);
-    assert.equal((await hr.post('/api/users', { code: 'NV 09', name: 'Có dấu cách' })).status, 400);
-    assert.equal((await hr.post('/api/users', { code: 'NV09', name: '' })).status, 400);
-    assert.equal((await hr.post('/api/users', { code: 'NV09', name: 'X', role: 'admin' })).status, 400);
-    assert.equal((await hr.post('/api/users', { code: 'NV09', name: 'X', departmentId: 'dep-khong-co' })).status, 400);
+    assert.equal((await hr.post('/api/users', { ...contact('NV19'), code: 'nv01', name: 'Trùng' })).status, 409);
+    assert.equal((await hr.post('/api/users', { ...contact('NV09'), code: 'NV 09', name: 'Có dấu cách' })).status, 400);
+    assert.equal((await hr.post('/api/users', { ...contact('NV09'), code: 'NV09', name: '' })).status, 400);
+    assert.equal((await hr.post('/api/users', { ...contact('NV09'), code: 'NV09', name: 'X', role: 'admin' })).status, 400);
+    assert.equal((await hr.post('/api/users', { ...contact('NV09'), code: 'NV09', name: 'X', departmentId: 'dep-khong-co' })).status, 400);
   } finally {
     await app.close();
   }
@@ -70,7 +77,7 @@ test('chỉ HR được tạo/sửa/đặt lại mật khẩu', async () => {
   try {
     for (const code of ['TP01', 'NV01']) {
       const c = await loginAs(app, code);
-      assert.equal((await c.post('/api/users', { code: 'NV09', name: 'X' })).status, 403);
+      assert.equal((await c.post('/api/users', { ...contact('NV09'), code: 'NV09', name: 'X' })).status, 403);
       assert.equal((await c.put(`/api/users/${ids.nv1}`, { name: 'Y' })).status, 403);
       assert.equal((await c.post(`/api/users/${ids.nv1}/reset-password`)).status, 403);
     }
@@ -117,13 +124,18 @@ test('Review Focus #5: HR không tự đổi vai trò hay trạng thái của m�
 test('HR đặt lại mật khẩu: mật khẩu cũ hết hiệu lực, phiên bị hủy', async () => {
   const { app, ids } = await setup();
   try {
+    saveMailConfig(app.db, {
+      host: 'smtp.gmail.com', port: 465, secure: 'ssl', user: 'hr@gmail.com', password: 'p', fromName: 'P', fromEmail: 'hr@gmail.com',
+      appUrl: 'https://petrolimex.hgcvn.cloud', dailyLimit: 450,
+    });
+    app.db.prepare("UPDATE users SET email = 'nv01@test.vn' WHERE id = ?").run(ids.nv1);
     const hr = await loginAs(app, 'HR01');
     const nv = await loginAs(app, 'NV01');
-    const r = await hr.post(`/api/users/${ids.nv1}/reset-password`);
-    assert.equal(r.status, 200);
+    assert.deepEqual((await hr.post(`/api/users/${ids.nv1}/reset-password`)).body, { queued: true });
+    await runMailJobs({ db: app.db, sendMail: app.ctx.sendMail, now: app.ctx.now });
     assert.equal((await nv.get('/api/auth/me')).status, 401);
     await assert.rejects(loginAs(app, 'NV01'));
-    await loginAs(app, 'NV01', r.body.tempPassword);
+    await loginAs(app, 'NV01', /Mật khẩu tạm: (\S+)/.exec(app.mails[0].text)![1]);
   } finally {
     await app.close();
   }
@@ -237,7 +249,7 @@ test('tạo nhân viên kèm faceRegistered (chọn từ camera) → lưu đúng
   const { app } = await setup();
   try {
     const hr = await loginAs(app, 'HR01');
-    const r = await hr.post('/api/users', { code: 'NV05', name: 'Từ camera', hanetPersonId: '2134589559210508288', faceRegistered: true });
+    const r = await hr.post('/api/users', { ...contact('NV05'), code: 'NV05', name: 'Từ camera', hanetPersonId: '2134589559210508288', faceRegistered: true });
     assert.equal(r.status, 200);
     assert.equal(r.body.user.faceRegistered, true);
     assert.equal(r.body.user.hanetPersonId, '2134589559210508288');
@@ -250,7 +262,7 @@ test('không ai tạo được nhân sự mang mã ADMIN (kể cả khi chưa c�
   const { app } = await setup();
   try {
     const hr = await loginAs(app, 'HR01');
-    assert.equal((await hr.post('/api/users', { code: 'admin', name: 'Giả mạo', role: 'hr' })).status, 400);
+    assert.equal((await hr.post('/api/users', { ...contact('admin'), code: 'admin', name: 'Giả mạo', role: 'hr' })).status, 400);
     assert.equal((app.db.prepare("SELECT COUNT(*) AS c FROM users WHERE code = 'ADMIN'").get() as { c: number }).c, 0);
   } finally {
     await app.close();

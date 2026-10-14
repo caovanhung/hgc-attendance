@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { startTestApp, seedUser, seedDepartment, loginAs } from './helpers';
+import { startTestApp, seedUser, seedDepartment, loginAs, contact } from './helpers';
 import { PLACE, configureHanet, fail, fakeHanet, ok, type Reply } from './fake-hanet';
 import { enqueue, runDueJobs } from '../server/hanet-sync';
 import { SYNC_HANDLERS } from '../server/sync-handlers';
@@ -39,7 +39,7 @@ test('sửa họ tên/chức vụ người đã có FaceID → updateInfo; ngư�
     const b = seedUser(app.db, { code: 'NV02' });
     await hr.put(`/api/users/${a}`, { name: 'Nguyễn Văn An', position: 'Kế toán' });
     await hr.put(`/api/users/${b}`, { name: 'Khác' });
-    await hr.put(`/api/users/${a}`, { phone: '0900' });
+    await hr.put(`/api/users/${a}`, { phone: '0900000000' });
     assert.deepEqual(ops(app.db), [['user.info', a]]);
     await runDueJobs(deps, SYNC_HANDLERS);
     const p = fake.last('/person/updateInfo')!.params;
@@ -191,7 +191,7 @@ test('gắn Person ID thủ công (tạo/sửa) → xếp việc user.alias trư
   try {
     const d = seedDepartment(app.db, 'A');
     app.db.prepare("UPDATE departments SET hanet_department_id = '11' WHERE id = ?").run(d);
-    const created = await hr.post('/api/users', { code: 'nv21', name: 'Người A', departmentId: d, hanetPersonId: 'P21' });
+    const created = await hr.post('/api/users', { ...contact('nv21'), code: 'nv21', name: 'Người A', departmentId: d, hanetPersonId: 'P21' });
     assert.equal(created.status, 200, JSON.stringify(created.body));
     assert.deepEqual(jobsOf(app.db, created.body.user.id), [
       ['user.alias', { personId: 'P21', code: 'NV21' }],
@@ -203,7 +203,7 @@ test('gắn Person ID thủ công (tạo/sửa) → xếp việc user.alias trư
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.deepEqual(jobsOf(app.db, id).map(([op]) => op), ['user.alias', 'user.info', 'user.department']);
     assert.deepEqual(jobsOf(app.db, id)[0][1], { personId: 'P22', code: 'NV22' });
-    await hr.put(`/api/users/${id}`, { hanetPersonId: 'P22', phone: '090' });
+    await hr.put(`/api/users/${id}`, { hanetPersonId: 'P22', phone: '0900000001' });
     assert.equal(jobsOf(app.db, id).filter(([op]) => op === 'user.alias').length, 1, 'Person ID không đổi thì không xếp lại');
 
     await runDueJobs(deps, SYNC_HANDLERS);
@@ -219,7 +219,7 @@ test('Person ID đã gắn với nhân sự khác → 409 khi tạo và khi sử
   try {
     faceUser(app.db, 'NV31', 'P31');
     const other = seedUser(app.db, { code: 'NV32' });
-    const c = await hr.post('/api/users', { code: 'NV33', name: 'X', hanetPersonId: 'P31' });
+    const c = await hr.post('/api/users', { ...contact('NV33'), code: 'NV33', name: 'X', hanetPersonId: 'P31' });
     assert.deepEqual([c.status, c.body.error], [409, 'Person ID này đã gắn với nhân sự khác']);
     const u = await hr.put(`/api/users/${other}`, { hanetPersonId: ' P31 ' });
     assert.deepEqual([u.status, u.body.error], [409, 'Person ID này đã gắn với nhân sự khác']);

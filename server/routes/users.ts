@@ -6,7 +6,9 @@ import { HttpError, ah } from '../errors';
 import { currentUser } from '../middleware';
 import { backupNow } from '../backup';
 import { USER_SELECT, getUser, mapUser, type Row } from '../repo';
-import { deleteUserSessions, generateTempPassword, hashPassword, scopeFor, scopeWhere, type AuthUser } from '../auth';
+import { deleteUserSessions, scopeFor, scopeWhere, type AuthUser } from '../auth';
+import { assertEmailFree, parseEmail, parsePhone } from '../accounts';
+import { enqueueMail } from '../mail-queue';
 import { toVnDate } from '../vntime';
 import { NOT_SYSTEM_ADMIN, SYSTEM_ADMIN_CODE } from '../bootstrap';
 import {
@@ -15,7 +17,7 @@ import {
 import { deleteSighting, getSighting, listSightings, SIGHTING_TTL_MS } from '../sightings';
 import { registerFace } from '../hanet-face';
 import { dropEntityJobs, enqueue, kickAll, kickEntity } from '../hanet-sync';
-import { fetchAllPersons, hanetAliases, IMPORT_MAX, importPersons, unlinkedPersons } from '../hanet-import';
+import { fetchAllPersons, hanetAliases, IMPORT_MAX, importPersons, nextEmployeeCode, unlinkedPersons } from '../hanet-import';
 import { getPlaceIds, reconcileEnabled } from '../hanet';
 import { CODE_ERROR, CODE_RE } from '../validation';
 import type { FaceCandidates, FaceResult, User, UserRole } from '../../shared/types';
@@ -157,13 +159,17 @@ export function userRoutes(ctx: AppContext): Router {
     }),
   );
 
+  r.get('/users/next-code', requireManager, (_req, res) => {
+    res.json({ code: nextEmployeeCode(db) });
+  });
+
   r.post(
     '/users',
     requireManager,
     ah(async (req, res) => {
       const actor = currentUser(req);
       const b = req.body ?? {};
-      const code = (str(b.code) ?? '').toUpperCase();
+      const code = (str(b.code) ?? '').toUpperCase() || nextEmployeeCode(db);
       const name = str(b.name) ?? '';
       if (!CODE_RE.test(code)) throw new HttpError(400, CODE_ERROR);
       // Mã ADMIN mang quyền xóa dữ liệu: chỉ hệ thống được tạo, kể cả khi database chưa có tài khoản này.
@@ -172,35 +178,25 @@ export function userRoutes(ctx: AppContext): Router {
       const role = b.role === undefined ? 'employee' : b.role;
       assertRoleAllowed(actor, role);
       const departmentId = resolveDepartmentFor(db, actor, b.departmentId);
+      const email = parseEmail(b.email);
+      const phone = parsePhone(b.phone);
       const adminAreaIds = role === 'area_admin' ? parseAdminAreaIds(db, b.adminAreaIds) : [];
       if (db.prepare('SELECT 1 FROM users WHERE code = ?').get(code)) throw new HttpError(409, 'Mã nhân viên đã tồn tại');
+      assertEmailFree(db, email, null);
       const image = resolveFaceImage(db, actor, null, b, ctx.now());
       const hanetPersonId = str(b.hanetPersonId) || null;
       assertPersonIdFree(db, hanetPersonId, null);
 
       const id = newId('usr');
-      const tempPassword = generateTempPassword();
+      // Chưa có mật khẩu: mật khẩu tạm được sinh và gửi qua email khi thư chào mừng đi (mail-queue)
       tx(db, () => {
         db.prepare(
           `INSERT INTO users(id, code, name, email, phone, role, department_id, position, avatar_url, hanet_person_id,
              face_registered, status, password_hash, must_change_password, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 1, ?)`,
-        ).run(
-          id,
-          code,
-          name,
-          str(b.email) ?? '',
-          str(b.phone) ?? '',
-          role,
-          departmentId,
-          str(b.position) ?? '',
-          str(b.avatarUrl) ?? '',
-          hanetPersonId,
-          hanetPersonId ? 1 : 0,
-          hashPassword(tempPassword),
-          toVnDate(ctx.now()),
-        );
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, 1, ?)`,
+        ).run(id, code, name, email, phone, role, departmentId, str(b.position) ?? '', str(b.avatarUrl) ?? '', hanetPersonId, hanetPersonId ? 1 : 0, toVnDate(ctx.now()));
         if (adminAreaIds.length) setAdminAreas(db, id, adminAreaIds);
+        enqueueMail(db, id, 'welcome', {}, ctx.now());
       });
       // Việc gán aliasID phải đứng trước việc phòng ban/thông tin của người này
       if (hanetPersonId) enqueueAlias(db, id, hanetPersonId, code, ctx.now());
@@ -213,7 +209,7 @@ export function userRoutes(ctx: AppContext): Router {
         if (face.ok && image.sightingId !== null) deleteSighting(db, image.sightingId);
       }
       kickEntity(ctx, 'user', id);
-      res.json({ user: getUser(db, id), tempPassword, ...(face ? { face } : {}) });
+      res.json({ user: getUser(db, id), ...(face ? { face } : {}) });
     }),
   );
 
@@ -255,7 +251,13 @@ export function userRoutes(ctx: AppContext): Router {
       if (!name) throw new HttpError(400, 'Họ tên là bắt buộc');
       set('name', name);
     }
-    for (const [key, col] of [['email', 'email'], ['phone', 'phone'], ['position', 'position'], ['avatarUrl', 'avatar_url']] as const) {
+    if (b.email !== undefined) {
+      const email = parseEmail(b.email);
+      assertEmailFree(db, email, target.id);
+      set('email', email);
+    }
+    if (b.phone !== undefined) set('phone', parsePhone(b.phone));
+    for (const [key, col] of [['position', 'position'], ['avatarUrl', 'avatar_url']] as const) {
       if (b[key] !== undefined) set(col, str(b[key]) ?? '');
     }
     if (b.hanetPersonId !== undefined) {
@@ -286,6 +288,10 @@ export function userRoutes(ctx: AppContext): Router {
       if (sets.length) db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...params, target.id);
       if (adminAreas !== null) setAdminAreas(db, target.id, adminAreas);
     });
+    // Người chưa đăng nhập được (nhập từ Camera AI, hoặc thư chào mừng lỗi) vừa có/đổi email: gửi thư chào mừng
+    if (b.email !== undefined && !target.canLogin && parseEmail(b.email) !== target.email.toLowerCase()) {
+      enqueueMail(db, target.id, 'welcome', {}, ctx.now());
+    }
     if (b.status === 'inactive' && target.status !== 'inactive') deleteUserSessions(db, target.id);
     const after = getUser(db, target.id)!;
     const now = ctx.now();
@@ -311,11 +317,10 @@ export function userRoutes(ctx: AppContext): Router {
     const actor = currentUser(req);
     const target = manageableUser(db, actor, req.params.id);
     assertCanEdit(actor, target);
-    const tempPassword = generateTempPassword();
-    db.prepare('UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?').run(hashPassword(tempPassword), target.id);
-    deleteUserSessions(db, target.id);
-    console.warn(`[SECURITY] password_reset by=${actor.code} target=${target.code} ip=${req.ip}`);
-    res.json({ tempPassword });
+    if (!target.email) throw new HttpError(400, 'Nhân sự chưa có email: hãy bổ sung email trước');
+    enqueueMail(db, target.id, target.canLogin ? 'reset_temp' : 'welcome', {}, ctx.now());
+    console.warn(`[SECURITY] password_reset_queued by=${actor.code} target=${target.code} ip=${req.ip}`);
+    res.json({ queued: true });
   });
 
   r.post(

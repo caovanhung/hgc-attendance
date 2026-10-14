@@ -170,3 +170,64 @@ test('API cấu hình thư: ADMIN lưu và gửi thư thử; HR toàn hệ thố
     await app.close();
   }
 });
+
+test('xếp thư mới trong lúc thư cũ đang gửi: không xóa thư đang gửi, trạng thái giữ "chờ" tới khi thư mới đi', async () => {
+  const db = freshDb();
+  saveMailConfig(db, GMAIL);
+  const id = seedUser(db, { code: 'NV01', email: 'nv01@test.vn', password: null });
+  enqueueMail(db, id, 'welcome', {}, T0);
+  const mails: MailMessage[] = [];
+  let first = true;
+  const send: SendMail = async (_cfg, msg) => {
+    if (first) {
+      first = false;
+      enqueueMail(db, id, 'reset_temp', {}, T0); // HR bấm "Gửi lại thư" đúng lúc thư đầu đang gửi
+    }
+    mails.push(msg);
+  };
+  assert.deepEqual(await runMailJobs({ db, sendMail: send, now: () => T0 }, 1), { sent: 1, failed: 0 });
+  const rows = db.prepare('SELECT kind, status FROM email_jobs WHERE user_id = ? ORDER BY id').all(id) as Record<string, any>[];
+  assert.deepEqual(rows.map((r) => [r.kind, r.status]), [['welcome', 'sent'], ['reset_temp', 'pending']]);
+  assert.equal(sentToday(db, T0), 1, 'thư đã gửi vẫn tính vào hạn mức');
+  assert.equal(user(db, id).email_status, 'pending', 'còn thư chờ thì không báo đã gửi');
+  await runMailJobs({ db, sendMail: send, now: () => T0 });
+  assert.equal(mails.length, 2);
+  assert.equal(user(db, id).email_status, 'sent');
+  assert.ok(verifyPassword(/Mật khẩu tạm: (\S+)/.exec(mails[1].text)![1], user(db, id).password_hash), 'mật khẩu của thư sau cùng');
+});
+
+test('thư hỏng dữ liệu (lỗi trước khi gửi) → lỗi, không chặn các thư sau', async () => {
+  const db = freshDb();
+  saveMailConfig(db, GMAIL);
+  const a = seedUser(db, { code: 'A', email: 'a@test.vn' });
+  const b = seedUser(db, { code: 'B', email: 'b@test.vn', password: null });
+  enqueueMail(db, a, 'reset_link', { token: 'tok' }, T0);
+  enqueueMail(db, b, 'welcome', {}, T0);
+  db.prepare("UPDATE email_jobs SET payload = 'khong-phai-json' WHERE user_id = ?").run(a);
+  const box = inbox();
+  assert.deepEqual(await runMailJobs({ db, sendMail: box.send, now: () => T0 }), { sent: 1, failed: 1 });
+  assert.equal(box.mails[0].to, 'b@test.vn');
+  const j = job(db, a);
+  assert.deepEqual([j.status, j.attempts, j.payload], ['error', 1, '{}']);
+  assert.match(j.last_error, /Không tạo được nội dung thư/);
+  assert.equal(user(db, a).email_status, 'error');
+});
+
+test('thư link đặt lại không gửi/thử lại quá 30 phút (hạn của link)', async () => {
+  const db = freshDb();
+  saveMailConfig(db, GMAIL);
+  const expired = 'Link đặt lại mật khẩu đã hết hạn trước khi gửi được';
+  const a = seedUser(db, { code: 'A', email: 'a@test.vn' });
+  enqueueMail(db, a, 'reset_link', { token: 'tok-a' }, T0);
+  const box = inbox();
+  assert.deepEqual(await runMailJobs({ db, sendMail: box.send, now: () => T0 + 31 * 60_000 }), { sent: 0, failed: 1 });
+  assert.equal(box.mails.length, 0);
+  assert.deepEqual([job(db, a).status, job(db, a).last_error, job(db, a).payload], ['error', expired, '{}']);
+  // Lỗi tạm sát hạn: lần thử lại sẽ quá hạn ⇒ dừng luôn, không giữ token trong hàng đợi
+  const b = seedUser(db, { code: 'B', email: 'b@test.vn' });
+  enqueueMail(db, b, 'reset_link', { token: 'tok-b' }, T0);
+  const flaky = inbox(() => new MailError('Không kết nối được máy chủ gửi thư, sẽ thử lại', false, 'ETIMEDOUT'));
+  await runMailJobs({ db, sendMail: flaky.send, now: () => T0 + 29.5 * 60_000 });
+  assert.deepEqual([job(db, b).status, job(db, b).last_error, job(db, b).payload], ['error', expired, '{}']);
+  assert.equal(user(db, b).email_status, 'error');
+});

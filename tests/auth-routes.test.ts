@@ -33,7 +33,7 @@ test('đăng nhập sai → 401 chung; đúng → cookie httpOnly và /me', asyn
     for (const body of [{ code: 'NV01', password: 'sai-mat-khau' }, { code: 'KHONGCO', password: TEST_PASSWORD }, {}]) {
       const r = await c.post('/api/auth/login', body);
       assert.equal(r.status, 401);
-      assert.equal(r.body.error, 'Mã nhân viên hoặc mật khẩu không đúng');
+      assert.equal(r.body.error, 'Mã nhân viên/email hoặc mật khẩu không đúng');
     }
     const ok = await c.post('/api/auth/login', { code: 'nv01', password: TEST_PASSWORD });
     assert.equal(ok.status, 200);

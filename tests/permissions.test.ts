@@ -70,6 +70,7 @@ const CASES: Case[] = [
   { method: 'POST', path: () => '/api/admin/backups', allowed: ADMIN },
   { method: 'GET', path: () => '/api/admin/backups/latest', allowed: ADMIN },
   { method: 'POST', path: () => '/api/admin/reset-database', body: { password: 'sai' }, allowed: ADMIN },
+  { method: 'GET', path: () => '/api/users/next-code', allowed: MANAGERS },
   // Xóa: để cuối danh sách
   { method: 'DELETE', path: (i) => `/api/users/${i.hr2}`, allowed: ADMIN },
   { method: 'DELETE', path: (i) => `/api/users/${i.nv2}`, allowed: MANAGERS },

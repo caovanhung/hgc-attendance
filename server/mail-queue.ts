@@ -3,6 +3,7 @@ import { deleteUserSessions, generateTempPassword, hashPassword } from './auth';
 import { classifyMailError, getAppUrl, getDailyLimit, getSmtpConfig, type MailMessage, type SendMail } from './mail';
 import { resetLinkMail, resetTempMail, welcomeMail } from './mail-templates';
 import { addDays, toVnDate, vnDayStart } from './vntime';
+import { RESET_TTL_MS } from './accounts';
 
 export type MailKind = 'welcome' | 'reset_temp' | 'reset_link';
 export const MAIL_RETRY_MIN = [1, 5, 15, 60];
@@ -15,18 +16,33 @@ export interface MailDeps {
   now: () => number;
 }
 
-type JobRow = { id: number; user_id: string; kind: MailKind; attempts: number; payload: string };
+type JobRow = { id: number; user_id: string; kind: MailKind; attempts: number; payload: string; created_at: number };
 type UserRow = { id: string; code: string; name: string; email: string; status: string; password_hash: string | null; must_change_password: number };
+
+/** Id các thư đang gửi dở (đang chờ máy chủ thư trả lời), theo từng database. */
+const inFlight = new WeakMap<Db, Set<number>>();
+const inFlightIds = (db: Db): Set<number> => {
+  let ids = inFlight.get(db);
+  if (!ids) inFlight.set(db, (ids = new Set()));
+  return ids;
+};
+
+const RESET_EXPIRED = 'Link đặt lại mật khẩu đã hết hạn trước khi gửi được';
 
 /**
  * Xếp một thư cho nhân sự (gửi tới email hiện tại của người đó lúc gửi). Thư mang mật khẩu mới thay mọi thư mang mật khẩu
  * đang chờ của cùng người (tránh nhận hai mật khẩu khác nhau); thư link đặt lại thay link cũ đang chờ.
+ * Thư đang gửi dở thì giữ nguyên (đã ở trong tay máy chủ thư), thư mới xếp sau nó.
  */
 export function enqueueMail(db: Db, userId: string, kind: MailKind, payload: Record<string, string>, now: number): void {
   const row = db.prepare('SELECT email FROM users WHERE id = ?').get(userId) as { email: string } | undefined;
   if (!row || !row.email) return;
   const replaces = PASSWORD_KINDS.includes(kind) ? PASSWORD_KINDS : [kind];
-  db.prepare(`DELETE FROM email_jobs WHERE user_id = ? AND status = 'pending' AND kind IN (${replaces.map(() => '?').join(', ')})`).run(userId, ...replaces);
+  const sending = [...inFlightIds(db)];
+  db.prepare(
+    `DELETE FROM email_jobs WHERE user_id = ? AND status = 'pending' AND kind IN (${replaces.map(() => '?').join(', ')})
+       AND id NOT IN (${sending.map(() => '?').join(', ')})`,
+  ).run(userId, ...replaces, ...sending);
   db.prepare(
     `INSERT INTO email_jobs(user_id, kind, to_email, status, attempts, payload, next_run_at, created_at)
      VALUES (?, ?, ?, 'pending', 0, ?, ?, ?)`,
@@ -36,6 +52,18 @@ export function enqueueMail(db: Db, userId: string, kind: MailKind, payload: Rec
 
 export function sentToday(db: Db, now: number): number {
   return (db.prepare("SELECT COUNT(*) AS c FROM email_jobs WHERE status = 'sent' AND sent_at >= ?").get(vnDayStart(toVnDate(now))) as { c: number }).c;
+}
+
+/** Trạng thái thư trên hồ sơ nhân sự: chỉ ghi khi người đó không còn thư nào đang chờ (thư mới hơn quyết định trạng thái). */
+function setUserMailStatus(db: Db, userId: string, status: 'sent' | 'error', error: string | null): void {
+  if (db.prepare("SELECT 1 FROM email_jobs WHERE user_id = ? AND status = 'pending'").get(userId)) return;
+  db.prepare('UPDATE users SET email_status = ?, email_error = ? WHERE id = ?').run(status, error, userId);
+}
+
+/** Kết thúc thư ở trạng thái lỗi: xóa dữ liệu nhạy cảm (token) khỏi hàng đợi. */
+function failJob(db: Db, job: JobRow, attempts: number, message: string): void {
+  db.prepare("UPDATE email_jobs SET status = 'error', attempts = ?, last_error = ?, payload = '{}' WHERE id = ?").run(attempts, message, job.id);
+  setUserMailStatus(db, job.user_id, 'error', message);
 }
 
 const running = new WeakSet<Db>();
@@ -49,7 +77,7 @@ export async function runMailJobs(deps: MailDeps, limit = 20): Promise<{ sent: n
   running.add(db);
   try {
     const now = deps.now();
-    const jobs = db.prepare("SELECT id, user_id, kind, attempts, payload FROM email_jobs WHERE status = 'pending' AND next_run_at <= ? ORDER BY id LIMIT ?").all(now, limit) as JobRow[];
+    const jobs = db.prepare("SELECT id, user_id, kind, attempts, payload, created_at FROM email_jobs WHERE status = 'pending' AND next_run_at <= ? ORDER BY id LIMIT ?").all(now, limit) as JobRow[];
     let budget = getDailyLimit(db) - sentToday(db, now);
     for (const job of jobs) {
       if (budget <= 0) {
@@ -57,7 +85,14 @@ export async function runMailJobs(deps: MailDeps, limit = 20): Promise<{ sent: n
         db.prepare("UPDATE email_jobs SET next_run_at = ? WHERE status = 'pending' AND next_run_at <= ?").run(tomorrow, now);
         break;
       }
-      const ok = await sendOne(deps, cfg, job);
+      const ids = inFlightIds(db);
+      ids.add(job.id);
+      let ok: boolean;
+      try {
+        ok = await sendOne(deps, cfg, job);
+      } finally {
+        ids.delete(job.id);
+      }
       if (ok) {
         result.sent++;
         budget--;
@@ -76,22 +111,39 @@ async function sendOne(deps: MailDeps, cfg: NonNullable<ReturnType<typeof getSmt
   const now = deps.now();
   const u = db.prepare('SELECT id, code, name, email, status, password_hash, must_change_password FROM users WHERE id = ?').get(job.user_id) as UserRow | undefined;
   if (!u || u.status !== 'active' || !u.email) {
-    db.prepare("UPDATE email_jobs SET status = 'error', attempts = attempts + 1, last_error = ?, payload = '{}' WHERE id = ?").run('Nhân sự không còn hoạt động hoặc không có email', job.id);
+    failJob(db, job, job.attempts + 1, 'Nhân sự không còn hoạt động hoặc không có email');
+    return false;
+  }
+  // Link đặt lại chỉ sống 30 phút: quá hạn thì không gửi nữa
+  const resetExpiresAt = job.created_at + RESET_TTL_MS;
+  if (job.kind === 'reset_link' && now > resetExpiresAt) {
+    failJob(db, job, job.attempts + 1, RESET_EXPIRED);
+    console.warn(`[MAIL] kind=${job.kind} user=${u.code} status=error code=EXPIRED`);
     return false;
   }
   const mailUser = { name: u.name, code: u.code, email: u.email };
   const appUrl = getAppUrl(db);
   let msg: MailMessage;
   let newHash: string | null = null;
-  if (job.kind === 'reset_link') {
-    const token = (JSON.parse(job.payload) as { token?: string }).token ?? '';
-    msg = resetLinkMail(mailUser, `${appUrl ?? ''}/?reset=${encodeURIComponent(token)}`);
-  } else {
-    // Mật khẩu tạm sinh ngay lúc gửi: DB không bao giờ giữ mật khẩu dạng rõ
-    const temp = generateTempPassword();
-    newHash = hashPassword(temp);
-    db.prepare('UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?').run(newHash, u.id);
-    msg = job.kind === 'welcome' ? welcomeMail(mailUser, temp, appUrl) : resetTempMail(mailUser, temp, appUrl);
+  try {
+    if (job.kind === 'reset_link') {
+      const token = (JSON.parse(job.payload) as { token?: string }).token ?? '';
+      msg = resetLinkMail(mailUser, `${appUrl ?? ''}/?reset=${encodeURIComponent(token)}`);
+    } else {
+      // Mật khẩu tạm sinh ngay lúc gửi: DB không bao giờ giữ mật khẩu dạng rõ
+      const temp = generateTempPassword();
+      newHash = hashPassword(temp);
+      db.prepare('UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?').run(newHash, u.id);
+      msg = job.kind === 'welcome' ? welcomeMail(mailUser, temp, appUrl) : resetTempMail(mailUser, temp, appUrl);
+    }
+  } catch {
+    // Dữ liệu thư hỏng: kết thúc thư này, không để lỗi chặn các thư sau trong hàng đợi
+    if (newHash) {
+      db.prepare('UPDATE users SET password_hash = ?, must_change_password = ? WHERE id = ? AND password_hash = ?').run(u.password_hash, u.must_change_password, u.id, newHash);
+    }
+    failJob(db, job, job.attempts + 1, 'Không tạo được nội dung thư (dữ liệu thư không hợp lệ)');
+    console.warn(`[MAIL] kind=${job.kind} user=${u.code} status=error code=BUILD`);
+    return false;
   }
   try {
     await deps.sendMail(cfg, msg);
@@ -102,18 +154,21 @@ async function sendOne(deps: MailDeps, cfg: NonNullable<ReturnType<typeof getSmt
       db.prepare('UPDATE users SET password_hash = ?, must_change_password = ? WHERE id = ? AND password_hash = ?').run(u.password_hash, u.must_change_password, u.id, newHash);
     }
     const attempts = job.attempts + 1;
+    const delay = MAIL_RETRY_MIN[Math.min(attempts - 1, MAIL_RETRY_MIN.length - 1)] * 60_000;
     if (me.permanent || attempts >= MAIL_MAX_ATTEMPTS) {
-      db.prepare("UPDATE email_jobs SET status = 'error', attempts = ?, last_error = ?, payload = '{}' WHERE id = ?").run(attempts, me.message, job.id);
-      db.prepare("UPDATE users SET email_status = 'error', email_error = ? WHERE id = ?").run(me.message, u.id);
+      failJob(db, job, attempts, me.message);
+    } else if (job.kind === 'reset_link' && now + delay > resetExpiresAt) {
+      // Lần thử lại sẽ quá hạn link: dừng luôn, không giữ token trong hàng đợi
+      failJob(db, job, attempts, RESET_EXPIRED);
     } else {
-      const delay = MAIL_RETRY_MIN[Math.min(attempts - 1, MAIL_RETRY_MIN.length - 1)] * 60_000;
       db.prepare('UPDATE email_jobs SET attempts = ?, last_error = ?, next_run_at = ? WHERE id = ?').run(attempts, me.message, now + delay, job.id);
     }
     console.warn(`[MAIL] kind=${job.kind} user=${u.code} status=error code=${me.code}`);
     return false;
   }
+  // Thư đã rời đi: luôn tính là đã gửi (kể cả khi dòng hàng đợi không còn)
   db.prepare("UPDATE email_jobs SET status = 'sent', attempts = attempts + 1, last_error = NULL, payload = '{}', sent_at = ? WHERE id = ?").run(now, job.id);
-  db.prepare("UPDATE users SET email_status = 'sent', email_error = NULL WHERE id = ?").run(u.id);
+  setUserMailStatus(db, u.id, 'sent', null);
   if (job.kind === 'reset_temp') deleteUserSessions(db, u.id);
   console.log(`[MAIL] kind=${job.kind} user=${u.code} status=sent`);
   return true;

@@ -2,7 +2,10 @@ import { Router } from 'express';
 import type { AppContext } from '../context';
 import { HttpError } from '../errors';
 import { clearSessionCookie, currentUser, jsonOnly, setSessionCookie } from '../middleware';
-import { createSession, deleteSession, deleteUserSessions, hashPassword, validateNewPassword, verifyPassword } from '../auth';
+import { createSession, deleteSession, deleteUserSessions, hashPassword, LoginLimiter, validateNewPassword, verifyPassword } from '../auth';
+import { consumeResetToken, createResetToken, findLoginUser } from '../accounts';
+import { enqueueMail } from '../mail-queue';
+import { getAppUrl } from '../mail';
 import { getUser } from '../repo';
 import { isSystemAdmin } from '../access';
 import { listAreasFor } from './areas';
@@ -13,24 +16,64 @@ export function authPublicRoutes(ctx: AppContext): Router {
   const r = Router();
 
   r.post('/auth/login', jsonOnly, (req, res) => {
-    const code = typeof req.body?.code === 'string' ? req.body.code.trim().toUpperCase() : '';
-    const password = typeof req.body?.password === 'string' ? req.body.password : '';
-    const key = `${code}|${req.ip}`;
+    const b = req.body ?? {};
+    const raw = typeof b.login === 'string' ? b.login : typeof b.code === 'string' ? b.code : '';
+    const login = raw.includes('@') ? raw.trim().toLowerCase() : raw.trim().toUpperCase();
+    const password = typeof b.password === 'string' ? b.password : '';
+    const key = `${login}|${req.ip}`;
     const now = ctx.now();
     if (ctx.limiter.isBlocked(key, now)) {
-      console.warn(`[SECURITY] login_blocked code=${code} ip=${req.ip}`);
+      console.warn(`[SECURITY] login_blocked login=${login} ip=${req.ip}`);
       throw new HttpError(429, 'Bạn đã nhập sai quá nhiều lần. Vui lòng thử lại sau 15 phút');
     }
-    const row = db.prepare('SELECT id, password_hash, status FROM users WHERE code = ?').get(code) as
-      | { id: string; password_hash: string | null; status: string }
-      | undefined;
+    const row = findLoginUser(db, login);
     if (!row || row.status !== 'active' || !verifyPassword(password, row.password_hash)) {
       ctx.limiter.recordFailure(key, now);
-      console.warn(`[SECURITY] login_failed code=${code} ip=${req.ip}`);
-      throw new HttpError(401, 'Mã nhân viên hoặc mật khẩu không đúng');
+      console.warn(`[SECURITY] login_failed login=${login} ip=${req.ip}`);
+      throw new HttpError(401, 'Mã nhân viên/email hoặc mật khẩu không đúng');
     }
     ctx.limiter.reset(key);
     setSessionCookie(res, createSession(db, row.id, now), ctx);
+    res.json({ success: true });
+  });
+
+  // Mỗi lần yêu cầu đều tính (không chỉ lần lỗi) để không ai dò hộp thư người khác
+  const forgotByIp = new LoginLimiter(5, 15 * 60_000);
+  const forgotByLogin = new LoginLimiter(5, 15 * 60_000);
+  const FORGOT_MESSAGE = 'Nếu tài khoản tồn tại và có email, thư hướng dẫn đã được gửi.';
+
+  r.post('/auth/forgot-password', jsonOnly, (req, res) => {
+    const raw = typeof req.body?.login === 'string' ? req.body.login.trim() : '';
+    const login = raw.includes('@') ? raw.toLowerCase() : raw.toUpperCase();
+    const now = ctx.now();
+    const ipKey = String(req.ip);
+    if (forgotByIp.isBlocked(ipKey, now) || forgotByLogin.isBlocked(login, now)) {
+      throw new HttpError(429, 'Bạn đã yêu cầu quá nhiều lần. Vui lòng thử lại sau 15 phút');
+    }
+    forgotByIp.recordFailure(ipKey, now);
+    forgotByLogin.recordFailure(login, now);
+    const u = findLoginUser(db, login);
+    if (u && u.status === 'active' && u.email) {
+      if (getAppUrl(db)) {
+        enqueueMail(db, u.id, 'reset_link', { token: createResetToken(db, u.id, now) }, now);
+        console.warn(`[SECURITY] password_reset_link_queued user=${u.code} ip=${req.ip}`);
+      } else {
+        console.warn('[MAIL] forgot_password bỏ qua: chưa cấu hình địa chỉ web (mail.app_url)');
+      }
+    }
+    res.json({ message: FORGOT_MESSAGE });
+  });
+
+  r.post('/auth/reset-password', jsonOnly, (req, res) => {
+    const { token, newPassword } = req.body ?? {};
+    // Kiểm tra mật khẩu trước khi dùng token: mật khẩu yếu không làm mất link
+    const error = validateNewPassword(newPassword, '');
+    if (error) throw new HttpError(400, error);
+    const userId = typeof token === 'string' && token ? consumeResetToken(db, token, ctx.now()) : null;
+    const u = userId ? (db.prepare('SELECT id, status FROM users WHERE id = ?').get(userId) as { id: string; status: string } | undefined) : undefined;
+    if (!u || u.status !== 'active') throw new HttpError(400, 'Link đặt lại mật khẩu không hợp lệ hoặc đã hết hạn');
+    db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(hashPassword(newPassword), u.id);
+    deleteUserSessions(db, u.id);
     res.json({ success: true });
   });
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { startTestApp, seedArea, seedDepartment, seedUser, loginAs, type TestApp } from './helpers';
+import { startTestApp, seedArea, seedDepartment, seedUser, loginAs, contact, type TestApp } from './helpers';
 
 async function setup(): Promise<{ app: TestApp; ids: Record<string, string> }> {
   const app = await startTestApp();
@@ -28,11 +28,11 @@ test('quản trị khu tạo nhân sự: chỉ phòng trong khu, bắt buộc ph
   const { app, ids } = await setup();
   try {
     const qk = await loginAs(app, 'QKA');
-    assert.equal((await qk.post('/api/users', { code: 'NV10', name: 'X', departmentId: ids.pa })).status, 200);
-    assert.equal((await qk.post('/api/users', { code: 'NV11', name: 'X', departmentId: ids.pb })).status, 404);
-    assert.equal((await qk.post('/api/users', { code: 'NV12', name: 'X' })).status, 400);
-    assert.equal((await qk.post('/api/users', { code: 'NV13', name: 'X', departmentId: ids.pa, role: 'hr' })).status, 403);
-    assert.equal((await qk.post('/api/users', { code: 'NV14', name: 'X', departmentId: ids.pa, role: 'area_admin', adminAreaIds: [ids.A] })).status, 403);
+    assert.equal((await qk.post('/api/users', { ...contact('NV10'), code: 'NV10', name: 'X', departmentId: ids.pa })).status, 200);
+    assert.equal((await qk.post('/api/users', { ...contact('NV11'), code: 'NV11', name: 'X', departmentId: ids.pb })).status, 404);
+    assert.equal((await qk.post('/api/users', { ...contact('NV12'), code: 'NV12', name: 'X' })).status, 400);
+    assert.equal((await qk.post('/api/users', { ...contact('NV13'), code: 'NV13', name: 'X', departmentId: ids.pa, role: 'hr' })).status, 403);
+    assert.equal((await qk.post('/api/users', { ...contact('NV14'), code: 'NV14', name: 'X', departmentId: ids.pa, role: 'area_admin', adminAreaIds: [ids.A] })).status, 403);
     assert.equal(app.db.prepare("SELECT COUNT(*) AS c FROM users WHERE code IN ('NV11','NV12','NV13','NV14')").get()!.c, 0);
   } finally {
     await app.close();
@@ -174,7 +174,7 @@ test('quản trị khu tự sửa mình: chỉ họ tên, email, điện thoại
     assert.equal((await qk.put(`/api/users/${ids.qkA}`, { name: 'Tôi', avatarUrl: 'http://x/a.jpg' })).status, 400);
     assert.equal((await qk.put(`/api/users/${ids.qkA}`, { adminAreaIds: [ids.A, ids.B] })).status, 400);
     assert.equal((await qk.put(`/api/users/${ids.qkA}`, { name: 'X' })).status, 200);
-    assert.equal((await qk.put(`/api/users/${ids.qkA}`, { name: 'X', email: 'x@a.vn', phone: '09', position: 'P', adminAreaIds: [ids.A] })).status, 200);
+    assert.equal((await qk.put(`/api/users/${ids.qkA}`, { name: 'X', email: 'x@a.vn', phone: '0912345678', position: 'P', adminAreaIds: [ids.A] })).status, 200);
   } finally {
     await app.close();
   }
