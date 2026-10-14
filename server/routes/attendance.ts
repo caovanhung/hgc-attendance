@@ -8,6 +8,7 @@ import { requireGlobalHr, areaColumnSql, areaFilterSql, cameraScopeSql, notFound
 import { recomputeRange } from '../attendance';
 import { NOT_SYSTEM_ADMIN } from '../bootstrap';
 import { getVideoAt } from '../hanet-connect';
+import { effectiveShift, isWorkday } from '../shifts';
 import { daysBetween, isValidDate, toVnDate } from '../vntime';
 import type { AttendanceDay, Detection, DetectionVideo, StatsData, StatsDetailRow, StatsDetailType } from '../../shared/types';
 
@@ -45,11 +46,15 @@ const MAX_VIDEO_DRIFT_MS = 24 * 3_600_000;
 /** Điều kiện lọc của từng thẻ thống kê, dùng chung để danh sách chi tiết khớp đúng con số. */
 const DETAIL_FILTER: Record<StatsDetailType, string> = {
   total: '1 = 1',
-  present: 'a.user_id IS NOT NULL',
-  on_time: 'a.late_minutes = 0',
+  present: 'a.first_in IS NOT NULL',
+  on_time: "a.first_in IS NOT NULL AND a.late_minutes = 0 AND a.status NOT IN ('leave', 'business_trip')",
   late: 'a.late_minutes > 0',
   missing_out: "a.status = 'missing_out'",
   not_checked_in: 'a.user_id IS NULL',
+  absent: "a.status = 'absent'",
+  leave: "a.status = 'leave'",
+  business_trip: "a.status = 'business_trip'",
+  early_arrival: 'a.early_arrival_minutes > 0',
 };
 
 /** Không được xem người này: quản trị khu nhận 404 (không lộ dữ liệu khu khác), vai trò khác 403 như trước. */
@@ -159,14 +164,28 @@ export function attendanceRoutes(ctx: AppContext): Router {
     const total = db.prepare(`SELECT COUNT(*) AS c FROM users u WHERE u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${where}`).get(...params) as { c: number };
     const day = db
       .prepare(
-        `SELECT COUNT(*) AS present,
-           SUM(CASE WHEN a.late_minutes = 0 THEN 1 ELSE 0 END) AS on_time,
+        `SELECT
+           SUM(CASE WHEN a.first_in IS NOT NULL THEN 1 ELSE 0 END) AS present,
+           SUM(CASE WHEN ${DETAIL_FILTER.on_time} THEN 1 ELSE 0 END) AS on_time,
            SUM(CASE WHEN a.late_minutes > 0 THEN 1 ELSE 0 END) AS late,
-           SUM(CASE WHEN a.status = 'missing_out' THEN 1 ELSE 0 END) AS missing_out
+           SUM(CASE WHEN a.status = 'missing_out' THEN 1 ELSE 0 END) AS missing_out,
+           SUM(CASE WHEN a.early_arrival_minutes > 0 THEN 1 ELSE 0 END) AS early_arrival,
+           SUM(CASE WHEN a.status = 'absent' THEN 1 ELSE 0 END) AS absent,
+           SUM(CASE WHEN a.status = 'leave' THEN 1 ELSE 0 END) AS leave,
+           SUM(CASE WHEN a.status = 'business_trip' THEN 1 ELSE 0 END) AS business_trip
          FROM attendance_days a JOIN users u ON u.id = a.user_id
          WHERE a.work_date = ? AND u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${where}`,
       )
-      .get(date, ...params) as { present: number; on_time: number | null; late: number | null; missing_out: number | null };
+      .get(date, ...params) as Record<string, number | null>;
+    const noRow = (
+      db
+        .prepare(
+          `SELECT u.id FROM users u LEFT JOIN attendance_days a ON a.user_id = u.id AND a.work_date = ?
+           WHERE u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${where} AND a.user_id IS NULL`,
+        )
+        .all(date, ...params) as { id: string }[]
+    ).map((r) => r.id);
+    const notCheckedIn = noRow.filter((id) => isWorkday(db, effectiveShift(db, id), date)).length;
     const pending = db
       .prepare(`SELECT COUNT(*) AS c FROM requests r JOIN users u ON u.id = r.user_id WHERE r.status = 'pending' AND ${where}`)
       .get(...params) as { c: number };
@@ -176,11 +195,15 @@ export function attendanceRoutes(ctx: AppContext): Router {
     const body: StatsData = {
       date,
       totalEmployees: total.c,
-      presentCount: day.present,
+      presentCount: day.present ?? 0,
       onTimeCount: day.on_time ?? 0,
       lateCount: day.late ?? 0,
       missingOutCount: day.missing_out ?? 0,
-      notCheckedInCount: Math.max(0, total.c - day.present),
+      earlyArrivalCount: day.early_arrival ?? 0,
+      absentCount: day.absent ?? 0,
+      leaveCount: day.leave ?? 0,
+      businessTripCount: day.business_trip ?? 0,
+      notCheckedInCount: notCheckedIn,
       pendingRequests: pending.c,
       totalCameras: cameras.c,
     };
@@ -194,9 +217,9 @@ export function attendanceRoutes(ctx: AppContext): Router {
     const w = scopeWhere(scopeFor(actor), 'u.id', 'u.department_id');
     const f = areaFilterSql(parseAreaFilter(db, actor, req.query.area), 'u.department_id');
     const date = toVnDate(ctx.now());
-    const rows = db
+    let rows = db
       .prepare(
-        `SELECT u.id, u.code, u.name, d.name AS department_name, a.first_in, a.last_out, a.late_minutes, a.status
+        `SELECT u.id, u.code, u.name, d.name AS department_name, a.first_in, a.last_out, a.late_minutes, a.early_minutes, a.early_arrival_minutes, a.status, a.final
          FROM users u
          LEFT JOIN departments d ON d.id = u.department_id
          LEFT JOIN attendance_days a ON a.user_id = u.id AND a.work_date = ?
@@ -204,6 +227,9 @@ export function attendanceRoutes(ctx: AppContext): Router {
          ORDER BY a.first_in IS NULL, a.first_in, u.code`,
       )
       .all(date, ...w.params, ...f.params) as Row[];
+    if (type === 'not_checked_in') {
+      rows = rows.filter((x) => isWorkday(db, effectiveShift(db, x.id), date));
+    }
     const out: StatsDetailRow[] = rows.map((x) => ({
       userId: x.id,
       employeeCode: x.code,
@@ -212,7 +238,10 @@ export function attendanceRoutes(ctx: AppContext): Router {
       firstIn: x.first_in ?? null,
       lastOut: x.last_out ?? null,
       lateMinutes: x.late_minutes ?? 0,
+      earlyArrivalMinutes: x.early_arrival_minutes ?? 0,
+      earlyMinutes: x.early_minutes ?? 0,
       status: x.status ?? null,
+      final: x.final === 1,
     }));
     res.json({ date, type, rows: out });
   });

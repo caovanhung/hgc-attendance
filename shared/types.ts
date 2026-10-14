@@ -208,16 +208,20 @@ export interface HanetConfigView {
 export interface StatsData {
   date: string;
   totalEmployees: number;
-  presentCount: number;
+  presentCount: number; // có giờ vào hôm nay
   onTimeCount: number;
   lateCount: number;
   missingOutCount: number;
-  notCheckedInCount: number;
+  earlyArrivalCount: number;
+  absentCount: number;
+  leaveCount: number;
+  businessTripCount: number;
+  notCheckedInCount: number; // hôm nay là ngày làm việc của ca, chưa có dòng ngày công
   pendingRequests: number;
   totalCameras: number;
 }
 
-export type StatsDetailType = 'total' | 'present' | 'on_time' | 'late' | 'missing_out' | 'not_checked_in';
+export type StatsDetailType = 'total' | 'present' | 'on_time' | 'late' | 'missing_out' | 'not_checked_in' | 'absent' | 'leave' | 'business_trip' | 'early_arrival';
 
 export interface StatsDetailRow {
   userId: string;
@@ -227,7 +231,10 @@ export interface StatsDetailRow {
   firstIn: number | null;
   lastOut: number | null;
   lateMinutes: number;
+  earlyArrivalMinutes: number;
+  earlyMinutes: number;
   status: DayStatus | null;
+  final: boolean;
 }
 
 export interface BackupInfo {
