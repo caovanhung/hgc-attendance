@@ -76,6 +76,39 @@ pm2 logs hanet-attendance --lines 20              # thấy dòng [BOOTSTRAP] Đ�
 
 Sau đó đăng nhập `ADMIN` / `Admin@123`, đổi mật khẩu, rồi tạo lại phòng ban, nhân sự (mỗi người nhận mật khẩu tạm từ HR) và camera. Cập nhật URL webhook mới (có token) trên Hanet theo phần dưới.
 
+## Nâng cấp lên bản khu vực và tài khoản email (database v3)
+
+Bản này đổi cấu trúc database và **không chuyển dữ liệu cũ** (server in `[STARTUP] Database phiên bản cũ (v2). Sao lưu rồi xóa data/attendance.db để hệ thống tạo mới.` rồi dừng). Bản này thêm thư viện gửi thư nên **phải chạy `npm install`**.
+
+```bash
+cd /home/ubuntu/hgc-attendance
+pm2 stop hanet-attendance
+mkdir -p ~/hgc-backup && cp data/attendance.db ~/hgc-backup/attendance-v2-$(date +%F).db
+rm -f data/attendance.db data/attendance.db-wal data/attendance.db-shm
+git pull && npm install --omit=dev
+pm2 restart hanet-attendance
+pm2 logs hanet-attendance --lines 20 --nostream    # thấy [BOOTSTRAP] Đã tạo tài khoản ADMIN ...
+```
+
+Sau khi khởi động (đăng nhập `ADMIN` / `Admin@123`, đổi mật khẩu):
+
+1. **Cấu hình › Gửi thư**: bấm **Dùng Gmail**, nhập tài khoản Gmail và **mật khẩu ứng dụng** (Google Account → Bảo mật → Xác minh 2 bước → Mật khẩu ứng dụng), email người gửi, **địa chỉ web** `https://petrolimex.hgcvn.cloud` → **Lưu** → **Gửi thư thử** tới hộp thư của bạn.
+2. **Cấu hình**: nhập lại kết nối Camera AI (Client ID, Client Secret, Refresh Token → Lưu → Kiểm tra kết nối → chọn địa điểm → Lưu), tài khoản xem video (Kiểm tra), chép **URL webhook mới** dán lên Camera AI.
+3. **Khu vực**: tạo các khu (ví dụ Trụ sở 26 Đức Giang, Tổng kho Đức Giang).
+4. **Phòng ban**: tạo phòng ban, chọn khu cho từng phòng.
+5. **Camera**: **Nhập camera từ Camera AI**, rồi gán khu cho từng camera (tab Khu vực hoặc Sửa camera).
+6. **Nhân sự**: thêm từng người (email + điện thoại bắt buộc; mật khẩu tự gửi qua email), hoặc **Nhập từ file CSV** (tải file mẫu), hoặc **Nhập từ Camera AI** (người nhập theo cách này chưa có email: bấm Sửa để bổ sung email và điện thoại — hệ thống tự gửi mật khẩu).
+7. Cấp quyền: Sửa nhân sự → Vai trò **Quản trị khu vực** → tích các khu được giao. Vai trò **HR toàn hệ thống** chỉ tài khoản `ADMIN` cấp được.
+
+## Kiểm tra sau khi nâng cấp v3 (trên host)
+
+- [ ] Gửi thư thử tới Gmail của bạn và nhận được.
+- [ ] Thêm một nhân sự thật → thư "Tài khoản đăng nhập của bạn" tới hộp Gmail → đăng nhập bằng **email** với mật khẩu tạm → bị yêu cầu đổi mật khẩu.
+- [ ] Đăng xuất → **Quên mật khẩu?** → nhận link → đặt mật khẩu mới → đăng nhập được; dùng lại link lần hai báo hết hạn.
+- [ ] Nhập file CSV 3 dòng (1 dòng cố ý sai email) → xem trước báo đúng dòng lỗi → tạo 2 người → 2 thư được gửi.
+- [ ] Quản trị khu A đăng nhập: chỉ thấy nhân sự, phòng ban, camera, bảng công, đơn của khu A; không thấy tab Khu vực, Cấu hình.
+- [ ] HR toàn hệ thống mở tab Cấu hình: thấy ở chế độ chỉ đọc, không thấy token webhook đầy đủ; sửa được giờ làm việc.
+
 ## Nâng cấp lên bản tích hợp Hanet (database v2)
 
 Bản này đổi cấu trúc database và **không chuyển dữ liệu cũ**. Server sẽ không khởi động trên database cũ mà in: `[STARTUP] Database phiên bản cũ (v1). Sao lưu rồi xóa data/attendance.db để hệ thống tạo mới.`

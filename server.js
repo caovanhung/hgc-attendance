@@ -52,9 +52,17 @@ var init_db = __esm({
   "server/db.ts"() {
     require2 = createRequire(import.meta.url);
     ({ DatabaseSync } = require2("node:sqlite"));
-    SCHEMA_VERSION = 2;
+    SCHEMA_VERSION = 3;
     SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
+
+CREATE TABLE IF NOT EXISTS areas (
+  id TEXT PRIMARY KEY,
+  code TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS departments (
   id TEXT PRIMARY KEY,
@@ -65,8 +73,10 @@ CREATE TABLE IF NOT EXISTS departments (
   hanet_department_id TEXT,
   hanet_sync_status TEXT NOT NULL DEFAULT 'synced' CHECK (hanet_sync_status IN ('synced', 'pending', 'error')),
   hanet_sync_error TEXT,
+  area_id TEXT REFERENCES areas(id) ON DELETE RESTRICT,
   created_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_departments_area ON departments(area_id);
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
@@ -74,7 +84,7 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   email TEXT NOT NULL DEFAULT '',
   phone TEXT NOT NULL DEFAULT '',
-  role TEXT NOT NULL CHECK (role IN ('hr', 'dept_manager', 'employee')),
+  role TEXT NOT NULL CHECK (role IN ('hr', 'area_admin', 'dept_manager', 'employee')),
   department_id TEXT REFERENCES departments(id) ON DELETE SET NULL,
   position TEXT NOT NULL DEFAULT '',
   avatar_url TEXT NOT NULL DEFAULT '',
@@ -86,10 +96,19 @@ CREATE TABLE IF NOT EXISTS users (
   hanet_sync_status TEXT NOT NULL DEFAULT 'synced' CHECK (hanet_sync_status IN ('synced', 'pending', 'error')),
   hanet_sync_error TEXT,
   face_error TEXT,
+  email_status TEXT NOT NULL DEFAULT 'none' CHECK (email_status IN ('none', 'pending', 'sent', 'error')),
+  email_error TEXT,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_users_department ON users(department_id);
 CREATE INDEX IF NOT EXISTS idx_users_hanet_person ON users(hanet_person_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(lower(email)) WHERE email != '';
+
+CREATE TABLE IF NOT EXISTS admin_areas (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  area_id TEXT NOT NULL REFERENCES areas(id) ON DELETE CASCADE,
+  PRIMARY KEY (user_id, area_id)
+);
 
 CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY,
@@ -109,8 +128,10 @@ CREATE TABLE IF NOT EXISTS cameras (
   ip_address TEXT NOT NULL DEFAULT '',
   online INTEGER,
   status_checked_at INTEGER,
+  area_id TEXT REFERENCES areas(id) ON DELETE RESTRICT,
   created_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_cameras_area ON cameras(area_id);
 
 CREATE TABLE IF NOT EXISTS detections (
   id INTEGER PRIMARY KEY,
@@ -203,6 +224,28 @@ CREATE TABLE IF NOT EXISTS face_sightings (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sightings_created ON face_sightings(created_at);
+
+CREATE TABLE IF NOT EXISTS email_jobs (
+  id INTEGER PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('welcome', 'reset_temp', 'reset_link')),
+  to_email TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'sent', 'error')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  payload TEXT NOT NULL DEFAULT '{}',
+  next_run_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  sent_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_email_jobs_due ON email_jobs(status, next_run_at);
+
+CREATE TABLE IF NOT EXISTS password_resets (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER
+);
 `;
     SchemaVersionError = class extends Error {
       constructor(found) {
@@ -299,13 +342,15 @@ function findSessionUser(db, token, now) {
        WHERE s.token_hash = ? AND s.expires_at > ?`
   ).get(sha256(token), now);
   if (!row || row.status !== "active") return null;
+  const areaIds = row.role === "area_admin" ? db.prepare("SELECT area_id FROM admin_areas WHERE user_id = ? ORDER BY area_id").all(row.id).map((r) => r.area_id) : [];
   return {
     id: row.id,
     code: row.code,
     name: row.name,
     role: row.role,
     departmentId: row.department_id ?? null,
-    mustChangePassword: row.must_change_password === 1
+    mustChangePassword: row.must_change_password === 1,
+    areaIds
   };
 }
 function deleteSession(db, token) {
@@ -323,6 +368,7 @@ function purgeExpiredSessions(db, now) {
 }
 function scopeFor(user) {
   if (user.role === "hr") return { kind: "all" };
+  if (user.role === "area_admin") return { kind: "areas", areaIds: user.areaIds };
   if (user.role === "dept_manager") return { kind: "department", departmentId: user.departmentId };
   return { kind: "self", userId: user.id };
 }
@@ -330,6 +376,8 @@ function scopeWhere(scope, userIdCol, deptCol) {
   switch (scope.kind) {
     case "all":
       return { sql: "1=1", params: [] };
+    case "areas":
+      return scope.areaIds.length ? { sql: `${deptCol} IN (SELECT id FROM departments WHERE area_id IN (${scope.areaIds.map(() => "?").join(", ")}))`, params: [...scope.areaIds] } : { sql: "0=1", params: [] };
     case "department":
       return scope.departmentId ? { sql: `${deptCol} = ?`, params: [scope.departmentId] } : { sql: "0=1", params: [] };
     case "self":
@@ -611,7 +659,7 @@ var init_attendance = __esm({
 });
 
 // server/hanet.ts
-import { randomBytes as randomBytes3 } from "node:crypto";
+import { randomBytes as randomBytes4 } from "node:crypto";
 function normalizeTs(raw, now) {
   if (raw === null || raw <= 0) return { ts: now, fromServer: true };
   return { ts: raw < 1e12 ? Math.round(raw * 1e3) : raw, fromServer: false };
@@ -684,7 +732,7 @@ function getWebhookToken(db) {
   return getSetting(db, WEBHOOK_TOKEN_KEY) ?? rotateWebhookToken(db);
 }
 function rotateWebhookToken(db) {
-  const token = randomBytes3(24).toString("base64url");
+  const token = randomBytes4(24).toString("base64url");
   setSetting(db, WEBHOOK_TOKEN_KEY, token);
   return token;
 }
@@ -820,8 +868,8 @@ async function callApi(deps, apiPath, params, retried = false) {
     return callApi(deps, apiPath, params, true);
   }
   if (code !== 1) {
-    const text = describeHanetError(code);
-    throw new HanetApiError(code, text ? `${text} (m\xE3 ${code})` : `Camera AI tr\u1EA3 l\u1ED7i ${code}: ${body?.returnMessage ?? ""}`);
+    const text2 = describeHanetError(code);
+    throw new HanetApiError(code, text2 ? `${text2} (m\xE3 ${code})` : `Camera AI tr\u1EA3 l\u1ED7i ${code}: ${body?.returnMessage ?? ""}`);
   }
   return body;
 }
@@ -1399,14 +1447,371 @@ function currentUser(req) {
 
 // server/routes/auth.ts
 init_errors();
-import { Router } from "express";
+import { Router as Router2 } from "express";
 init_auth();
+
+// server/accounts.ts
+init_errors();
+init_auth();
+import { randomBytes as randomBytes3 } from "node:crypto";
+var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+var RESET_TTL_MS = 30 * 6e4;
+function parseEmail(v) {
+  const email = typeof v === "string" ? v.trim().toLowerCase() : "";
+  if (!email) throw new HttpError(400, "Email l\xE0 b\u1EAFt bu\u1ED9c");
+  if (!EMAIL_RE.test(email)) throw new HttpError(400, "Email kh\xF4ng h\u1EE3p l\u1EC7");
+  return email;
+}
+function parsePhone(v) {
+  const raw = typeof v === "string" ? v.replace(/[\s.\-()]/g, "") : "";
+  if (!raw) throw new HttpError(400, "S\u1ED1 \u0111i\u1EC7n tho\u1EA1i l\xE0 b\u1EAFt bu\u1ED9c");
+  const phone = /^\+84\d{9}$/.test(raw) ? `0${raw.slice(3)}` : raw;
+  if (!/^0\d{9}$/.test(phone)) throw new HttpError(400, "S\u1ED1 \u0111i\u1EC7n tho\u1EA1i kh\xF4ng h\u1EE3p l\u1EC7 (10 ch\u1EEF s\u1ED1, b\u1EAFt \u0111\u1EA7u b\u1EB1ng 0 ho\u1EB7c +84)");
+  return phone;
+}
+function assertEmailFree(db, email, userId) {
+  const holder = db.prepare("SELECT id FROM users WHERE email != '' AND lower(email) = ?").get(email.toLowerCase());
+  if (holder && holder.id !== userId) throw new HttpError(409, "Email \u0111\xE3 \u0111\u01B0\u1EE3c d\xF9ng cho nh\xE2n s\u1EF1 kh\xE1c");
+}
+function findLoginUser(db, login) {
+  const s = login.trim();
+  if (!s) return void 0;
+  const sql = "SELECT id, code, email, password_hash, status FROM users WHERE ";
+  return s.includes("@") ? db.prepare(`${sql} email != '' AND lower(email) = ?`).get(s.toLowerCase()) : db.prepare(`${sql} code = ?`).get(s.toUpperCase());
+}
+function createResetToken(db, userId, now) {
+  const token = randomBytes3(32).toString("base64url");
+  db.prepare("DELETE FROM password_resets WHERE user_id = ?").run(userId);
+  db.prepare("INSERT INTO password_resets(token_hash, user_id, expires_at) VALUES (?, ?, ?)").run(sha256(token), userId, now + RESET_TTL_MS);
+  return token;
+}
+function consumeResetToken(db, token, now) {
+  const row = db.prepare("SELECT user_id FROM password_resets WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?").get(sha256(token), now);
+  if (!row) return null;
+  db.prepare("UPDATE password_resets SET used_at = ? WHERE token_hash = ?").run(now, sha256(token));
+  return row.user_id;
+}
+
+// server/mail-queue.ts
+init_auth();
+
+// server/mail.ts
+init_settings();
+init_errors();
+init_vntime();
+import nodemailer from "nodemailer";
+var MailError = class extends Error {
+  constructor(message, permanent, code) {
+    super(message);
+    this.permanent = permanent;
+    this.code = code;
+  }
+};
+var DEFAULT_DAILY_LIMIT = 450;
+var K = {
+  host: "mail.host",
+  port: "mail.port",
+  secure: "mail.secure",
+  user: "mail.user",
+  password: "mail.password",
+  fromName: "mail.from_name",
+  fromEmail: "mail.from_email",
+  appUrl: "mail.app_url",
+  dailyLimit: "mail.daily_limit"
+};
+var EMAIL_RE2 = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function getSmtpConfig(db) {
+  const host = getSetting(db, K.host);
+  const user = getSetting(db, K.user);
+  const password = getSetting(db, K.password);
+  const fromEmail = getSetting(db, K.fromEmail);
+  if (!host || !user || !password || !fromEmail) return null;
+  return {
+    host,
+    port: Number(getSetting(db, K.port) ?? 465),
+    secure: (getSetting(db, K.secure) ?? "ssl") === "ssl",
+    user,
+    password,
+    fromName: getSetting(db, K.fromName) ?? "Petrolimex Attendance",
+    fromEmail
+  };
+}
+function getAppUrl(db) {
+  return getSetting(db, K.appUrl) || null;
+}
+function getDailyLimit(db) {
+  return Number(getSetting(db, K.dailyLimit) ?? DEFAULT_DAILY_LIMIT);
+}
+function getMailConfigView(db, now) {
+  const dayStart = vnDayStart(toVnDate(now));
+  const count = (sql, ...p) => db.prepare(sql).get(...p).c;
+  return {
+    host: getSetting(db, K.host) ?? "",
+    port: Number(getSetting(db, K.port) ?? 465),
+    secure: (getSetting(db, K.secure) ?? "ssl") === "starttls" ? "starttls" : "ssl",
+    user: getSetting(db, K.user) ?? "",
+    hasPassword: Boolean(getSetting(db, K.password)),
+    fromName: getSetting(db, K.fromName) ?? "Petrolimex Attendance",
+    fromEmail: getSetting(db, K.fromEmail) ?? "",
+    appUrl: getSetting(db, K.appUrl) ?? "",
+    dailyLimit: getDailyLimit(db),
+    configured: getSmtpConfig(db) !== null,
+    sentToday: count("SELECT COUNT(*) AS c FROM email_jobs WHERE status = 'sent' AND sent_at >= ?", dayStart),
+    pending: count("SELECT COUNT(*) AS c FROM email_jobs WHERE status = 'pending'")
+  };
+}
+function saveMailConfig(db, input) {
+  const b = input ?? {};
+  const text2 = (v) => typeof v === "string" ? v.trim() : "";
+  const host = text2(b.host);
+  const user = text2(b.user);
+  const fromEmail = text2(b.fromEmail).toLowerCase();
+  const fromName = text2(b.fromName) || "Petrolimex Attendance";
+  const appUrl = text2(b.appUrl).replace(/\/+$/, "");
+  const port = Number(b.port);
+  const dailyLimit = Number(b.dailyLimit ?? DEFAULT_DAILY_LIMIT);
+  if (!host) throw new HttpError(400, "M\xE1y ch\u1EE7 SMTP l\xE0 b\u1EAFt bu\u1ED9c");
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new HttpError(400, "C\u1ED5ng SMTP kh\xF4ng h\u1EE3p l\u1EC7");
+  if (b.secure !== "ssl" && b.secure !== "starttls") throw new HttpError(400, "Ki\u1EC3u b\u1EA3o m\u1EADt ph\u1EA3i l\xE0 SSL/TLS ho\u1EB7c STARTTLS");
+  if (!user) throw new HttpError(400, "T\xE0i kho\u1EA3n SMTP l\xE0 b\u1EAFt bu\u1ED9c");
+  if (!EMAIL_RE2.test(fromEmail)) throw new HttpError(400, "Email ng\u01B0\u1EDDi g\u1EEDi kh\xF4ng h\u1EE3p l\u1EC7");
+  if (!/^https?:\/\/[^\s/]+(\/[^\s]*)?$/.test(appUrl)) throw new HttpError(400, "\u0110\u1ECBa ch\u1EC9 web ph\u1EA3i b\u1EAFt \u0111\u1EA7u b\u1EB1ng http:// ho\u1EB7c https://");
+  if (!Number.isInteger(dailyLimit) || dailyLimit < 1 || dailyLimit > 1e4) throw new HttpError(400, "H\u1EA1n m\u1EE9c th\u01B0 m\u1ED7i ng\xE0y kh\xF4ng h\u1EE3p l\u1EC7");
+  setSetting(db, K.host, host);
+  setSetting(db, K.port, String(port));
+  setSetting(db, K.secure, b.secure);
+  setSetting(db, K.user, user);
+  if (typeof b.password === "string" && b.password !== "") setSetting(db, K.password, b.password);
+  setSetting(db, K.fromName, fromName);
+  setSetting(db, K.fromEmail, fromEmail);
+  setSetting(db, K.appUrl, appUrl);
+  setSetting(db, K.dailyLimit, String(dailyLimit));
+}
+function classifyMailError(err) {
+  if (err instanceof MailError) return err;
+  const e = err ?? {};
+  if (e.code === "EAUTH") return new MailError("Sai t\xE0i kho\u1EA3n ho\u1EB7c m\u1EADt kh\u1EA9u g\u1EEDi th\u01B0 (SMTP)", true, "EAUTH");
+  if (e.code === "EENVELOPE") return new MailError("\u0110\u1ECBa ch\u1EC9 email ng\u01B0\u1EDDi nh\u1EADn kh\xF4ng h\u1EE3p l\u1EC7", true, "EENVELOPE");
+  if (typeof e.responseCode === "number" && e.responseCode >= 500) return new MailError(`M\xE1y ch\u1EE7 th\u01B0 t\u1EEB ch\u1ED1i (${e.responseCode})`, true, String(e.responseCode));
+  return new MailError("Kh\xF4ng k\u1EBFt n\u1ED1i \u0111\u01B0\u1EE3c m\xE1y ch\u1EE7 g\u1EEDi th\u01B0, s\u1EBD th\u1EED l\u1EA1i", false, e.code ?? "ENET");
+}
+var nodemailerSend = async (cfg, msg) => {
+  const transport = nodemailer.createTransport({
+    host: cfg.host,
+    port: cfg.port,
+    secure: cfg.secure,
+    auth: { user: cfg.user, pass: cfg.password },
+    connectionTimeout: 15e3,
+    greetingTimeout: 15e3,
+    socketTimeout: 3e4
+  });
+  try {
+    await transport.sendMail({ from: { name: cfg.fromName, address: cfg.fromEmail }, to: msg.to, subject: msg.subject, text: msg.text });
+  } catch (err) {
+    throw classifyMailError(err);
+  } finally {
+    transport.close();
+  }
+};
+
+// server/mail-templates.ts
+var SIGN = "\n\nTr\xE2n tr\u1ECDng,\nPetrolimex Attendance \u2014 H\u1EC7 th\u1ED1ng \u0110i\u1EC3m danh Camera AI";
+var site = (appUrl) => appUrl ? `
+\u0110\u1ECBa ch\u1EC9 \u0111\u0103ng nh\u1EADp: ${appUrl}` : "";
+function welcomeMail(u, tempPassword, appUrl) {
+  return {
+    to: u.email,
+    subject: "Petrolimex Attendance \u2014 T\xE0i kho\u1EA3n \u0111\u0103ng nh\u1EADp c\u1EE7a b\u1EA1n",
+    text: `Xin ch\xE0o ${u.name},
+
+T\xE0i kho\u1EA3n \u0111i\u1EC3m danh c\u1EE7a b\u1EA1n \u0111\xE3 \u0111\u01B0\u1EE3c t\u1EA1o.
+M\xE3 nh\xE2n vi\xEAn: ${u.code}
+\u0110\u0103ng nh\u1EADp b\u1EB1ng m\xE3 nh\xE2n vi\xEAn ho\u1EB7c email: ${u.email}
+M\u1EADt kh\u1EA9u t\u1EA1m: ${tempPassword}` + site(appUrl) + "\n\nL\u1EA7n \u0111\u0103ng nh\u1EADp \u0111\u1EA7u ti\xEAn b\u1EA1n s\u1EBD \u0111\u01B0\u1EE3c y\xEAu c\u1EA7u \u0111\u1ED5i m\u1EADt kh\u1EA9u." + SIGN
+  };
+}
+function resetTempMail(u, tempPassword, appUrl) {
+  return {
+    to: u.email,
+    subject: "Petrolimex Attendance \u2014 M\u1EADt kh\u1EA9u m\u1EDBi",
+    text: `Xin ch\xE0o ${u.name},
+
+M\u1EADt kh\u1EA9u c\u1EE7a t\xE0i kho\u1EA3n ${u.code} v\u1EEBa \u0111\u01B0\u1EE3c \u0111\u1EB7t l\u1EA1i.
+M\u1EADt kh\u1EA9u t\u1EA1m: ${tempPassword}` + site(appUrl) + "\n\nH\xE3y \u0111\u0103ng nh\u1EADp v\xE0 \u0111\u1ED5i m\u1EADt kh\u1EA9u ngay. N\u1EBFu b\u1EA1n kh\xF4ng y\xEAu c\u1EA7u, h\xE3y b\xE1o ph\xF2ng Nh\xE2n s\u1EF1." + SIGN
+  };
+}
+function resetLinkMail(u, link) {
+  return {
+    to: u.email,
+    subject: "Petrolimex Attendance \u2014 \u0110\u1EB7t l\u1EA1i m\u1EADt kh\u1EA9u",
+    text: `Xin ch\xE0o ${u.name},
+
+B\u1EA1n (ho\u1EB7c ai \u0111\xF3) v\u1EEBa y\xEAu c\u1EA7u \u0111\u1EB7t l\u1EA1i m\u1EADt kh\u1EA9u cho t\xE0i kho\u1EA3n ${u.code}.
+B\u1EA5m v\xE0o link sau trong v\xF2ng 30 ph\xFAt \u0111\u1EC3 \u0111\u1EB7t m\u1EADt kh\u1EA9u m\u1EDBi (ch\u1EC9 d\xF9ng \u0111\u01B0\u1EE3c m\u1ED9t l\u1EA7n):
+${link}
+
+N\u1EBFu b\u1EA1n kh\xF4ng y\xEAu c\u1EA7u, h\xE3y b\u1ECF qua th\u01B0 n\xE0y; m\u1EADt kh\u1EA9u hi\u1EC7n t\u1EA1i v\u1EABn gi\u1EEF nguy\xEAn.` + SIGN
+  };
+}
+function testMail(to) {
+  return { to, subject: "Petrolimex Attendance \u2014 Th\u01B0 th\u1EED", text: "C\u1EA5u h\xECnh g\u1EEDi th\u01B0 ho\u1EA1t \u0111\u1ED9ng b\xECnh th\u01B0\u1EDDng." + SIGN };
+}
+
+// server/mail-queue.ts
+init_vntime();
+var MAIL_RETRY_MIN = [1, 5, 15, 60];
+var MAIL_MAX_ATTEMPTS = 5;
+var PASSWORD_KINDS = ["welcome", "reset_temp"];
+var inFlight = /* @__PURE__ */ new WeakMap();
+var inFlightIds = (db) => {
+  let ids = inFlight.get(db);
+  if (!ids) inFlight.set(db, ids = /* @__PURE__ */ new Set());
+  return ids;
+};
+var RESET_EXPIRED = "Link \u0111\u1EB7t l\u1EA1i m\u1EADt kh\u1EA9u \u0111\xE3 h\u1EBFt h\u1EA1n tr\u01B0\u1EDBc khi g\u1EEDi \u0111\u01B0\u1EE3c";
+function enqueueMail(db, userId, kind, payload, now) {
+  const row = db.prepare("SELECT email FROM users WHERE id = ?").get(userId);
+  if (!row || !row.email) return;
+  dropPendingMails(db, userId, PASSWORD_KINDS.includes(kind) ? PASSWORD_KINDS : [kind]);
+  db.prepare(
+    `INSERT INTO email_jobs(user_id, kind, to_email, status, attempts, payload, next_run_at, created_at)
+     VALUES (?, ?, ?, 'pending', 0, ?, ?, ?)`
+  ).run(userId, kind, row.email, JSON.stringify(payload), now, now);
+  db.prepare("UPDATE users SET email_status = 'pending', email_error = NULL WHERE id = ?").run(userId);
+}
+function dropPendingMails(db, userId, kinds) {
+  const sending = [...inFlightIds(db)];
+  db.prepare(
+    `DELETE FROM email_jobs WHERE user_id = ? AND status = 'pending' AND kind IN (${kinds.map(() => "?").join(", ")})
+       AND id NOT IN (${sending.map(() => "?").join(", ")})`
+  ).run(userId, ...kinds, ...sending);
+}
+function cancelPasswordMails(db, userId) {
+  dropPendingMails(db, userId, PASSWORD_KINDS);
+  if (db.prepare("SELECT 1 FROM email_jobs WHERE user_id = ? AND status = 'pending'").get(userId)) return;
+  const last = db.prepare("SELECT status, last_error FROM email_jobs WHERE user_id = ? ORDER BY id DESC LIMIT 1").get(userId);
+  db.prepare("UPDATE users SET email_status = ?, email_error = ? WHERE id = ?").run(last?.status ?? "none", last?.status === "error" ? last.last_error : null, userId);
+}
+function sentToday(db, now) {
+  return db.prepare("SELECT COUNT(*) AS c FROM email_jobs WHERE status = 'sent' AND sent_at >= ?").get(vnDayStart(toVnDate(now))).c;
+}
+function setUserMailStatus(db, userId, status, error) {
+  if (db.prepare("SELECT 1 FROM email_jobs WHERE user_id = ? AND status = 'pending'").get(userId)) return;
+  db.prepare("UPDATE users SET email_status = ?, email_error = ? WHERE id = ?").run(status, error, userId);
+}
+function failJob(db, job, attempts, message) {
+  db.prepare("UPDATE email_jobs SET status = 'error', attempts = ?, last_error = ?, payload = '{}' WHERE id = ?").run(attempts, message, job.id);
+  setUserMailStatus(db, job.user_id, "error", message);
+}
+var running = /* @__PURE__ */ new WeakSet();
+async function runMailJobs(deps, limit = 20) {
+  const { db } = deps;
+  const result = { sent: 0, failed: 0 };
+  const cfg = getSmtpConfig(db);
+  if (!cfg || running.has(db)) return result;
+  running.add(db);
+  try {
+    const now = deps.now();
+    const due = db.prepare("SELECT id FROM email_jobs WHERE status = 'pending' AND next_run_at <= ? ORDER BY id LIMIT ?").all(now, limit);
+    const fresh = db.prepare("SELECT id, user_id, kind, attempts, payload, created_at FROM email_jobs WHERE id = ? AND status = 'pending'");
+    let budget = getDailyLimit(db) - sentToday(db, now);
+    for (const { id } of due) {
+      const job = fresh.get(id);
+      if (!job) continue;
+      if (budget <= 0) {
+        const tomorrow = vnDayStart(addDays(toVnDate(now), 1));
+        db.prepare("UPDATE email_jobs SET next_run_at = ? WHERE status = 'pending' AND next_run_at <= ?").run(tomorrow, now);
+        break;
+      }
+      const ids = inFlightIds(db);
+      ids.add(job.id);
+      let ok;
+      try {
+        ok = await sendOne(deps, cfg, job);
+      } finally {
+        ids.delete(job.id);
+      }
+      if (ok) {
+        result.sent++;
+        budget--;
+      } else {
+        result.failed++;
+      }
+    }
+  } finally {
+    running.delete(db);
+  }
+  return result;
+}
+async function sendOne(deps, cfg, job) {
+  const { db } = deps;
+  const now = deps.now();
+  const u = db.prepare("SELECT id, code, name, email, status, password_hash, must_change_password FROM users WHERE id = ?").get(job.user_id);
+  if (!u || u.status !== "active" || !u.email) {
+    failJob(db, job, job.attempts + 1, "Nh\xE2n s\u1EF1 kh\xF4ng c\xF2n ho\u1EA1t \u0111\u1ED9ng ho\u1EB7c kh\xF4ng c\xF3 email");
+    return false;
+  }
+  const resetExpiresAt = job.created_at + RESET_TTL_MS;
+  if (job.kind === "reset_link" && now > resetExpiresAt) {
+    failJob(db, job, job.attempts + 1, RESET_EXPIRED);
+    console.warn(`[MAIL] kind=${job.kind} user=${u.code} status=error code=EXPIRED`);
+    return false;
+  }
+  const mailUser = { name: u.name, code: u.code, email: u.email };
+  const appUrl = getAppUrl(db);
+  let msg;
+  let newHash = null;
+  try {
+    if (job.kind === "reset_link") {
+      const token = JSON.parse(job.payload).token ?? "";
+      msg = resetLinkMail(mailUser, `${appUrl ?? ""}/?reset=${encodeURIComponent(token)}`);
+    } else {
+      const temp = generateTempPassword();
+      newHash = hashPassword(temp);
+      db.prepare("UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?").run(newHash, u.id);
+      msg = job.kind === "welcome" ? welcomeMail(mailUser, temp, appUrl) : resetTempMail(mailUser, temp, appUrl);
+    }
+  } catch {
+    if (newHash) {
+      db.prepare("UPDATE users SET password_hash = ?, must_change_password = ? WHERE id = ? AND password_hash = ?").run(u.password_hash, u.must_change_password, u.id, newHash);
+    }
+    failJob(db, job, job.attempts + 1, "Kh\xF4ng t\u1EA1o \u0111\u01B0\u1EE3c n\u1ED9i dung th\u01B0 (d\u1EEF li\u1EC7u th\u01B0 kh\xF4ng h\u1EE3p l\u1EC7)");
+    console.warn(`[MAIL] kind=${job.kind} user=${u.code} status=error code=BUILD`);
+    return false;
+  }
+  try {
+    await deps.sendMail(cfg, msg);
+  } catch (err) {
+    const me = classifyMailError(err);
+    if (newHash) {
+      db.prepare("UPDATE users SET password_hash = ?, must_change_password = ? WHERE id = ? AND password_hash = ?").run(u.password_hash, u.must_change_password, u.id, newHash);
+    }
+    const attempts = job.attempts + 1;
+    const delay = MAIL_RETRY_MIN[Math.min(attempts - 1, MAIL_RETRY_MIN.length - 1)] * 6e4;
+    if (me.permanent || attempts >= MAIL_MAX_ATTEMPTS) {
+      failJob(db, job, attempts, me.message);
+    } else if (job.kind === "reset_link" && now + delay > resetExpiresAt) {
+      failJob(db, job, attempts, RESET_EXPIRED);
+    } else {
+      db.prepare("UPDATE email_jobs SET attempts = ?, last_error = ?, next_run_at = ? WHERE id = ?").run(attempts, me.message, now + delay, job.id);
+    }
+    console.warn(`[MAIL] kind=${job.kind} user=${u.code} status=error code=${me.code}`);
+    return false;
+  }
+  db.prepare("UPDATE email_jobs SET status = 'sent', attempts = attempts + 1, last_error = NULL, payload = '{}', sent_at = ? WHERE id = ?").run(now, job.id);
+  setUserMailStatus(db, u.id, "sent", null);
+  if (job.kind === "reset_temp") deleteUserSessions(db, u.id);
+  console.log(`[MAIL] kind=${job.kind} user=${u.code} status=sent`);
+  return true;
+}
 
 // server/repo.ts
 init_auth();
 var USER_SELECT = `SELECT u.id, u.code, u.name, u.email, u.phone, u.role, u.department_id,
-  d.name AS department_name, u.position, u.avatar_url, u.hanet_person_id, u.face_registered, u.status, u.hanet_sync_status, u.hanet_sync_error, u.face_error, u.created_at
-  FROM users u LEFT JOIN departments d ON d.id = u.department_id`;
+  d.name AS department_name, d.area_id, ar.name AS area_name, u.position, u.avatar_url, u.hanet_person_id, u.face_registered, u.status,
+  u.hanet_sync_status, u.hanet_sync_error, u.face_error, u.email_status, u.email_error, (u.password_hash IS NOT NULL) AS can_login,
+  (SELECT group_concat(x.area_id) FROM admin_areas x WHERE x.user_id = u.id) AS admin_area_ids, u.created_at
+  FROM users u LEFT JOIN departments d ON d.id = u.department_id LEFT JOIN areas ar ON ar.id = d.area_id`;
 function mapUser(r) {
   return {
     id: r.id,
@@ -1417,6 +1822,9 @@ function mapUser(r) {
     role: r.role,
     departmentId: r.department_id ?? null,
     departmentName: r.department_name ?? null,
+    areaId: r.area_id ?? null,
+    areaName: r.area_name ?? null,
+    adminAreaIds: r.admin_area_ids ? String(r.admin_area_ids).split(",").sort() : [],
     position: r.position ?? "",
     avatarUrl: r.avatar_url ?? "",
     hanetPersonId: r.hanet_person_id ?? null,
@@ -1425,6 +1833,9 @@ function mapUser(r) {
     hanetSyncStatus: r.hanet_sync_status ?? "synced",
     hanetSyncError: r.hanet_sync_error ?? null,
     faceError: r.face_error ?? null,
+    emailStatus: r.email_status ?? "none",
+    emailError: r.email_error ?? null,
+    canLogin: r.can_login === 1,
     createdAt: r.created_at
   };
 }
@@ -1436,42 +1847,253 @@ function canSeeUser(viewer, target) {
   const scope = scopeFor(viewer);
   if (scope.kind === "all") return true;
   if (scope.kind === "self") return target.id === scope.userId;
+  if (scope.kind === "areas") return target.areaId !== null && scope.areaIds.includes(target.areaId);
   return scope.departmentId !== null && target.departmentId === scope.departmentId;
+}
+
+// server/access.ts
+init_errors();
+init_bootstrap();
+var isSystemAdmin = (u) => u.code === SYSTEM_ADMIN_CODE;
+var isGlobalHr = (u) => u.role === "hr";
+var isManager = (u) => u.role === "hr" || u.role === "area_admin";
+function gate(ok, message) {
+  return (req, _res, next) => {
+    if (!req.user || !ok(req.user)) return next(new HttpError(403, message));
+    next();
+  };
+}
+var requireGlobalHr = gate(isGlobalHr, "Ch\u1EC9 HR to\xE0n h\u1EC7 th\u1ED1ng \u0111\u01B0\u1EE3c th\u1EF1c hi\u1EC7n thao t\xE1c n\xE0y");
+var requireManager = gate(isManager, "B\u1EA1n kh\xF4ng c\xF3 quy\u1EC1n th\u1EF1c hi\u1EC7n thao t\xE1c n\xE0y");
+function managesArea(u, areaId) {
+  if (isGlobalHr(u)) return true;
+  return u.role === "area_admin" && areaId !== null && u.areaIds.includes(areaId);
+}
+function notFound(what) {
+  return new HttpError(404, `Kh\xF4ng t\xECm th\u1EA5y ${what}`);
+}
+function deptAreaId(db, departmentId) {
+  const row = db.prepare("SELECT area_id FROM departments WHERE id = ?").get(departmentId);
+  return row ? row.area_id : void 0;
+}
+function deviceAreaId(db, deviceKey) {
+  const row = db.prepare("SELECT area_id FROM cameras WHERE device_key = ?").get(deviceKey);
+  return row?.area_id ?? null;
+}
+function parseAreaFilter(db, u, raw) {
+  if (raw === void 0 || raw === "" || raw === "all") return { kind: "all" };
+  if (raw === "none") {
+    if (!isGlobalHr(u)) throw notFound("khu v\u1EF1c");
+    return { kind: "none" };
+  }
+  if (typeof raw !== "string" || !db.prepare("SELECT 1 FROM areas WHERE id = ?").get(raw) || !managesArea(u, raw)) throw notFound("khu v\u1EF1c");
+  return { kind: "area", areaId: raw };
+}
+function areaFilterSql(f, deptCol) {
+  if (f.kind === "all") return { sql: "1=1", params: [] };
+  if (f.kind === "none") return { sql: `(${deptCol} IS NULL OR ${deptCol} IN (SELECT id FROM departments WHERE area_id IS NULL))`, params: [] };
+  return { sql: `${deptCol} IN (SELECT id FROM departments WHERE area_id = ?)`, params: [f.areaId] };
+}
+function areaColumnSql(f, col) {
+  if (f.kind === "all") return { sql: "1=1", params: [] };
+  if (f.kind === "none") return { sql: `${col} IS NULL`, params: [] };
+  return { sql: `${col} = ?`, params: [f.areaId] };
+}
+function inAreas(col, ids) {
+  return ids.length ? { sql: `${col} IN (${ids.map(() => "?").join(", ")})`, params: [...ids] } : { sql: "0=1", params: [] };
+}
+function departmentScopeSql(u) {
+  if (isGlobalHr(u)) return { sql: "1=1", params: [] };
+  if (u.role === "area_admin") return inAreas("d.area_id", u.areaIds);
+  return u.departmentId ? { sql: "d.id = ?", params: [u.departmentId] } : { sql: "0=1", params: [] };
+}
+function cameraScopeSql(u) {
+  if (isGlobalHr(u)) return { sql: "1=1", params: [] };
+  if (u.role === "area_admin") return inAreas("c.area_id", u.areaIds);
+  if (u.role === "dept_manager" && u.departmentId) {
+    return { sql: "c.area_id IS NOT NULL AND c.area_id = (SELECT area_id FROM departments WHERE id = ?)", params: [u.departmentId] };
+  }
+  return { sql: "0=1", params: [] };
+}
+function canDeleteUser(actor, target) {
+  if (target.id === actor.id || target.code === SYSTEM_ADMIN_CODE) return false;
+  if (isSystemAdmin(actor)) return true;
+  if (target.role === "hr") return false;
+  if (isGlobalHr(actor)) return true;
+  return actor.role === "area_admin" && (target.role === "employee" || target.role === "dept_manager") && managesArea(actor, target.areaId);
+}
+function resolveAreaFor(db, u, raw) {
+  if (raw === void 0 || raw === null || raw === "") {
+    if (u.role === "area_admin") throw new HttpError(400, "H\xE3y ch\u1ECDn khu v\u1EF1c");
+    return null;
+  }
+  if (typeof raw !== "string" || !db.prepare("SELECT 1 FROM areas WHERE id = ?").get(raw) || !managesArea(u, raw)) throw notFound("khu v\u1EF1c");
+  return raw;
+}
+
+// server/routes/areas.ts
+init_db();
+init_errors();
+import { Router } from "express";
+
+// server/validation.ts
+var CODE_RE = /^[A-Z0-9._-]{1,32}$/;
+var CODE_ERROR = "M\xE3 ch\u1EC9 g\u1ED3m ch\u1EEF kh\xF4ng d\u1EA5u, s\u1ED1, d\u1EA5u ch\u1EA5m, g\u1EA1ch ngang, g\u1EA1ch d\u01B0\u1EDBi (t\u1ED1i \u0111a 32 k\xFD t\u1EF1)";
+
+// server/routes/areas.ts
+init_bootstrap();
+init_vntime();
+var AREA_SELECT = `SELECT a.id, a.code, a.name, a.note, a.created_at,
+  (SELECT COUNT(*) FROM departments d WHERE d.area_id = a.id) AS department_count,
+  (SELECT COUNT(*) FROM cameras c WHERE c.area_id = a.id) AS camera_count,
+  (SELECT COUNT(*) FROM users u JOIN departments d ON d.id = u.department_id WHERE d.area_id = a.id AND u.code != '${SYSTEM_ADMIN_CODE}') AS member_count,
+  (SELECT group_concat(u.name, '|') FROM admin_areas x JOIN users u ON u.id = x.user_id WHERE x.area_id = a.id) AS admin_names
+  FROM areas a`;
+function mapArea(r) {
+  return {
+    id: r.id,
+    code: r.code,
+    name: r.name,
+    note: r.note ?? "",
+    departmentCount: Number(r.department_count),
+    cameraCount: Number(r.camera_count),
+    memberCount: Number(r.member_count),
+    adminNames: r.admin_names ? String(r.admin_names).split("|").sort((x, y) => x.localeCompare(y, "vi")) : [],
+    createdAt: r.created_at
+  };
+}
+function getArea(db, id) {
+  const row = db.prepare(`${AREA_SELECT} WHERE a.id = ?`).get(id);
+  return row ? mapArea(row) : null;
+}
+function listAreasFor(db, u) {
+  if (isGlobalHr(u)) return db.prepare(`${AREA_SELECT} ORDER BY a.code`).all().map(mapArea);
+  if (u.role !== "area_admin" || u.areaIds.length === 0) return [];
+  const rows = db.prepare(`${AREA_SELECT} WHERE a.id IN (${u.areaIds.map(() => "?").join(", ")}) ORDER BY a.code`).all(...u.areaIds);
+  return rows.map(mapArea);
+}
+function nextAreaCode(db) {
+  const codes = db.prepare("SELECT code FROM areas WHERE code GLOB 'KV[0-9]*'").all();
+  const max = codes.reduce((m, { code }) => /^KV\d+$/.test(code) ? Math.max(m, Number(code.slice(2))) : m, 0);
+  return `KV${String(max + 1).padStart(2, "0")}`;
+}
+var text = (v) => typeof v === "string" ? v.trim() : "";
+function areaRoutes(ctx) {
+  const { db } = ctx;
+  const r = Router();
+  r.get("/areas", (req, res) => {
+    res.json({ areas: listAreasFor(db, currentUser(req)) });
+  });
+  r.post("/areas", requireGlobalHr, (req, res) => {
+    const b = req.body ?? {};
+    const code = text(b.code).toUpperCase() || nextAreaCode(db);
+    const name = text(b.name);
+    if (!CODE_RE.test(code)) throw new HttpError(400, "M\xE3 khu v\u1EF1c kh\xF4ng h\u1EE3p l\u1EC7");
+    if (!name) throw new HttpError(400, "T\xEAn khu v\u1EF1c l\xE0 b\u1EAFt bu\u1ED9c");
+    if (db.prepare("SELECT 1 FROM areas WHERE code = ?").get(code)) throw new HttpError(409, "M\xE3 khu v\u1EF1c \u0111\xE3 t\u1ED3n t\u1EA1i");
+    const id = newId("area");
+    db.prepare("INSERT INTO areas(id, code, name, note, created_at) VALUES (?, ?, ?, ?, ?)").run(id, code, name, text(b.note), toVnDate(ctx.now()));
+    res.json({ area: getArea(db, id) });
+  });
+  r.put("/areas/:id", requireGlobalHr, (req, res) => {
+    const area = getArea(db, req.params.id);
+    if (!area) throw notFound("khu v\u1EF1c");
+    const b = req.body ?? {};
+    const name = b.name === void 0 ? area.name : text(b.name);
+    if (!name) throw new HttpError(400, "T\xEAn khu v\u1EF1c l\xE0 b\u1EAFt bu\u1ED9c");
+    db.prepare("UPDATE areas SET name = ?, note = ? WHERE id = ?").run(name, b.note === void 0 ? area.note : text(b.note), area.id);
+    res.json({ area: getArea(db, area.id) });
+  });
+  r.delete("/areas/:id", requireGlobalHr, (req, res) => {
+    const area = getArea(db, req.params.id);
+    if (!area) throw notFound("khu v\u1EF1c");
+    if (area.departmentCount > 0 || area.cameraCount > 0) {
+      throw new HttpError(409, "Khu v\u1EF1c c\xF2n ph\xF2ng ban ho\u1EB7c camera: h\xE3y chuy\u1EC3n sang khu kh\xE1c tr\u01B0\u1EDBc khi x\xF3a");
+    }
+    db.prepare("DELETE FROM areas WHERE id = ?").run(area.id);
+    console.warn(`[SECURITY] area_deleted by=${currentUser(req).code} target=${area.code} ip=${req.ip}`);
+    res.json({ success: true });
+  });
+  return r;
 }
 
 // server/routes/auth.ts
 function authPublicRoutes(ctx) {
   const { db } = ctx;
-  const r = Router();
+  const r = Router2();
   r.post("/auth/login", jsonOnly, (req, res) => {
-    const code = typeof req.body?.code === "string" ? req.body.code.trim().toUpperCase() : "";
-    const password = typeof req.body?.password === "string" ? req.body.password : "";
-    const key = `${code}|${req.ip}`;
+    const b = req.body ?? {};
+    const raw = typeof b.login === "string" ? b.login : typeof b.code === "string" ? b.code : "";
+    const login = raw.includes("@") ? raw.trim().toLowerCase() : raw.trim().toUpperCase();
+    const password = typeof b.password === "string" ? b.password : "";
+    const key = `${login}|${req.ip}`;
     const now = ctx.now();
     if (ctx.limiter.isBlocked(key, now)) {
-      console.warn(`[SECURITY] login_blocked code=${code} ip=${req.ip}`);
+      console.warn(`[SECURITY] login_blocked login=${login} ip=${req.ip}`);
       throw new HttpError(429, "B\u1EA1n \u0111\xE3 nh\u1EADp sai qu\xE1 nhi\u1EC1u l\u1EA7n. Vui l\xF2ng th\u1EED l\u1EA1i sau 15 ph\xFAt");
     }
-    const row = db.prepare("SELECT id, password_hash, status FROM users WHERE code = ?").get(code);
+    const row = findLoginUser(db, login);
     if (!row || row.status !== "active" || !verifyPassword(password, row.password_hash)) {
       ctx.limiter.recordFailure(key, now);
-      console.warn(`[SECURITY] login_failed code=${code} ip=${req.ip}`);
-      throw new HttpError(401, "M\xE3 nh\xE2n vi\xEAn ho\u1EB7c m\u1EADt kh\u1EA9u kh\xF4ng \u0111\xFAng");
+      console.warn(`[SECURITY] login_failed login=${login} ip=${req.ip}`);
+      throw new HttpError(401, "M\xE3 nh\xE2n vi\xEAn/email ho\u1EB7c m\u1EADt kh\u1EA9u kh\xF4ng \u0111\xFAng");
     }
     ctx.limiter.reset(key);
     setSessionCookie(res, createSession(db, row.id, now), ctx);
+    res.json({ success: true });
+  });
+  const forgotByIp = new LoginLimiter(5, 15 * 6e4);
+  const forgotByLogin = new LoginLimiter(5, 15 * 6e4);
+  const FORGOT_MESSAGE = "N\u1EBFu t\xE0i kho\u1EA3n t\u1ED3n t\u1EA1i v\xE0 c\xF3 email, th\u01B0 h\u01B0\u1EDBng d\u1EABn \u0111\xE3 \u0111\u01B0\u1EE3c g\u1EEDi.";
+  r.post("/auth/forgot-password", jsonOnly, (req, res) => {
+    const raw = typeof req.body?.login === "string" ? req.body.login.trim() : "";
+    const login = raw.includes("@") ? raw.toLowerCase() : raw.toUpperCase();
+    const now = ctx.now();
+    const ipKey = String(req.ip);
+    if (forgotByIp.isBlocked(ipKey, now) || forgotByLogin.isBlocked(login, now)) {
+      throw new HttpError(429, "B\u1EA1n \u0111\xE3 y\xEAu c\u1EA7u qu\xE1 nhi\u1EC1u l\u1EA7n. Vui l\xF2ng th\u1EED l\u1EA1i sau 15 ph\xFAt");
+    }
+    forgotByIp.recordFailure(ipKey, now);
+    forgotByLogin.recordFailure(login, now);
+    const u = findLoginUser(db, login);
+    if (u && u.status === "active" && u.email) {
+      if (getAppUrl(db)) {
+        enqueueMail(db, u.id, "reset_link", { token: createResetToken(db, u.id, now) }, now);
+        console.warn(`[SECURITY] password_reset_link_queued user=${u.code} ip=${req.ip}`);
+      } else {
+        console.warn("[MAIL] forgot_password b\u1ECF qua: ch\u01B0a c\u1EA5u h\xECnh \u0111\u1ECBa ch\u1EC9 web (mail.app_url)");
+      }
+    }
+    res.json({ message: FORGOT_MESSAGE });
+  });
+  r.post("/auth/reset-password", jsonOnly, (req, res) => {
+    const { token, newPassword } = req.body ?? {};
+    const error = validateNewPassword(newPassword, "");
+    if (error) throw new HttpError(400, error);
+    const userId = typeof token === "string" && token ? consumeResetToken(db, token, ctx.now()) : null;
+    const u = userId ? db.prepare("SELECT id, status FROM users WHERE id = ?").get(userId) : void 0;
+    if (!u || u.status !== "active") throw new HttpError(400, "Link \u0111\u1EB7t l\u1EA1i m\u1EADt kh\u1EA9u kh\xF4ng h\u1EE3p l\u1EC7 ho\u1EB7c \u0111\xE3 h\u1EBFt h\u1EA1n");
+    db.prepare("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?").run(hashPassword(newPassword), u.id);
+    deleteUserSessions(db, u.id);
+    cancelPasswordMails(db, u.id);
     res.json({ success: true });
   });
   return r;
 }
 function authRoutes(ctx) {
   const { db } = ctx;
-  const r = Router();
+  const r = Router2();
   r.get("/auth/me", (req, res) => {
     const auth = currentUser(req);
     const user = getUser(db, auth.id);
     if (!user) throw new HttpError(401, "Vui l\xF2ng \u0111\u0103ng nh\u1EADp");
-    const body = { user, mustChangePassword: auth.mustChangePassword, simulatorEnabled: ctx.config.simulatorEnabled };
+    const body = {
+      user,
+      mustChangePassword: auth.mustChangePassword,
+      simulatorEnabled: ctx.config.simulatorEnabled,
+      isSystemAdmin: isSystemAdmin(auth),
+      areas: listAreasFor(db, auth)
+    };
     res.json(body);
   });
   r.post("/auth/logout", (req, res) => {
@@ -1498,7 +2120,7 @@ function authRoutes(ctx) {
 // server/routes/users.ts
 init_db();
 init_errors();
-import { Router as Router2 } from "express";
+import { Router as Router3 } from "express";
 
 // server/backup.ts
 init_vntime();
@@ -1652,14 +2274,7 @@ init_hanet_sync();
 init_db();
 init_hanet_api();
 init_hanet_sync();
-init_auth();
 init_bootstrap();
-
-// server/validation.ts
-var CODE_RE = /^[A-Z0-9._-]{1,32}$/;
-var CODE_ERROR = "M\xE3 ch\u1EC9 g\u1ED3m ch\u1EEF kh\xF4ng d\u1EA5u, s\u1ED1, d\u1EA5u ch\u1EA5m, g\u1EA1ch ngang, g\u1EA1ch d\u01B0\u1EDBi (t\u1ED1i \u0111a 32 k\xFD t\u1EF1)";
-
-// server/hanet-import.ts
 init_vntime();
 var IMPORT_PAGE_SIZE = 100;
 var IMPORT_MAX = 100;
@@ -1699,7 +2314,7 @@ function importPersons(db, persons, departmentId, now, reserved = /* @__PURE__ *
   const insert = db.prepare(
     `INSERT INTO users(id, code, name, email, phone, role, department_id, position, avatar_url, hanet_person_id,
        face_registered, status, password_hash, must_change_password, created_at)
-     VALUES (?, ?, ?, '', '', 'employee', ?, ?, ?, ?, 1, 'active', ?, 1, ?)`
+     VALUES (?, ?, ?, '', '', 'employee', ?, ?, ?, ?, 1, 'active', NULL, 1, ?)`
   );
   return tx(
     db,
@@ -1708,19 +2323,107 @@ function importPersons(db, persons, departmentId, now, reserved = /* @__PURE__ *
       const fromAlias = aliasCode(p);
       const code = fromAlias && !exists.get(fromAlias) ? fromAlias : nextEmployeeCode(db, reserved);
       const id = newId("usr");
-      const tempPassword = generateTempPassword();
       const name = String(p.name ?? "").trim() || code;
-      insert.run(id, code, name, departmentId, String(p.title ?? "").trim(), String(p.avatar ?? ""), String(p.personID), hashPassword(tempPassword), toVnDate(now));
+      insert.run(id, code, name, departmentId, String(p.title ?? "").trim(), String(p.avatar ?? ""), String(p.personID), toVnDate(now));
       if (code !== alias) enqueue(db, "user", id, "user.alias", { personId: String(p.personID), code }, now);
       if (departmentId) enqueue(db, "user", id, "user.department", { fromHanetDeptId: null, toDepartmentId: departmentId }, now);
-      return { id, code, name, tempPassword };
+      return { id, code, name };
     })
   );
 }
 
 // server/routes/users.ts
 init_hanet();
-var ROLES = ["hr", "dept_manager", "employee"];
+
+// server/csv-import.ts
+init_db();
+init_errors();
+init_bootstrap();
+init_vntime();
+var CSV_MAX_ROWS = 200;
+var ROLE_MAP = { "": "employee", nhan_vien: "employee", truong_phong: "dept_manager" };
+var cell = (v) => typeof v === "string" ? v.trim() : "";
+var errText = (e) => e instanceof HttpError ? e.message : "D\u1EEF li\u1EC7u kh\xF4ng h\u1EE3p l\u1EC7";
+function checkCsvRows(db, actor, rows, reserved) {
+  if (!Array.isArray(rows)) throw new HttpError(400, "D\u1EEF li\u1EC7u nh\u1EADp kh\xF4ng h\u1EE3p l\u1EC7");
+  if (rows.length === 0) throw new HttpError(400, "File kh\xF4ng c\xF3 d\xF2ng n\xE0o");
+  if (rows.length > CSV_MAX_ROWS) throw new HttpError(400, `M\u1ED7i l\u1EA7n nh\u1EADp t\u1ED1i \u0111a ${CSV_MAX_ROWS} d\xF2ng`);
+  const deptByCode = db.prepare("SELECT id, area_id FROM departments WHERE code = ?");
+  const codeTaken = db.prepare("SELECT 1 FROM users WHERE code = ?");
+  const emailTaken = db.prepare("SELECT 1 FROM users WHERE email != '' AND lower(email) = ?");
+  const fileCodes = /* @__PURE__ */ new Map();
+  for (const r of rows) {
+    const c = cell(r?.code).toUpperCase();
+    if (c) fileCodes.set(c, (fileCodes.get(c) ?? 0) + 1);
+  }
+  const seenEmails = /* @__PURE__ */ new Set();
+  const checked = rows.map((r, i) => {
+    const errors = [];
+    const name = cell(r?.name);
+    if (!name) errors.push("H\u1ECD t\xEAn l\xE0 b\u1EAFt bu\u1ED9c");
+    let email = "";
+    try {
+      email = parseEmail(r?.email);
+      if (seenEmails.has(email)) errors.push("Email tr\xF9ng v\u1EDBi d\xF2ng kh\xE1c trong file");
+      else if (emailTaken.get(email)) errors.push("Email \u0111\xE3 \u0111\u01B0\u1EE3c d\xF9ng cho nh\xE2n s\u1EF1 kh\xE1c");
+      seenEmails.add(email);
+    } catch (e) {
+      errors.push(errText(e));
+    }
+    let phone = "";
+    try {
+      phone = parsePhone(r?.phone);
+    } catch (e) {
+      errors.push(errText(e));
+    }
+    const dept = deptByCode.get(cell(r?.departmentCode).toUpperCase());
+    if (!dept || !managesArea(actor, dept.area_id)) errors.push("M\xE3 ph\xF2ng ban kh\xF4ng t\u1ED3n t\u1EA1i");
+    const roleKey = cell(r?.role).toLowerCase();
+    const role = Object.hasOwn(ROLE_MAP, roleKey) ? ROLE_MAP[roleKey] : void 0;
+    if (!role) errors.push("Vai tr\xF2 ch\u1EC9 \u0111\u01B0\u1EE3c l\xE0 nhan_vien ho\u1EB7c truong_phong");
+    const code = cell(r?.code).toUpperCase();
+    if (code) {
+      if (!CODE_RE.test(code)) errors.push(CODE_ERROR);
+      else if (code === SYSTEM_ADMIN_CODE) errors.push("M\xE3 ADMIN d\xE0nh ri\xEAng cho t\xE0i kho\u1EA3n qu\u1EA3n tr\u1ECB h\u1EC7 th\u1ED1ng");
+      else if (codeTaken.get(code)) errors.push("M\xE3 nh\xE2n vi\xEAn \u0111\xE3 t\u1ED3n t\u1EA1i");
+      else if ((fileCodes.get(code) ?? 0) > 1) errors.push("M\xE3 nh\xE2n vi\xEAn tr\xF9ng v\u1EDBi d\xF2ng kh\xE1c trong file");
+    }
+    return { line: i + 2, errors, name, email, phone, code, departmentId: dept?.id ?? "", position: cell(r?.position), role: role ?? "employee" };
+  });
+  const taken = /* @__PURE__ */ new Set([...reserved, ...fileCodes.keys()]);
+  const preview = [];
+  const valid = [];
+  for (const c of checked) {
+    const ok = c.errors.length === 0;
+    let code = null;
+    if (ok) {
+      code = c.code || nextEmployeeCode(db, taken);
+      taken.add(code);
+      valid.push({ code, name: c.name, email: c.email, phone: c.phone, departmentId: c.departmentId, position: c.position, role: c.role });
+    }
+    preview.push({ line: c.line, ok, errors: c.errors, code, name: c.name, email: c.email });
+  }
+  return { preview, valid };
+}
+function createCsvUsers(db, valid, now) {
+  const insert = db.prepare(
+    `INSERT INTO users(id, code, name, email, phone, role, department_id, position, avatar_url, hanet_person_id,
+       face_registered, status, password_hash, must_change_password, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', NULL, 0, 'active', NULL, 1, ?)`
+  );
+  return tx(
+    db,
+    () => valid.map((v) => {
+      const id = newId("usr");
+      insert.run(id, v.code, v.name, v.email, v.phone, v.role, v.departmentId, v.position, toVnDate(now));
+      enqueueMail(db, id, "welcome", {}, now);
+      return { id, code: v.code, name: v.name };
+    })
+  );
+}
+
+// server/routes/users.ts
+var ROLES = ["hr", "area_admin", "dept_manager", "employee"];
 var str2 = (v) => typeof v === "string" ? v.trim() : void 0;
 function assertPersonIdFree(db, personId, userId) {
   if (!personId) return;
@@ -1737,10 +2440,50 @@ function resolveDepartment(db, departmentId) {
   }
   return departmentId;
 }
-function resolveFaceImage(db, userId, b, now) {
+function manageableUser(db, actor, id) {
+  const u = getUser(db, id);
+  if (!u || u.code === SYSTEM_ADMIN_CODE && !isSystemAdmin(actor)) throw notFound("nh\xE2n s\u1EF1");
+  if (u.id !== actor.id && !managesArea(actor, u.areaId)) throw notFound("nh\xE2n s\u1EF1");
+  return u;
+}
+function assertCanEdit(actor, target) {
+  if (target.id === actor.id) return;
+  if (target.role === "hr" && !isSystemAdmin(actor)) throw new HttpError(403, "Ch\u1EC9 t\xE0i kho\u1EA3n ADMIN \u0111\u01B0\u1EE3c s\u1EEDa t\xE0i kho\u1EA3n HR to\xE0n h\u1EC7 th\u1ED1ng");
+  if (actor.role === "area_admin" && target.role === "area_admin") throw new HttpError(403, "B\u1EA1n kh\xF4ng c\xF3 quy\u1EC1n s\u1EEDa t\xE0i kho\u1EA3n qu\u1EA3n tr\u1ECB khu v\u1EF1c kh\xE1c");
+}
+function assertRoleAllowed(actor, role) {
+  if (!ROLES.includes(role)) throw new HttpError(400, "Vai tr\xF2 kh\xF4ng h\u1EE3p l\u1EC7");
+  if (role === "hr" && !isSystemAdmin(actor)) throw new HttpError(403, "Ch\u1EC9 t\xE0i kho\u1EA3n ADMIN \u0111\u01B0\u1EE3c c\u1EA5p vai tr\xF2 HR to\xE0n h\u1EC7 th\u1ED1ng");
+  if (role === "area_admin" && !isGlobalHr(actor)) throw new HttpError(403, "Ch\u1EC9 HR to\xE0n h\u1EC7 th\u1ED1ng \u0111\u01B0\u1EE3c c\u1EA5p quy\u1EC1n qu\u1EA3n tr\u1ECB khu v\u1EF1c");
+}
+function resolveDepartmentFor(db, actor, departmentId) {
+  const id = resolveDepartment(db, departmentId);
+  if (id === null) {
+    if (actor.role === "area_admin") throw new HttpError(400, "H\xE3y ch\u1ECDn ph\xF2ng ban thu\u1ED9c khu b\u1EA1n qu\u1EA3n l\xFD");
+    return null;
+  }
+  if (!managesArea(actor, deptAreaId(db, id) ?? null)) throw notFound("ph\xF2ng ban");
+  return id;
+}
+function assertCanManageFace(actor, target) {
+  assertCanEdit(actor, target);
+  if (actor.role === "area_admin" && target.id === actor.id) throw new HttpError(403, "B\u1EA1n kh\xF4ng th\u1EC3 t\u1EF1 \u0111\u0103ng k\xFD FaceID cho ch\xEDnh m\xECnh");
+}
+function parseAdminAreaIds(db, raw) {
+  const ids = Array.isArray(raw) ? [...new Set(raw.map(String))] : [];
+  if (ids.length === 0) throw new HttpError(400, "H\xE3y ch\u1ECDn \xEDt nh\u1EA5t m\u1ED9t khu cho qu\u1EA3n tr\u1ECB khu v\u1EF1c");
+  for (const id of ids) if (!db.prepare("SELECT 1 FROM areas WHERE id = ?").get(id)) throw new HttpError(400, "Khu v\u1EF1c kh\xF4ng t\u1ED3n t\u1EA1i");
+  return ids;
+}
+function setAdminAreas(db, userId, areaIds) {
+  db.prepare("DELETE FROM admin_areas WHERE user_id = ?").run(userId);
+  const ins = db.prepare("INSERT INTO admin_areas(user_id, area_id) VALUES (?, ?)");
+  for (const id of areaIds) ins.run(userId, id);
+}
+function resolveFaceImage(db, actor, userId, b, now) {
   if (b.sightingId !== void 0 && b.sightingId !== null && b.sightingId !== "") {
     const s = getSighting(db, Number(b.sightingId));
-    if (!s) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y l\u01B0\u1EE3t ch\u1EE5p n\xE0y, h\xE3y ch\u1ECDn l\u01B0\u1EE3t m\u1EDBi h\u01A1n");
+    if (!s || !managesArea(actor, deviceAreaId(db, s.deviceId))) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y l\u01B0\u1EE3t ch\u1EE5p n\xE0y, h\xE3y ch\u1ECDn l\u01B0\u1EE3t m\u1EDBi h\u01A1n");
     return { url: s.imageUrl, sightingId: s.id };
   }
   if (b.detectionId !== void 0 && b.detectionId !== null && userId) {
@@ -1752,16 +2495,18 @@ function resolveFaceImage(db, userId, b, now) {
 }
 function userRoutes(ctx) {
   const { db } = ctx;
-  const r = Router2();
+  const r = Router3();
   const deps = { db, fetch: ctx.fetch, now: ctx.now };
   r.get("/users", (req, res) => {
-    const w = scopeWhere(scopeFor(currentUser(req)), "u.id", "u.department_id");
-    const rows = db.prepare(`${USER_SELECT} WHERE ${NOT_SYSTEM_ADMIN} AND ${w.sql} ORDER BY u.code`).all(...w.params);
+    const actor = currentUser(req);
+    const w = scopeWhere(scopeFor(actor), "u.id", "u.department_id");
+    const f = areaFilterSql(parseAreaFilter(db, actor, req.query.area), "u.department_id");
+    const rows = db.prepare(`${USER_SELECT} WHERE ${NOT_SYSTEM_ADMIN} AND ${w.sql} AND ${f.sql} ORDER BY u.code`).all(...w.params, ...f.params);
     res.json({ users: rows.map(mapUser) });
   });
   r.post(
     "/users/import",
-    requireRole("hr"),
+    requireManager,
     ah(async (req, res) => {
       const b = req.body ?? {};
       const wanted = new Set(
@@ -1769,7 +2514,7 @@ function userRoutes(ctx) {
       );
       if (wanted.size === 0) throw new HttpError(400, "Ch\u01B0a ch\u1ECDn ng\u01B0\u1EDDi n\xE0o \u0111\u1EC3 nh\u1EADp");
       if (wanted.size > IMPORT_MAX) throw new HttpError(400, `M\u1ED7i l\u1EA7n nh\u1EADp t\u1ED1i \u0111a ${IMPORT_MAX} ng\u01B0\u1EDDi`);
-      const departmentId = resolveDepartment(db, b.departmentId);
+      const departmentId = resolveDepartmentFor(db, currentUser(req), b.departmentId);
       const placeId = getPlaceIds(db)[0];
       if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, "Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Camera AI (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
       let all;
@@ -1785,44 +2530,68 @@ function userRoutes(ctx) {
       res.json({ created });
     })
   );
+  r.get("/users/next-code", requireManager, (_req, res) => {
+    res.json({ code: nextEmployeeCode(db) });
+  });
+  const cameraAliases = async () => {
+    const placeId = getPlaceIds(db)[0];
+    if (!reconcileEnabled(db) || !placeId) return /* @__PURE__ */ new Set();
+    try {
+      return hanetAliases(await fetchAllPersons(deps, placeId));
+    } catch {
+      return /* @__PURE__ */ new Set();
+    }
+  };
+  r.post(
+    "/users/import-csv/preview",
+    requireManager,
+    ah(async (req, res) => {
+      const { preview } = checkCsvRows(db, currentUser(req), req.body?.rows, await cameraAliases());
+      res.json({ rows: preview });
+    })
+  );
+  r.post(
+    "/users/import-csv",
+    requireManager,
+    ah(async (req, res) => {
+      const { preview, valid } = checkCsvRows(db, currentUser(req), req.body?.rows, await cameraAliases());
+      if (valid.length === 0) throw new HttpError(400, "Kh\xF4ng c\xF3 d\xF2ng h\u1EE3p l\u1EC7 \u0111\u1EC3 t\u1EA1o");
+      const created = createCsvUsers(db, valid, ctx.now());
+      res.json({ created, skipped: preview.length - valid.length });
+    })
+  );
   r.post(
     "/users",
-    requireRole("hr"),
+    requireManager,
     ah(async (req, res) => {
+      const actor = currentUser(req);
       const b = req.body ?? {};
-      const code = (str2(b.code) ?? "").toUpperCase();
+      const code = (str2(b.code) ?? "").toUpperCase() || nextEmployeeCode(db);
       const name = str2(b.name) ?? "";
       if (!CODE_RE.test(code)) throw new HttpError(400, CODE_ERROR);
       if (code === SYSTEM_ADMIN_CODE) throw new HttpError(400, "M\xE3 ADMIN d\xE0nh ri\xEAng cho t\xE0i kho\u1EA3n qu\u1EA3n tr\u1ECB h\u1EC7 th\u1ED1ng");
       if (!name) throw new HttpError(400, "H\u1ECD t\xEAn l\xE0 b\u1EAFt bu\u1ED9c");
       const role = b.role === void 0 ? "employee" : b.role;
-      if (!ROLES.includes(role)) throw new HttpError(400, "Vai tr\xF2 kh\xF4ng h\u1EE3p l\u1EC7");
-      const departmentId = resolveDepartment(db, b.departmentId);
+      assertRoleAllowed(actor, role);
+      const departmentId = resolveDepartmentFor(db, actor, b.departmentId);
+      const email = parseEmail(b.email);
+      const phone = parsePhone(b.phone);
+      const adminAreaIds = role === "area_admin" ? parseAdminAreaIds(db, b.adminAreaIds) : [];
       if (db.prepare("SELECT 1 FROM users WHERE code = ?").get(code)) throw new HttpError(409, "M\xE3 nh\xE2n vi\xEAn \u0111\xE3 t\u1ED3n t\u1EA1i");
-      const image = resolveFaceImage(db, null, b, ctx.now());
+      assertEmailFree(db, email, null);
+      const image = resolveFaceImage(db, actor, null, b, ctx.now());
       const hanetPersonId = str2(b.hanetPersonId) || null;
       assertPersonIdFree(db, hanetPersonId, null);
       const id = newId("usr");
-      const tempPassword = generateTempPassword();
-      db.prepare(
-        `INSERT INTO users(id, code, name, email, phone, role, department_id, position, avatar_url, hanet_person_id,
-           face_registered, status, password_hash, must_change_password, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 1, ?)`
-      ).run(
-        id,
-        code,
-        name,
-        str2(b.email) ?? "",
-        str2(b.phone) ?? "",
-        role,
-        departmentId,
-        str2(b.position) ?? "",
-        str2(b.avatarUrl) ?? "",
-        hanetPersonId,
-        hanetPersonId ? 1 : 0,
-        hashPassword(tempPassword),
-        toVnDate(ctx.now())
-      );
+      tx(db, () => {
+        db.prepare(
+          `INSERT INTO users(id, code, name, email, phone, role, department_id, position, avatar_url, hanet_person_id,
+             face_registered, status, password_hash, must_change_password, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, 1, ?)`
+        ).run(id, code, name, email, phone, role, departmentId, str2(b.position) ?? "", str2(b.avatarUrl) ?? "", hanetPersonId, hanetPersonId ? 1 : 0, toVnDate(ctx.now()));
+        if (adminAreaIds.length) setAdminAreas(db, id, adminAreaIds);
+        enqueueMail(db, id, "welcome", {}, ctx.now());
+      });
       if (hanetPersonId) enqueueAlias(db, id, hanetPersonId, code, ctx.now());
       if (hanetPersonId && departmentId) {
         enqueue(db, "user", id, "user.department", { fromHanetDeptId: null, toDepartmentId: departmentId }, ctx.now());
@@ -1833,16 +2602,22 @@ function userRoutes(ctx) {
         if (face.ok && image.sightingId !== null) deleteSighting(db, image.sightingId);
       }
       kickEntity(ctx, "user", id);
-      res.json({ user: getUser(db, id), tempPassword, ...face ? { face } : {} });
+      res.json({ user: getUser(db, id), ...face ? { face } : {} });
     })
   );
-  r.put("/users/:id", requireRole("hr"), (req, res) => {
+  r.put("/users/:id", requireManager, (req, res) => {
     const actor = currentUser(req);
-    const target = getUser(db, req.params.id);
-    if (!target) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y nh\xE2n s\u1EF1");
+    const target = manageableUser(db, actor, req.params.id);
+    assertCanEdit(actor, target);
     const b = req.body ?? {};
     const changesRole = b.role !== void 0 && b.role !== target.role;
     const changesStatus = b.status !== void 0 && b.status !== target.status;
+    const changesDept = b.departmentId !== void 0 && (b.departmentId || null) !== target.departmentId;
+    const changesAreas = b.adminAreaIds !== void 0 && !(Array.isArray(b.adminAreaIds) && [...new Set(b.adminAreaIds.map(String))].sort().join(",") === target.adminAreaIds.join(","));
+    if (target.id === actor.id && actor.role === "area_admin") {
+      const changesOther = changesRole || changesStatus || changesDept || changesAreas || b.hanetPersonId !== void 0 && (str2(b.hanetPersonId) || null) !== target.hanetPersonId || b.avatarUrl !== void 0 && (str2(b.avatarUrl) ?? "") !== target.avatarUrl;
+      if (changesOther) throw new HttpError(400, "B\u1EA1n ch\u1EC9 \u0111\u01B0\u1EE3c s\u1EEDa h\u1ECD t\xEAn, email, \u0111i\u1EC7n tho\u1EA1i v\xE0 ch\u1EE9c v\u1EE5 c\u1EE7a ch\xEDnh m\xECnh");
+    }
     if (target.id === actor.id && (changesRole || changesStatus)) {
       throw new HttpError(400, "Kh\xF4ng th\u1EC3 t\u1EF1 \u0111\u1ED5i vai tr\xF2 ho\u1EB7c tr\u1EA1ng th\xE1i c\u1EE7a ch\xEDnh m\xECnh");
     }
@@ -1857,7 +2632,13 @@ function userRoutes(ctx) {
       if (!name) throw new HttpError(400, "H\u1ECD t\xEAn l\xE0 b\u1EAFt bu\u1ED9c");
       set("name", name);
     }
-    for (const [key, col] of [["email", "email"], ["phone", "phone"], ["position", "position"], ["avatarUrl", "avatar_url"]]) {
+    if (b.email !== void 0) {
+      const email = parseEmail(b.email);
+      assertEmailFree(db, email, target.id);
+      set("email", email);
+    }
+    if (b.phone !== void 0) set("phone", parsePhone(b.phone));
+    for (const [key, col] of [["position", "position"], ["avatarUrl", "avatar_url"]]) {
       if (b[key] !== void 0) set(col, str2(b[key]) ?? "");
     }
     if (b.hanetPersonId !== void 0) {
@@ -1866,16 +2647,30 @@ function userRoutes(ctx) {
       set("hanet_person_id", pid);
       set("face_registered", pid ? 1 : 0);
     }
-    if (b.role !== void 0) {
-      if (!ROLES.includes(b.role)) throw new HttpError(400, "Vai tr\xF2 kh\xF4ng h\u1EE3p l\u1EC7");
+    if (changesRole) {
+      assertRoleAllowed(actor, b.role);
       set("role", b.role);
     }
     if (b.status !== void 0) {
       if (b.status !== "active" && b.status !== "inactive") throw new HttpError(400, "Tr\u1EA1ng th\xE1i kh\xF4ng h\u1EE3p l\u1EC7");
       set("status", b.status);
     }
-    if (b.departmentId !== void 0) set("department_id", resolveDepartment(db, b.departmentId));
-    if (sets.length) db.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).run(...params, target.id);
+    if (changesDept) set("department_id", resolveDepartmentFor(db, actor, b.departmentId));
+    const newRole = changesRole ? b.role : target.role;
+    let adminAreas = null;
+    if (newRole === "area_admin" && (changesRole || changesAreas)) {
+      if (!isGlobalHr(actor)) throw new HttpError(403, "Ch\u1EC9 HR to\xE0n h\u1EC7 th\u1ED1ng \u0111\u01B0\u1EE3c c\u1EA5p quy\u1EC1n qu\u1EA3n tr\u1ECB khu v\u1EF1c");
+      adminAreas = parseAdminAreaIds(db, b.adminAreaIds);
+    } else if (changesRole && target.role === "area_admin") {
+      adminAreas = [];
+    }
+    tx(db, () => {
+      if (sets.length) db.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).run(...params, target.id);
+      if (adminAreas !== null) setAdminAreas(db, target.id, adminAreas);
+    });
+    if (b.email !== void 0 && !target.canLogin && parseEmail(b.email) !== target.email.toLowerCase()) {
+      enqueueMail(db, target.id, "welcome", {}, ctx.now());
+    }
     if (b.status === "inactive" && target.status !== "inactive") deleteUserSessions(db, target.id);
     const after = getUser(db, target.id);
     const now = ctx.now();
@@ -1891,23 +2686,23 @@ function userRoutes(ctx) {
     kickEntity(ctx, "user", target.id);
     res.json({ user: getUser(db, target.id) });
   });
-  r.post("/users/:id/reset-password", requireRole("hr"), (req, res) => {
+  r.post("/users/:id/reset-password", requireManager, (req, res) => {
     const actor = currentUser(req);
-    const target = getUser(db, req.params.id);
-    if (!target) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y nh\xE2n s\u1EF1");
-    const tempPassword = generateTempPassword();
-    db.prepare("UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?").run(hashPassword(tempPassword), target.id);
-    deleteUserSessions(db, target.id);
-    console.warn(`[SECURITY] password_reset by=${actor.code} target=${target.code} ip=${req.ip}`);
-    res.json({ tempPassword });
+    const target = manageableUser(db, actor, req.params.id);
+    assertCanEdit(actor, target);
+    if (!target.email) throw new HttpError(400, "Nh\xE2n s\u1EF1 ch\u01B0a c\xF3 email: h\xE3y b\u1ED5 sung email tr\u01B0\u1EDBc");
+    enqueueMail(db, target.id, target.canLogin ? "reset_temp" : "welcome", {}, ctx.now());
+    console.warn(`[SECURITY] password_reset_queued by=${actor.code} target=${target.code} ip=${req.ip}`);
+    res.json({ queued: true });
   });
   r.post(
     "/users/:id/face",
-    requireRole("hr"),
+    requireManager,
     ah(async (req, res) => {
-      const target = getUser(db, req.params.id);
-      if (!target) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y nh\xE2n s\u1EF1");
-      const image = resolveFaceImage(db, target.id, req.body ?? {}, ctx.now());
+      const actor = currentUser(req);
+      const target = manageableUser(db, actor, req.params.id);
+      assertCanManageFace(actor, target);
+      const image = resolveFaceImage(db, actor, target.id, req.body ?? {}, ctx.now());
       if (!image) throw new HttpError(400, "H\xE3y ch\u1ECDn m\u1ED9t l\u01B0\u1EE3t camera ch\u1EE5p");
       const face = await registerFace(deps, target.id, image.url);
       if (face.ok && image.sightingId !== null) deleteSighting(db, image.sightingId);
@@ -1915,9 +2710,10 @@ function userRoutes(ctx) {
       res.json({ user: getUser(db, target.id), face });
     })
   );
-  r.get("/users/:id/face-candidates", requireRole("hr"), (req, res) => {
-    const target = getUser(db, req.params.id);
-    if (!target) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y nh\xE2n s\u1EF1");
+  r.get("/users/:id/face-candidates", requireManager, (req, res) => {
+    const actor = currentUser(req);
+    const target = manageableUser(db, actor, req.params.id);
+    assertCanManageFace(actor, target);
     const now = ctx.now();
     const rows = db.prepare(
       `SELECT id, ts, image_url, device_id, device_name FROM detections
@@ -1925,15 +2721,15 @@ function userRoutes(ctx) {
     ).all(target.id, now - SIGHTING_TTL_MS);
     const body = {
       detections: rows.map((d) => ({ id: d.id, ts: d.ts, imageUrl: d.image_url, deviceName: d.device_name ?? d.device_id })),
-      strangers: listSightings(db, now, "stranger")
+      strangers: listSightings(db, now, "stranger").filter((s) => managesArea(actor, deviceAreaId(db, s.deviceId)))
     };
     res.json(body);
   });
-  r.delete("/users/:id", requireSystemAdmin, (req, res) => {
+  r.delete("/users/:id", requireManager, (req, res) => {
     const actor = currentUser(req);
-    const target = getUser(db, req.params.id);
-    if (!target) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y nh\xE2n s\u1EF1");
+    const target = manageableUser(db, actor, req.params.id);
     if (target.id === actor.id) throw new HttpError(400, "Kh\xF4ng th\u1EC3 t\u1EF1 x\xF3a t\xE0i kho\u1EA3n \u0111ang \u0111\u0103ng nh\u1EADp");
+    if (!canDeleteUser(actor, target)) throw new HttpError(403, "B\u1EA1n kh\xF4ng c\xF3 quy\u1EC1n x\xF3a t\xE0i kho\u1EA3n n\xE0y");
     const backup = backupNow(db, ctx.config.backupDir, "pre-delete", ctx.now());
     if (target.faceRegistered || target.hanetPersonId) {
       enqueue(db, "user", target.id, "user.remove", { code: target.code, name: target.name, personId: target.hanetPersonId }, ctx.now());
@@ -1951,12 +2747,13 @@ function userRoutes(ctx) {
 // server/routes/departments.ts
 init_db();
 init_errors();
-import { Router as Router3 } from "express";
+import { Router as Router4 } from "express";
 init_hanet_sync();
 init_vntime();
 var DEPT_SELECT = `SELECT d.id, d.code, d.name, d.description, d.manager_id, m.name AS manager_name, d.hanet_sync_status, d.hanet_sync_error, d.created_at,
+  d.area_id, ar.name AS area_name,
   (SELECT COUNT(*) FROM users x WHERE x.department_id = d.id) AS member_count
-  FROM departments d LEFT JOIN users m ON m.id = d.manager_id`;
+  FROM departments d LEFT JOIN users m ON m.id = d.manager_id LEFT JOIN areas ar ON ar.id = d.area_id`;
 function mapDept(r) {
   return {
     id: r.id,
@@ -1968,6 +2765,8 @@ function mapDept(r) {
     memberCount: Number(r.member_count),
     hanetSyncStatus: r.hanet_sync_status ?? "synced",
     hanetSyncError: r.hanet_sync_error ?? null,
+    areaId: r.area_id ?? null,
+    areaName: r.area_name ?? null,
     createdAt: r.created_at
   };
 }
@@ -1975,12 +2774,17 @@ function getDept(db, id) {
   const row = db.prepare(`${DEPT_SELECT} WHERE d.id = ?`).get(id);
   return row ? mapDept(row) : null;
 }
-function resolveManager(db, managerId) {
+function resolveManager(db, actor, managerId) {
   if (managerId === void 0 || managerId === null || managerId === "") return null;
-  if (typeof managerId !== "string" || !db.prepare("SELECT 1 FROM users WHERE id = ?").get(managerId)) {
-    throw new HttpError(400, "Tr\u01B0\u1EDFng ph\xF2ng \u0111\u01B0\u1EE3c ch\u1ECDn kh\xF4ng t\u1ED3n t\u1EA1i");
-  }
-  return managerId;
+  const m = typeof managerId === "string" ? getUser(db, managerId) : null;
+  if (!m) throw new HttpError(400, "Tr\u01B0\u1EDFng ph\xF2ng \u0111\u01B0\u1EE3c ch\u1ECDn kh\xF4ng t\u1ED3n t\u1EA1i");
+  if (!managesArea(actor, m.areaId)) throw notFound("nh\xE2n s\u1EF1");
+  return m.id;
+}
+function manageableDept(db, actor, id) {
+  const dept = getDept(db, id);
+  if (!dept || !managesArea(actor, dept.areaId)) throw notFound("ph\xF2ng ban");
+  return dept;
 }
 function nextDepartmentCode(db) {
   const codes = db.prepare("SELECT code FROM departments WHERE code GLOB 'PB[0-9]*'").all();
@@ -1989,48 +2793,55 @@ function nextDepartmentCode(db) {
 }
 function departmentRoutes(ctx) {
   const { db } = ctx;
-  const r = Router3();
-  r.get("/departments", (_req, res) => {
-    const rows = db.prepare(`${DEPT_SELECT} ORDER BY d.code`).all();
+  const r = Router4();
+  r.get("/departments", (req, res) => {
+    const actor = currentUser(req);
+    const s = departmentScopeSql(actor);
+    const f = areaColumnSql(parseAreaFilter(db, actor, req.query.area), "d.area_id");
+    const rows = db.prepare(`${DEPT_SELECT} WHERE ${s.sql} AND ${f.sql} ORDER BY d.code`).all(...s.params, ...f.params);
     res.json({ departments: rows.map(mapDept) });
   });
-  r.post("/departments", requireRole("hr"), (req, res) => {
+  r.post("/departments", requireManager, (req, res) => {
+    const actor = currentUser(req);
     const b = req.body ?? {};
     const given = typeof b.code === "string" ? b.code.trim().toUpperCase() : "";
     const code = given || nextDepartmentCode(db);
     const name = typeof b.name === "string" ? b.name.trim() : "";
     if (!CODE_RE.test(code)) throw new HttpError(400, "M\xE3 ph\xF2ng ban kh\xF4ng h\u1EE3p l\u1EC7");
     if (!name) throw new HttpError(400, "T\xEAn ph\xF2ng ban l\xE0 b\u1EAFt bu\u1ED9c");
-    const managerId = resolveManager(db, b.managerId);
+    const areaId = resolveAreaFor(db, actor, b.areaId);
+    const managerId = resolveManager(db, actor, b.managerId);
     if (db.prepare("SELECT 1 FROM departments WHERE code = ?").get(code)) throw new HttpError(409, "M\xE3 ph\xF2ng ban \u0111\xE3 t\u1ED3n t\u1EA1i");
     const id = newId("dep");
-    db.prepare("INSERT INTO departments(id, code, name, description, manager_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(
+    db.prepare("INSERT INTO departments(id, code, name, description, manager_id, area_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
       id,
       code,
       name,
       typeof b.description === "string" ? b.description.trim() : "",
       managerId,
+      areaId,
       toVnDate(ctx.now())
     );
     enqueue(db, "department", id, "dept.create", { name, desc: typeof b.description === "string" ? b.description.trim() : "" }, ctx.now());
     kickEntity(ctx, "department", id);
     res.json({ department: getDept(db, id) });
   });
-  r.put("/departments/:id", requireRole("hr"), (req, res) => {
-    const dept = getDept(db, req.params.id);
-    if (!dept) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y ph\xF2ng ban");
+  r.put("/departments/:id", requireManager, (req, res) => {
+    const actor = currentUser(req);
+    const dept = manageableDept(db, actor, req.params.id);
     const b = req.body ?? {};
-    if (b.name !== void 0) {
-      const name = typeof b.name === "string" ? b.name.trim() : "";
-      if (!name) throw new HttpError(400, "T\xEAn ph\xF2ng ban l\xE0 b\u1EAFt bu\u1ED9c");
-      db.prepare("UPDATE departments SET name = ? WHERE id = ?").run(name, dept.id);
-    }
-    if (b.description !== void 0) {
-      db.prepare("UPDATE departments SET description = ? WHERE id = ?").run(typeof b.description === "string" ? b.description.trim() : "", dept.id);
-    }
-    if (b.managerId !== void 0) {
-      db.prepare("UPDATE departments SET manager_id = ? WHERE id = ?").run(resolveManager(db, b.managerId), dept.id);
-    }
+    const name = b.name === void 0 ? void 0 : typeof b.name === "string" ? b.name.trim() : "";
+    if (name === "") throw new HttpError(400, "T\xEAn ph\xF2ng ban l\xE0 b\u1EAFt bu\u1ED9c");
+    const areaId = b.areaId === void 0 ? void 0 : resolveAreaFor(db, actor, b.areaId);
+    const managerId = b.managerId === void 0 ? void 0 : resolveManager(db, actor, b.managerId);
+    tx(db, () => {
+      if (name !== void 0) db.prepare("UPDATE departments SET name = ? WHERE id = ?").run(name, dept.id);
+      if (b.description !== void 0) {
+        db.prepare("UPDATE departments SET description = ? WHERE id = ?").run(typeof b.description === "string" ? b.description.trim() : "", dept.id);
+      }
+      if (areaId !== void 0) db.prepare("UPDATE departments SET area_id = ? WHERE id = ?").run(areaId, dept.id);
+      if (managerId !== void 0) db.prepare("UPDATE departments SET manager_id = ? WHERE id = ?").run(managerId, dept.id);
+    });
     const after = getDept(db, dept.id);
     if (after.name !== dept.name || after.description !== dept.description) {
       enqueue(db, "department", dept.id, "dept.update", { name: after.name, desc: after.description }, ctx.now());
@@ -2038,10 +2849,9 @@ function departmentRoutes(ctx) {
     }
     res.json({ department: getDept(db, dept.id) });
   });
-  r.delete("/departments/:id", requireSystemAdmin, (req, res) => {
+  r.delete("/departments/:id", requireManager, (req, res) => {
     const actor = currentUser(req);
-    const dept = getDept(db, req.params.id);
-    if (!dept) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y ph\xF2ng ban");
+    const dept = manageableDept(db, actor, req.params.id);
     const backup = backupNow(db, ctx.config.backupDir, "pre-delete", ctx.now());
     const hanetDeptId = db.prepare("SELECT hanet_department_id FROM departments WHERE id = ?").get(dept.id).hanet_department_id;
     if (hanetDeptId) enqueue(db, "department", dept.id, "dept.remove", { hanetDepartmentId: hanetDeptId, name: dept.name }, ctx.now());
@@ -2057,7 +2867,7 @@ function departmentRoutes(ctx) {
 // server/routes/cameras.ts
 init_db();
 init_errors();
-import { Router as Router4 } from "express";
+import { Router as Router5 } from "express";
 
 // server/cameras.ts
 init_db();
@@ -2094,6 +2904,7 @@ async function refreshCameraStatus(deps) {
 // server/routes/cameras.ts
 init_hanet();
 init_hanet_sync();
+var CAMERA_SELECT = "SELECT c.*, ar.name AS area_name FROM cameras c LEFT JOIN areas ar ON ar.id = c.area_id";
 function mapCamera(r) {
   return {
     id: r.id,
@@ -2105,38 +2916,45 @@ function mapCamera(r) {
     ipAddress: r.ip_address ?? "",
     online: r.online === null || r.online === void 0 ? null : r.online === 1,
     statusCheckedAt: r.status_checked_at ?? null,
+    areaId: r.area_id ?? null,
+    areaName: r.area_name ?? null,
     createdAt: r.created_at
   };
 }
 function cameraRoutes(ctx) {
   const { db } = ctx;
-  const r = Router4();
+  const r = Router5();
   const deps = { db, fetch: ctx.fetch, now: ctx.now };
-  const listCameras = () => db.prepare("SELECT * FROM cameras ORDER BY name").all().map(mapCamera);
+  const listCameras = () => db.prepare(`${CAMERA_SELECT} ORDER BY c.name`).all().map(mapCamera);
   const requireHanet = () => {
     if (!reconcileEnabled(db)) throw new HttpError(400, "Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Camera AI (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
   };
-  r.get("/cameras", (_req, res) => {
-    res.json({ cameras: listCameras() });
+  r.get("/cameras", (req, res) => {
+    const actor = currentUser(req);
+    const s = cameraScopeSql(actor);
+    const f = areaColumnSql(parseAreaFilter(db, actor, req.query.area), "c.area_id");
+    const rows = db.prepare(`${CAMERA_SELECT} WHERE ${s.sql} AND ${f.sql} ORDER BY c.name`).all(...s.params, ...f.params);
+    res.json({ cameras: rows.map(mapCamera) });
   });
-  r.post("/cameras", requireRole("hr"), (req, res) => {
+  r.post("/cameras", requireGlobalHr, (req, res) => {
     const b = req.body ?? {};
-    const text = (v) => typeof v === "string" ? v.trim() : "";
-    const name = text(b.name);
-    const deviceKey = text(b.deviceKey);
+    const text2 = (v) => typeof v === "string" ? v.trim() : "";
+    const name = text2(b.name);
+    const deviceKey = text2(b.deviceKey);
     if (!name || !deviceKey) throw new HttpError(400, "T\xEAn camera v\xE0 m\xE3 thi\u1EBFt b\u1ECB l\xE0 b\u1EAFt bu\u1ED9c");
     const placeId = b.placeId === void 0 || b.placeId === "" || b.placeId === null ? null : Number(b.placeId);
     if (placeId !== null && (!Number.isInteger(placeId) || placeId <= 0)) throw new HttpError(400, "Place ID kh\xF4ng h\u1EE3p l\u1EC7");
+    const areaId = resolveAreaFor(db, currentUser(req), b.areaId);
     if (db.prepare("SELECT 1 FROM cameras WHERE device_key = ?").get(deviceKey)) throw new HttpError(409, "M\xE3 thi\u1EBFt b\u1ECB \u0111\xE3 t\u1ED3n t\u1EA1i");
     const id = newId("cam");
     db.prepare(
-      "INSERT INTO cameras(id, name, device_key, place_id, place_name, location, ip_address, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-    ).run(id, name, deviceKey, placeId, text(b.placeName), text(b.location), text(b.ipAddress), new Date(ctx.now()).toISOString());
-    res.json({ camera: mapCamera(db.prepare("SELECT * FROM cameras WHERE id = ?").get(id)) });
+      "INSERT INTO cameras(id, name, device_key, place_id, place_name, location, ip_address, area_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(id, name, deviceKey, placeId, text2(b.placeName), text2(b.location), text2(b.ipAddress), areaId, new Date(ctx.now()).toISOString());
+    res.json({ camera: mapCamera(db.prepare(`${CAMERA_SELECT} WHERE c.id = ?`).get(id)) });
   });
   r.post(
     "/cameras/import",
-    requireRole("hr"),
+    requireGlobalHr,
     ah(async (_req, res) => {
       requireHanet();
       let added;
@@ -2150,7 +2968,7 @@ function cameraRoutes(ctx) {
   );
   r.post(
     "/cameras/refresh-status",
-    requireRole("hr"),
+    requireGlobalHr,
     ah(async (_req, res) => {
       requireHanet();
       try {
@@ -2161,29 +2979,33 @@ function cameraRoutes(ctx) {
       res.json({ cameras: listCameras() });
     })
   );
-  r.put("/cameras/:id", requireRole("hr"), (req, res) => {
-    const row = db.prepare("SELECT * FROM cameras WHERE id = ?").get(req.params.id);
-    if (!row) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y camera");
+  r.put("/cameras/:id", requireManager, (req, res) => {
+    const actor = currentUser(req);
+    const row = db.prepare(`${CAMERA_SELECT} WHERE c.id = ?`).get(req.params.id);
+    if (!row || !managesArea(actor, row.area_id ?? null)) throw notFound("camera");
     const b = req.body ?? {};
-    const text = (v) => typeof v === "string" ? v.trim() : "";
-    const name = b.name === void 0 ? row.name : text(b.name);
+    const text2 = (v) => typeof v === "string" ? v.trim() : "";
+    const name = b.name === void 0 ? row.name : text2(b.name);
     if (!name) throw new HttpError(400, "T\xEAn camera l\xE0 b\u1EAFt bu\u1ED9c");
-    db.prepare("UPDATE cameras SET name = ?, location = ?, ip_address = ? WHERE id = ?").run(
+    const areaId = b.areaId === void 0 ? row.area_id ?? null : resolveAreaFor(db, actor, b.areaId);
+    db.prepare("UPDATE cameras SET name = ?, location = ?, ip_address = ?, area_id = ? WHERE id = ?").run(
       name,
-      b.location === void 0 ? row.location : text(b.location),
-      b.ipAddress === void 0 ? row.ip_address : text(b.ipAddress),
+      b.location === void 0 ? row.location : text2(b.location),
+      b.ipAddress === void 0 ? row.ip_address : text2(b.ipAddress),
+      areaId,
       row.id
     );
     if (name !== row.name) {
       enqueue(db, "camera", row.id, "camera.rename", { deviceId: row.device_key, name }, ctx.now());
       kickEntity(ctx, "camera", row.id);
     }
-    res.json({ camera: mapCamera(db.prepare("SELECT * FROM cameras WHERE id = ?").get(row.id)) });
+    res.json({ camera: mapCamera(db.prepare(`${CAMERA_SELECT} WHERE c.id = ?`).get(row.id)) });
   });
-  r.delete("/cameras/:id", requireRole("hr"), (req, res) => {
-    const result = db.prepare("DELETE FROM cameras WHERE id = ?").run(req.params.id);
-    if (Number(result.changes) === 0) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y camera");
-    dropEntityJobs(db, "camera", req.params.id);
+  r.delete("/cameras/:id", requireManager, (req, res) => {
+    const row = db.prepare("SELECT id, area_id FROM cameras WHERE id = ?").get(req.params.id);
+    if (!row || !managesArea(currentUser(req), row.area_id)) throw notFound("camera");
+    db.prepare("DELETE FROM cameras WHERE id = ?").run(row.id);
+    dropEntityJobs(db, "camera", row.id);
     res.json({ success: true });
   });
   return r;
@@ -2191,7 +3013,7 @@ function cameraRoutes(ctx) {
 
 // server/routes/attendance.ts
 init_errors();
-import { Router as Router5 } from "express";
+import { Router as Router6 } from "express";
 init_auth();
 init_attendance();
 init_bootstrap();
@@ -2387,18 +3209,22 @@ var DETAIL_FILTER = {
   missing_out: "a.status = 'missing_out'",
   not_checked_in: "a.user_id IS NULL"
 };
+function denySee(viewer) {
+  return viewer.role === "area_admin" ? notFound("nh\xE2n s\u1EF1") : new HttpError(403, "B\u1EA1n kh\xF4ng c\xF3 quy\u1EC1n xem d\u1EEF li\u1EC7u n\xE0y");
+}
 function attendanceRoutes(ctx) {
   const { db } = ctx;
-  const r = Router5();
+  const r = Router6();
   r.get("/attendance", (req, res) => {
     const user = currentUser(req);
     const date = req.query.date === void 0 || req.query.date === "" ? toVnDate(ctx.now()) : req.query.date;
     if (!isValidDate(date)) throw new HttpError(400, "Ng\xE0y kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng YYYY-MM-DD)");
     const w = scopeWhere(scopeFor(user), "u.id", "u.department_id");
-    let sql = `${DAY_SELECT} WHERE a.work_date = ? AND ${w.sql}`;
-    const params = [date, ...w.params];
+    const f = areaFilterSql(parseAreaFilter(db, user, req.query.area), "u.department_id");
+    let sql = `${DAY_SELECT} WHERE a.work_date = ? AND ${w.sql} AND ${f.sql}`;
+    const params = [date, ...w.params, ...f.params];
     const departmentId = req.query.departmentId;
-    if (user.role === "hr" && typeof departmentId === "string" && departmentId) {
+    if ((user.role === "hr" || user.role === "area_admin") && typeof departmentId === "string" && departmentId) {
       sql += " AND u.department_id = ?";
       params.push(departmentId);
     }
@@ -2412,13 +3238,13 @@ function attendanceRoutes(ctx) {
     res.json({ date, records });
   });
   r.get("/attendance/:userId/:date/detections", (req, res) => {
+    const viewer = currentUser(req);
     const target = getUser(db, req.params.userId);
     if (!target) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y nh\xE2n s\u1EF1");
-    if (!canSeeUser(currentUser(req), target)) throw new HttpError(403, "B\u1EA1n kh\xF4ng c\xF3 quy\u1EC1n xem d\u1EEF li\u1EC7u n\xE0y");
+    if (!canSeeUser(viewer, target)) throw denySee(viewer);
     if (!isValidDate(req.params.date)) throw new HttpError(400, "Ng\xE0y kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng YYYY-MM-DD)");
     const rows = db.prepare("SELECT id, device_id, device_name, place_id, ts, work_date, image_url, source FROM detections WHERE user_id = ? AND work_date = ? ORDER BY ts").all(target.id, req.params.date);
-    const viewer = currentUser(req);
-    const canWatch = viewer.role === "hr" || viewer.role === "dept_manager";
+    const canWatch = viewer.role === "hr" || viewer.role === "area_admin" || viewer.role === "dept_manager";
     const detections = rows.map((x) => ({
       id: x.id,
       deviceId: x.device_id,
@@ -2433,12 +3259,14 @@ function attendanceRoutes(ctx) {
   });
   r.get(
     "/detections/:id/video",
-    requireRole("hr", "dept_manager"),
+    requireRole("hr", "area_admin", "dept_manager"),
     ah(async (req, res) => {
       const det = db.prepare("SELECT user_id, device_id, ts, source FROM detections WHERE id = ?").get(Number(req.params.id) || 0);
       if (!det) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y l\u01B0\u1EE3t nh\u1EADn di\u1EC7n");
       const target = getUser(db, det.user_id);
-      if (!target || !canSeeUser(currentUser(req), target)) throw new HttpError(403, "B\u1EA1n kh\xF4ng c\xF3 quy\u1EC1n xem d\u1EEF li\u1EC7u n\xE0y");
+      if (!target) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y l\u01B0\u1EE3t nh\u1EADn di\u1EC7n");
+      const viewer = currentUser(req);
+      if (!canSeeUser(viewer, target)) throw denySee(viewer);
       if (det.source === "simulator") throw new HttpError(404, "L\u01B0\u1EE3t m\xF4 ph\u1ECFng kh\xF4ng c\xF3 video");
       let at = det.ts;
       if (req.query.at !== void 0) {
@@ -2460,7 +3288,7 @@ function attendanceRoutes(ctx) {
       res.json(body);
     })
   );
-  r.post("/attendance/recompute", requireRole("hr"), (req, res) => {
+  r.post("/attendance/recompute", requireGlobalHr, (req, res) => {
     const { from, to } = req.body ?? {};
     if (!isValidDate(from) || !isValidDate(to)) throw new HttpError(400, "Ng\xE0y kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng YYYY-MM-DD)");
     const span = daysBetween(from, to);
@@ -2469,19 +3297,26 @@ function attendanceRoutes(ctx) {
     res.json({ updated: recomputeRange(db, from, to) });
   });
   r.get("/stats", (req, res) => {
-    const w = scopeWhere(scopeFor(currentUser(req)), "u.id", "u.department_id");
+    const actor = currentUser(req);
+    const filter = parseAreaFilter(db, actor, req.query.area);
+    const w = scopeWhere(scopeFor(actor), "u.id", "u.department_id");
+    const f = areaFilterSql(filter, "u.department_id");
+    const where = `${w.sql} AND ${f.sql}`;
+    const params = [...w.params, ...f.params];
     const date = toVnDate(ctx.now());
-    const total = db.prepare(`SELECT COUNT(*) AS c FROM users u WHERE u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${w.sql}`).get(...w.params);
+    const total = db.prepare(`SELECT COUNT(*) AS c FROM users u WHERE u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${where}`).get(...params);
     const day = db.prepare(
       `SELECT COUNT(*) AS present,
            SUM(CASE WHEN a.late_minutes = 0 THEN 1 ELSE 0 END) AS on_time,
            SUM(CASE WHEN a.late_minutes > 0 THEN 1 ELSE 0 END) AS late,
            SUM(CASE WHEN a.status = 'missing_out' THEN 1 ELSE 0 END) AS missing_out
          FROM attendance_days a JOIN users u ON u.id = a.user_id
-         WHERE a.work_date = ? AND u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${w.sql}`
-    ).get(date, ...w.params);
-    const pending = db.prepare(`SELECT COUNT(*) AS c FROM requests r JOIN users u ON u.id = r.user_id WHERE r.status = 'pending' AND ${w.sql}`).get(...w.params);
-    const cameras = db.prepare("SELECT COUNT(*) AS c FROM cameras").get();
+         WHERE a.work_date = ? AND u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${where}`
+    ).get(date, ...params);
+    const pending = db.prepare(`SELECT COUNT(*) AS c FROM requests r JOIN users u ON u.id = r.user_id WHERE r.status = 'pending' AND ${where}`).get(...params);
+    const cs = cameraScopeSql(actor);
+    const cf = areaColumnSql(filter, "c.area_id");
+    const cameras = db.prepare(`SELECT COUNT(*) AS c FROM cameras c WHERE ${cs.sql} AND ${cf.sql}`).get(...cs.params, ...cf.params);
     const body = {
       date,
       totalEmployees: total.c,
@@ -2498,16 +3333,18 @@ function attendanceRoutes(ctx) {
   r.get("/stats/details", (req, res) => {
     const type = req.query.type;
     if (typeof type !== "string" || !Object.hasOwn(DETAIL_FILTER, type)) throw new HttpError(400, "Lo\u1EA1i th\u1ED1ng k\xEA kh\xF4ng h\u1EE3p l\u1EC7");
-    const w = scopeWhere(scopeFor(currentUser(req)), "u.id", "u.department_id");
+    const actor = currentUser(req);
+    const w = scopeWhere(scopeFor(actor), "u.id", "u.department_id");
+    const f = areaFilterSql(parseAreaFilter(db, actor, req.query.area), "u.department_id");
     const date = toVnDate(ctx.now());
     const rows = db.prepare(
       `SELECT u.id, u.code, u.name, d.name AS department_name, a.first_in, a.last_out, a.late_minutes, a.status
          FROM users u
          LEFT JOIN departments d ON d.id = u.department_id
          LEFT JOIN attendance_days a ON a.user_id = u.id AND a.work_date = ?
-         WHERE u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${w.sql} AND ${DETAIL_FILTER[type]}
+         WHERE u.status = 'active' AND ${NOT_SYSTEM_ADMIN} AND ${w.sql} AND ${f.sql} AND ${DETAIL_FILTER[type]}
          ORDER BY a.first_in IS NULL, a.first_in, u.code`
-    ).all(date, ...w.params);
+    ).all(date, ...w.params, ...f.params);
     const out = rows.map((x) => ({
       userId: x.id,
       employeeCode: x.code,
@@ -2524,25 +3361,60 @@ function attendanceRoutes(ctx) {
 }
 
 // server/routes/settings.ts
-import { Router as Router6 } from "express";
+import { Router as Router7 } from "express";
 init_settings();
 function settingsRoutes(ctx) {
   const { db } = ctx;
-  const r = Router6();
-  r.get("/settings/work", requireRole("hr"), (_req, res) => {
+  const r = Router7();
+  r.get("/settings/work", requireGlobalHr, (_req, res) => {
     res.json({ settings: getWorkSettings(db) });
   });
-  r.put("/settings/work", requireRole("hr"), (req, res) => {
+  r.put("/settings/work", requireGlobalHr, (req, res) => {
     saveWorkSettings(db, validateWorkSettings(req.body));
     res.json({ settings: getWorkSettings(db) });
   });
   return r;
 }
 
+// server/routes/mail.ts
+init_errors();
+import { Router as Router8 } from "express";
+function mailRoutes(ctx) {
+  const { db } = ctx;
+  const r = Router8();
+  r.get("/settings/mail", requireGlobalHr, (_req, res) => {
+    res.json(getMailConfigView(db, ctx.now()));
+  });
+  r.put("/settings/mail", requireSystemAdmin, (req, res) => {
+    saveMailConfig(db, req.body);
+    res.json(getMailConfigView(db, ctx.now()));
+  });
+  r.post(
+    "/settings/mail/test",
+    requireSystemAdmin,
+    ah(async (req, res) => {
+      const to = typeof req.body?.to === "string" ? req.body.to.trim() : "";
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new HttpError(400, "Email nh\u1EADn th\u01B0 th\u1EED kh\xF4ng h\u1EE3p l\u1EC7");
+      const cfg = getSmtpConfig(db);
+      if (!cfg) {
+        res.json({ ok: false, message: "Ch\u01B0a c\u1EA5u h\xECnh \u0111\u1EE7 m\xE1y ch\u1EE7, t\xE0i kho\u1EA3n, m\u1EADt kh\u1EA9u v\xE0 email ng\u01B0\u1EDDi g\u1EEDi" });
+        return;
+      }
+      try {
+        await ctx.sendMail(cfg, testMail(to));
+        res.json({ ok: true, message: `\u0110\xE3 g\u1EEDi th\u01B0 th\u1EED t\u1EDBi ${to}` });
+      } catch (err) {
+        res.json({ ok: false, message: classifyMailError(err).message });
+      }
+    })
+  );
+  return r;
+}
+
 // server/routes/requests.ts
 init_db();
 init_errors();
-import { Router as Router7 } from "express";
+import { Router as Router9 } from "express";
 init_auth();
 init_attendance();
 init_vntime();
@@ -2584,10 +3456,12 @@ function optionalTime(v, label) {
 }
 function requestRoutes(ctx) {
   const { db } = ctx;
-  const r = Router7();
+  const r = Router9();
   r.get("/requests", (req, res) => {
-    const w = scopeWhere(scopeFor(currentUser(req)), "u.id", "u.department_id");
-    const rows = db.prepare(`${REQUEST_SELECT} WHERE ${w.sql} ORDER BY r.created_at DESC`).all(...w.params);
+    const actor = currentUser(req);
+    const w = scopeWhere(scopeFor(actor), "u.id", "u.department_id");
+    const f = areaFilterSql(parseAreaFilter(db, actor, req.query.area), "u.department_id");
+    const rows = db.prepare(`${REQUEST_SELECT} WHERE ${w.sql} AND ${f.sql} ORDER BY r.created_at DESC`).all(...w.params, ...f.params);
     res.json({ requests: rows.map(mapRequest) });
   });
   r.post("/requests", (req, res) => {
@@ -2612,10 +3486,19 @@ function requestRoutes(ctx) {
     ).run(id, user.id, b.workDate, b.type, reason, suggestedIn, suggestedOut, new Date(ctx.now()).toISOString());
     res.json({ request: getRequest(db, id) });
   });
-  r.put("/requests/:id", requireRole("hr", "dept_manager"), (req, res) => {
+  r.put("/requests/:id", requireRole("hr", "area_admin", "dept_manager"), (req, res) => {
     const reviewer = currentUser(req);
     const target = getRequest(db, req.params.id);
     if (!target) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y \u0111\u01A1n");
+    if (reviewer.role === "area_admin" && !managesArea(reviewer, target.departmentId ? deptAreaId(db, target.departmentId) ?? null : null)) {
+      throw notFound("\u0111\u01A1n");
+    }
+    if (reviewer.role === "area_admin") {
+      const owner = db.prepare("SELECT role FROM users WHERE id = ?").get(target.userId);
+      if (!owner || owner.role !== "employee" && owner.role !== "dept_manager") {
+        throw new HttpError(403, "B\u1EA1n kh\xF4ng c\xF3 quy\u1EC1n duy\u1EC7t \u0111\u01A1n c\u1EE7a t\xE0i kho\u1EA3n n\xE0y");
+      }
+    }
     if (target.userId === reviewer.id) throw new HttpError(403, "Kh\xF4ng th\u1EC3 t\u1EF1 duy\u1EC7t \u0111\u01A1n c\u1EE7a m\xECnh");
     if (reviewer.role === "dept_manager" && (!reviewer.departmentId || target.departmentId !== reviewer.departmentId)) {
       throw new HttpError(403, "Tr\u01B0\u1EDFng ph\xF2ng ch\u1EC9 \u0111\u01B0\u1EE3c duy\u1EC7t \u0111\u01A1n c\u1EE7a ph\xF2ng m\xECnh");
@@ -2652,7 +3535,7 @@ function requestRoutes(ctx) {
 
 // server/routes/hanet.ts
 init_errors();
-import { Router as Router8 } from "express";
+import { Router as Router10 } from "express";
 init_auth();
 init_hanet();
 init_hanet_api();
@@ -2661,7 +3544,7 @@ init_vntime();
 init_hanet_sync();
 function hanetPublicRoutes(ctx) {
   const { db } = ctx;
-  const r = Router8();
+  const r = Router10();
   r.post("/hanet/webhook/:token", (req, res) => {
     const now = ctx.now();
     if (!safeEqualStrings(req.params.token, getWebhookToken(db))) {
@@ -2720,21 +3603,35 @@ function hanetPublicRoutes(ctx) {
   });
   return r;
 }
+function syncEntityInScope(db, actor, type, id) {
+  if (isGlobalHr(actor)) return true;
+  if (type === "user") {
+    const u = getUser(db, id);
+    return Boolean(u) && managesArea(actor, u.areaId);
+  }
+  if (type === "department") {
+    const area = deptAreaId(db, id);
+    return area !== void 0 && managesArea(actor, area);
+  }
+  const cam = db.prepare("SELECT area_id FROM cameras WHERE id = ?").get(id);
+  return Boolean(cam) && managesArea(actor, cam.area_id);
+}
 function hanetRoutes(ctx) {
   const { db } = ctx;
-  const r = Router8();
-  const hr = requireRole("hr");
-  r.get("/hanet/config", hr, (_req, res) => {
-    res.json({ config: getHanetConfigView(db) });
+  const r = Router10();
+  r.get("/hanet/config", requireGlobalHr, (req, res) => {
+    const config = getHanetConfigView(db);
+    if (!isSystemAdmin(currentUser(req))) config.webhookPath = config.webhookPath.replace(/[^/]+$/, (t) => `\u2022\u2022\u2022\u2022${t.slice(-4)}`);
+    res.json({ config });
   });
-  r.put("/hanet/config", hr, (req, res) => {
+  r.put("/hanet/config", requireSystemAdmin, (req, res) => {
     updateHanetConfig(db, req.body);
     kickAll(ctx);
     res.json({ config: getHanetConfigView(db) });
   });
   r.post(
     "/hanet/test-connection",
-    hr,
+    requireSystemAdmin,
     ah(async (_req, res) => {
       const fail = (message) => ({ ok: false, account: null, places: [], message });
       if (!getSetting(db, "hanet.client_id") || !(getSetting(db, "hanet.refresh_token") || getSetting(db, "hanet.access_token"))) {
@@ -2757,33 +3654,36 @@ function hanetRoutes(ctx) {
       }
     })
   );
-  r.get("/hanet/connect", hr, (_req, res) => {
+  r.get("/hanet/connect", requireGlobalHr, (_req, res) => {
     res.json(getConnectConfig(db));
   });
-  r.put("/hanet/connect", hr, (req, res) => {
+  r.put("/hanet/connect", requireSystemAdmin, (req, res) => {
     const b = req.body ?? {};
     res.json(saveConnectConfig(db, { email: b.email, password: b.password }));
   });
   r.post(
     "/hanet/connect/test",
-    hr,
+    requireSystemAdmin,
     ah(async (_req, res) => {
       res.json(await testConnectLogin({ db, fetch: ctx.fetch, now: ctx.now }));
     })
   );
-  r.post("/hanet/webhook-token/rotate", hr, (req, res) => {
+  r.post("/hanet/webhook-token/rotate", requireSystemAdmin, (req, res) => {
     rotateWebhookToken(db);
     console.warn(`[SECURITY] webhook_token_rotated by=${currentUser(req).code} ip=${req.ip}`);
     res.json({ config: getHanetConfigView(db) });
   });
-  r.get("/hanet/sightings", hr, (req, res) => {
+  r.get("/hanet/sightings", requireManager, (req, res) => {
+    const actor = currentUser(req);
     const kind = req.query.kind;
     if (kind !== void 0 && kind !== "stranger" && kind !== "unlinked") throw new HttpError(400, "Lo\u1EA1i l\u01B0\u1EE3t ch\u1EE5p kh\xF4ng h\u1EE3p l\u1EC7");
-    res.json({ sightings: listSightings(db, ctx.now(), kind) });
+    const all = listSightings(db, ctx.now(), kind);
+    const sightings = isGlobalHr(actor) ? all : all.filter((s) => managesArea(actor, deviceAreaId(db, s.deviceId)));
+    res.json({ sightings });
   });
   r.get(
     "/hanet/persons/unlinked",
-    hr,
+    requireManager,
     ah(async (_req, res) => {
       const placeId = getPlaceIds(db)[0];
       if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, "Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Camera AI (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
@@ -2796,10 +3696,11 @@ function hanetRoutes(ctx) {
       res.json({ persons: unlinkedPersons(db, persons) });
     })
   );
-  r.get("/hanet/sync", hr, (_req, res) => {
+  r.get("/hanet/sync", requireGlobalHr, (_req, res) => {
     res.json(syncSummary(db));
   });
-  r.post("/hanet/sync/retry", hr, (req, res) => {
+  r.post("/hanet/sync/retry", requireManager, (req, res) => {
+    const actor = currentUser(req);
     const b = req.body ?? {};
     const filter = {};
     if (b.jobId !== void 0) {
@@ -2811,11 +3712,16 @@ function hanetRoutes(ctx) {
       filter.entityType = b.entityType;
       filter.entityId = b.entityId;
     }
+    if (filter.entityType === void 0) {
+      if (!isSystemAdmin(actor)) throw new HttpError(403, "Ch\u1EC9 t\xE0i kho\u1EA3n ADMIN \u0111\u01B0\u1EE3c \u0111\u1ED3ng b\u1ED9 l\u1EA1i to\xE0n b\u1ED9");
+    } else if (!syncEntityInScope(db, actor, filter.entityType, filter.entityId)) {
+      throw notFound("\u0111\u1ED1i t\u01B0\u1EE3ng");
+    }
     retryJobs(db, filter, ctx.now());
     kickAll(ctx);
-    res.json(syncSummary(db));
+    res.json(isGlobalHr(actor) ? syncSummary(db) : { success: true });
   });
-  r.get("/hanet/webhook-logs", hr, (_req, res) => {
+  r.get("/hanet/webhook-logs", requireGlobalHr, (_req, res) => {
     const rows = db.prepare("SELECT * FROM webhook_logs ORDER BY id DESC LIMIT 200").all();
     const logs = rows.map((x) => {
       let rawPayload = null;
@@ -2828,7 +3734,7 @@ function hanetRoutes(ctx) {
     });
     res.json({ logs });
   });
-  r.post("/hanet/simulate", hr, (req, res) => {
+  r.post("/hanet/simulate", requireGlobalHr, (req, res) => {
     if (!ctx.config.simulatorEnabled) throw new HttpError(404, "Kh\xF4ng t\xECm th\u1EA5y");
     const b = req.body ?? {};
     const target = typeof b.userId === "string" ? getUser(db, b.userId) : null;
@@ -2861,7 +3767,7 @@ function hanetRoutes(ctx) {
   });
   r.post(
     "/hanet/reconcile",
-    hr,
+    requireSystemAdmin,
     ah(async (req, res) => {
       if (!reconcileEnabled(db)) throw new HttpError(400, "Ch\u01B0a c\u1EA5u h\xECnh \u0111\u1EE7 Client ID, token v\xE0 Place ID \u0111\u1EC3 \u0111\u1ED1i so\xE1t");
       const date = typeof req.body?.date === "string" && req.body.date ? req.body.date : toVnDate(ctx.now());
@@ -2880,25 +3786,24 @@ function hanetRoutes(ctx) {
 // server/routes/admin.ts
 init_db();
 init_errors();
-import { Router as Router9 } from "express";
+import { Router as Router11 } from "express";
 init_auth();
 function adminRoutes(ctx) {
   const { db } = ctx;
   const dir = ctx.config.backupDir;
-  const r = Router9();
-  const hr = requireRole("hr");
-  r.get("/admin/backups", hr, (_req, res) => {
+  const r = Router11();
+  r.get("/admin/backups", requireGlobalHr, (_req, res) => {
     res.json({ backups: listBackups(dir) });
   });
-  r.post("/admin/backups", hr, (_req, res) => {
+  r.post("/admin/backups", requireSystemAdmin, (_req, res) => {
     res.json({ backup: backupNow(db, dir, "manual", ctx.now()) });
   });
-  r.get("/admin/backups/latest", hr, (_req, res) => {
+  r.get("/admin/backups/latest", requireSystemAdmin, (_req, res) => {
     const file = latestBackup(dir);
     if (!file) throw new HttpError(404, "Ch\u01B0a c\xF3 b\u1EA3n sao l\u01B0u n\xE0o");
     res.download(file);
   });
-  r.post("/admin/reset-database", hr, (req, res) => {
+  r.post("/admin/reset-database", requireSystemAdmin, (req, res) => {
     const actor = currentUser(req);
     const row = db.prepare("SELECT password_hash FROM users WHERE id = ?").get(actor.id);
     const password = req.body?.password;
@@ -2907,11 +3812,23 @@ function adminRoutes(ctx) {
     }
     const backup = backupNow(db, dir, "pre-reset", ctx.now());
     tx(db, () => {
-      for (const table of ["detections", "attendance_days", "requests", "webhook_logs", "cameras", "sync_jobs", "face_sightings"]) db.exec(`DELETE FROM ${table}`);
+      for (const table of [
+        "detections",
+        "attendance_days",
+        "requests",
+        "webhook_logs",
+        "cameras",
+        "sync_jobs",
+        "face_sightings",
+        "email_jobs",
+        "password_resets",
+        "admin_areas"
+      ]) db.exec(`DELETE FROM ${table}`);
       db.prepare("UPDATE users SET department_id = NULL WHERE id = ?").run(actor.id);
       db.exec("UPDATE departments SET manager_id = NULL");
       db.prepare("DELETE FROM users WHERE id != ?").run(actor.id);
       db.exec("DELETE FROM departments");
+      db.exec("DELETE FROM areas");
     });
     console.warn(`[SECURITY] database_reset by=${actor.code} backup=${backup} ip=${req.ip}`);
     res.json({ success: true, backup });
@@ -2941,9 +3858,11 @@ function createApp(ctx) {
   api.use(authRoutes(ctx));
   api.use(userRoutes(ctx));
   api.use(departmentRoutes(ctx));
+  api.use(areaRoutes(ctx));
   api.use(cameraRoutes(ctx));
   api.use(attendanceRoutes(ctx));
   api.use(settingsRoutes(ctx));
+  api.use(mailRoutes(ctx));
   api.use(requestRoutes(ctx));
   api.use(hanetRoutes(ctx));
   api.use(adminRoutes(ctx));
@@ -2976,12 +3895,12 @@ function dueJobs(now) {
   };
 }
 function startJobs(ctx) {
-  const running = /* @__PURE__ */ new Set();
+  const running2 = /* @__PURE__ */ new Set();
   const deps = { db: ctx.db, fetch: ctx.fetch, now: ctx.now };
   const run = (name, fn) => {
-    if (running.has(name)) return;
-    running.add(name);
-    Promise.resolve().then(fn).catch((err) => console.error(`[JOB] ${name} l\u1ED7i:`, err.message)).finally(() => running.delete(name));
+    if (running2.has(name)) return;
+    running2.add(name);
+    Promise.resolve().then(fn).catch((err) => console.error(`[JOB] ${name} l\u1ED7i:`, err.message)).finally(() => running2.delete(name));
   };
   let lastMinute = -1;
   const tick = () => {
@@ -2996,6 +3915,7 @@ function startJobs(ctx) {
     if (due.purgeHourly) run("purge-sightings", () => purgeSightings(ctx.db, now));
     if (due.purgeHourly) run("purge-sync-jobs", () => purgeDoneJobs(ctx.db, now));
     run("sync", () => runDueJobs(deps, SYNC_HANDLERS));
+    run("mail", () => runMailJobs({ db: ctx.db, sendMail: ctx.sendMail, now: ctx.now }));
     if (reconcileEnabled(ctx.db)) {
       if (due.cameraStatus) run("camera-status", () => refreshCameraStatus(deps));
       if (due.reconcileToday) run("reconcile-today", () => reconcileDate(deps, today));
@@ -3038,7 +3958,8 @@ async function main() {
     },
     limiter: new LoginLimiter(),
     fetch: globalThis.fetch,
-    now: () => Date.now()
+    now: () => Date.now(),
+    sendMail: nodemailerSend
   };
   const app = createApp(ctx);
   if (!production) {
