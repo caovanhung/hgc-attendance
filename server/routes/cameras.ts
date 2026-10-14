@@ -9,6 +9,8 @@ import { requireRole } from '../middleware';
 import type { Row } from '../repo';
 import type { Camera } from '../../shared/types';
 
+const CAMERA_SELECT = 'SELECT c.*, ar.name AS area_name FROM cameras c LEFT JOIN areas ar ON ar.id = c.area_id';
+
 function mapCamera(r: Row): Camera {
   return {
     id: r.id,
@@ -20,6 +22,8 @@ function mapCamera(r: Row): Camera {
     ipAddress: r.ip_address ?? '',
     online: r.online === null || r.online === undefined ? null : r.online === 1,
     statusCheckedAt: r.status_checked_at ?? null,
+    areaId: r.area_id ?? null,
+    areaName: r.area_name ?? null,
     createdAt: r.created_at,
   };
 }
@@ -28,7 +32,7 @@ export function cameraRoutes(ctx: AppContext): Router {
   const { db } = ctx;
   const r = Router();
   const deps = { db, fetch: ctx.fetch, now: ctx.now };
-  const listCameras = () => (db.prepare('SELECT * FROM cameras ORDER BY name').all() as Row[]).map(mapCamera);
+  const listCameras = () => (db.prepare(`${CAMERA_SELECT} ORDER BY c.name`).all() as Row[]).map(mapCamera);
   const requireHanet = () => {
     if (!reconcileEnabled(db)) throw new HttpError(400, 'Chưa cấu hình kết nối Camera AI (Client ID, Refresh Token, địa điểm)');
   };
@@ -50,7 +54,7 @@ export function cameraRoutes(ctx: AppContext): Router {
     db.prepare(
       'INSERT INTO cameras(id, name, device_key, place_id, place_name, location, ip_address, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(id, name, deviceKey, placeId, text(b.placeName), text(b.location), text(b.ipAddress), new Date(ctx.now()).toISOString());
-    res.json({ camera: mapCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(id) as Row) });
+    res.json({ camera: mapCamera(db.prepare(`${CAMERA_SELECT} WHERE c.id = ?`).get(id) as Row) });
   });
 
   r.post(
@@ -83,7 +87,7 @@ export function cameraRoutes(ctx: AppContext): Router {
   );
 
   r.put('/cameras/:id', requireRole('hr'), (req, res) => {
-    const row = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id) as Row | undefined;
+    const row = db.prepare(`${CAMERA_SELECT} WHERE c.id = ?`).get(req.params.id) as Row | undefined;
     if (!row) throw new HttpError(404, 'Không tìm thấy camera');
     const b = req.body ?? {};
     const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
@@ -99,7 +103,7 @@ export function cameraRoutes(ctx: AppContext): Router {
       enqueue(db, 'camera', row.id, 'camera.rename', { deviceId: row.device_key, name }, ctx.now());
       kickEntity(ctx, 'camera', row.id);
     }
-    res.json({ camera: mapCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(row.id) as Row) });
+    res.json({ camera: mapCamera(db.prepare(`${CAMERA_SELECT} WHERE c.id = ?`).get(row.id) as Row) });
   });
 
   r.delete('/cameras/:id', requireRole('hr'), (req, res) => {

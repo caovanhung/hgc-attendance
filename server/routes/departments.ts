@@ -12,8 +12,9 @@ import { toVnDate } from '../vntime';
 import type { Department } from '../../shared/types';
 
 const DEPT_SELECT = `SELECT d.id, d.code, d.name, d.description, d.manager_id, m.name AS manager_name, d.hanet_sync_status, d.hanet_sync_error, d.created_at,
+  d.area_id, ar.name AS area_name,
   (SELECT COUNT(*) FROM users x WHERE x.department_id = d.id) AS member_count
-  FROM departments d LEFT JOIN users m ON m.id = d.manager_id`;
+  FROM departments d LEFT JOIN users m ON m.id = d.manager_id LEFT JOIN areas ar ON ar.id = d.area_id`;
 
 function mapDept(r: Row): Department {
   return {
@@ -26,6 +27,8 @@ function mapDept(r: Row): Department {
     memberCount: Number(r.member_count),
     hanetSyncStatus: r.hanet_sync_status ?? 'synced',
     hanetSyncError: r.hanet_sync_error ?? null,
+    areaId: r.area_id ?? null,
+    areaName: r.area_name ?? null,
     createdAt: r.created_at,
   };
 }

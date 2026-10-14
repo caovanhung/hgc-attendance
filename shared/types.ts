@@ -1,6 +1,7 @@
-export type UserRole = 'hr' | 'dept_manager' | 'employee';
+export type UserRole = 'hr' | 'area_admin' | 'dept_manager' | 'employee';
 export type UserStatus = 'active' | 'inactive';
 export type SyncStatus = 'synced' | 'pending' | 'error';
+export type EmailStatus = 'none' | 'pending' | 'sent' | 'error';
 
 export interface User {
   id: string;
@@ -11,6 +12,9 @@ export interface User {
   role: UserRole;
   departmentId: string | null;
   departmentName: string | null;
+  areaId: string | null; // khu của phòng ban
+  areaName: string | null;
+  adminAreaIds: string[]; // khu được giao (chỉ với area_admin)
   position: string;
   avatarUrl: string;
   hanetPersonId: string | null;
@@ -19,6 +23,9 @@ export interface User {
   hanetSyncStatus: SyncStatus;
   hanetSyncError: string | null;
   faceError: string | null; // lý do đăng ký FaceID thất bại gần nhất
+  emailStatus: EmailStatus; // trạng thái thư gần nhất gửi cho người này
+  emailError: string | null;
+  canLogin: boolean; // đã có mật khẩu (false: thiếu email hoặc thư chào mừng chưa gửi được)
   createdAt: string;
 }
 
@@ -32,6 +39,8 @@ export interface Department {
   memberCount: number;
   hanetSyncStatus: SyncStatus;
   hanetSyncError: string | null;
+  areaId: string | null;
+  areaName: string | null;
   createdAt: string;
 }
 
@@ -45,6 +54,20 @@ export interface Camera {
   ipAddress: string;
   online: boolean | null; // null = chưa kiểm tra
   statusCheckedAt: number | null;
+  areaId: string | null;
+  areaName: string | null;
+  createdAt: string;
+}
+
+export interface Area {
+  id: string;
+  code: string;
+  name: string;
+  note: string;
+  departmentCount: number;
+  cameraCount: number;
+  memberCount: number;
+  adminNames: string[]; // quản trị khu vực được giao khu này
   createdAt: string;
 }
 
@@ -279,5 +302,4 @@ export interface ImportedUser {
   id: string;
   code: string;
   name: string;
-  tempPassword: string;
 }

@@ -52,18 +52,35 @@ test('newId có prefix và không trùng', () => {
   assert.notEqual(a, b);
 });
 
-test('schema v2: có bảng sync_jobs, face_sightings và các cột mới', () => {
+test('schema v3: bảng khu vực, thư, token đặt lại và các cột mới', () => {
   const db = openDb(':memory:');
   const cols = (t: string) => (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
-  for (const c of ['hanet_sync_status', 'hanet_sync_error', 'face_error']) assert.ok(cols('users').includes(c), `users thiếu ${c}`);
-  for (const c of ['hanet_department_id', 'hanet_sync_status', 'hanet_sync_error']) assert.ok(cols('departments').includes(c), `departments thiếu ${c}`);
-  for (const c of ['online', 'status_checked_at']) assert.ok(cols('cameras').includes(c), `cameras thiếu ${c}`);
-  for (const c of ['entity_type', 'entity_id', 'op', 'payload', 'status', 'attempts', 'next_run_at', 'last_error']) {
-    assert.ok(cols('sync_jobs').includes(c), `sync_jobs thiếu ${c}`);
+  for (const c of ['hanet_sync_status', 'hanet_sync_error', 'face_error', 'email_status', 'email_error']) assert.ok(cols('users').includes(c), `users thiếu ${c}`);
+  for (const c of ['hanet_department_id', 'area_id']) assert.ok(cols('departments').includes(c), `departments thiếu ${c}`);
+  for (const c of ['online', 'status_checked_at', 'area_id']) assert.ok(cols('cameras').includes(c), `cameras thiếu ${c}`);
+  for (const c of ['id', 'code', 'name', 'note', 'created_at']) assert.ok(cols('areas').includes(c), `areas thiếu ${c}`);
+  for (const c of ['user_id', 'area_id']) assert.ok(cols('admin_areas').includes(c), `admin_areas thiếu ${c}`);
+  for (const c of ['user_id', 'kind', 'to_email', 'status', 'attempts', 'last_error', 'payload', 'next_run_at', 'created_at', 'sent_at']) {
+    assert.ok(cols('email_jobs').includes(c), `email_jobs thiếu ${c}`);
   }
-  for (const c of ['kind', 'person_id', 'alias_id', 'image_url', 'created_at']) assert.ok(cols('face_sightings').includes(c), `face_sightings thiếu ${c}`);
-  assert.equal(SCHEMA_VERSION, 2);
-  assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 2);
+  for (const c of ['token_hash', 'user_id', 'expires_at', 'used_at']) assert.ok(cols('password_resets').includes(c), `password_resets thiếu ${c}`);
+  for (const t of ['sync_jobs', 'face_sightings']) assert.ok(cols(t).length > 0, `thiếu bảng ${t}`);
+  assert.equal(SCHEMA_VERSION, 3);
+  assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 3);
+});
+
+test('schema v3: vai trò area_admin hợp lệ, email không trùng (không phân biệt hoa thường), khu còn phòng ban thì không xóa được', () => {
+  const db = openDb(':memory:');
+  const add = (id: string, code: string, role: string, email: string) =>
+    db.prepare(`INSERT INTO users(id, code, name, email, role, status, created_at) VALUES (?, ?, ?, ?, ?, 'active', '2026-10-14')`).run(id, code, code, email, role);
+  add('u1', 'A1', 'area_admin', 'an@test.vn');
+  add('u2', 'A2', 'employee', '');
+  add('u3', 'A3', 'employee', '');
+  assert.throws(() => add('u4', 'A4', 'employee', 'AN@test.vn'), /UNIQUE/);
+  assert.throws(() => add('u5', 'A5', 'superuser', 'x@test.vn'), /CHECK/);
+  db.prepare("INSERT INTO areas(id, code, name, created_at) VALUES ('ar1', 'KV01', 'Trụ sở', '2026-10-14')").run();
+  db.prepare("INSERT INTO departments(id, code, name, area_id, created_at) VALUES ('d1', 'PB001', 'Kế toán', 'ar1', '2026-10-14')").run();
+  assert.throws(() => db.prepare("DELETE FROM areas WHERE id = 'ar1'").run(), /FOREIGN KEY/);
 });
 
 test('database phiên bản cũ: openDb báo SchemaVersionError và không tạo bảng mới', () => {

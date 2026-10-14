@@ -82,7 +82,9 @@ test('nhập: mã theo aliasID, tự sinh NV0001 khi thiếu/không hợp lệ, 
     );
     assert.equal(jobs.filter((j) => j.op === 'user.department').length, 4);
     const c = new Client(app.baseUrl);
-    assert.equal((await c.post('/api/auth/login', { code: 'NV05', password: r.body.created[0].tempPassword })).status, 200);
+    assert.equal(r.body.created[0].tempPassword, undefined, 'không còn trả mật khẩu tạm');
+    const row = app.db.prepare("SELECT password_hash, email_status FROM users WHERE code = 'NV05'").get() as { password_hash: string | null; email_status: string };
+    assert.deepEqual({ ...row }, { password_hash: null, email_status: 'none' });
     assert.equal((await hr.post('/api/users/import', { persons: [{ personId: 'P5' }] })).status, 400, 'đã nhập rồi thì không còn ai hợp lệ');
   } finally {
     await app.close();

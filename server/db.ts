@@ -10,10 +10,18 @@ const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite');
 
 export type Db = DatabaseSyncType;
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
+
+CREATE TABLE IF NOT EXISTS areas (
+  id TEXT PRIMARY KEY,
+  code TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS departments (
   id TEXT PRIMARY KEY,
@@ -24,8 +32,10 @@ CREATE TABLE IF NOT EXISTS departments (
   hanet_department_id TEXT,
   hanet_sync_status TEXT NOT NULL DEFAULT 'synced' CHECK (hanet_sync_status IN ('synced', 'pending', 'error')),
   hanet_sync_error TEXT,
+  area_id TEXT REFERENCES areas(id) ON DELETE RESTRICT,
   created_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_departments_area ON departments(area_id);
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
@@ -33,7 +43,7 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   email TEXT NOT NULL DEFAULT '',
   phone TEXT NOT NULL DEFAULT '',
-  role TEXT NOT NULL CHECK (role IN ('hr', 'dept_manager', 'employee')),
+  role TEXT NOT NULL CHECK (role IN ('hr', 'area_admin', 'dept_manager', 'employee')),
   department_id TEXT REFERENCES departments(id) ON DELETE SET NULL,
   position TEXT NOT NULL DEFAULT '',
   avatar_url TEXT NOT NULL DEFAULT '',
@@ -45,10 +55,19 @@ CREATE TABLE IF NOT EXISTS users (
   hanet_sync_status TEXT NOT NULL DEFAULT 'synced' CHECK (hanet_sync_status IN ('synced', 'pending', 'error')),
   hanet_sync_error TEXT,
   face_error TEXT,
+  email_status TEXT NOT NULL DEFAULT 'none' CHECK (email_status IN ('none', 'pending', 'sent', 'error')),
+  email_error TEXT,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_users_department ON users(department_id);
 CREATE INDEX IF NOT EXISTS idx_users_hanet_person ON users(hanet_person_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(lower(email)) WHERE email != '';
+
+CREATE TABLE IF NOT EXISTS admin_areas (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  area_id TEXT NOT NULL REFERENCES areas(id) ON DELETE CASCADE,
+  PRIMARY KEY (user_id, area_id)
+);
 
 CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY,
@@ -68,8 +87,10 @@ CREATE TABLE IF NOT EXISTS cameras (
   ip_address TEXT NOT NULL DEFAULT '',
   online INTEGER,
   status_checked_at INTEGER,
+  area_id TEXT REFERENCES areas(id) ON DELETE RESTRICT,
   created_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_cameras_area ON cameras(area_id);
 
 CREATE TABLE IF NOT EXISTS detections (
   id INTEGER PRIMARY KEY,
@@ -162,6 +183,28 @@ CREATE TABLE IF NOT EXISTS face_sightings (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sightings_created ON face_sightings(created_at);
+
+CREATE TABLE IF NOT EXISTS email_jobs (
+  id INTEGER PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('welcome', 'reset_temp', 'reset_link')),
+  to_email TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'sent', 'error')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  payload TEXT NOT NULL DEFAULT '{}',
+  next_run_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  sent_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_email_jobs_due ON email_jobs(status, next_run_at);
+
+CREATE TABLE IF NOT EXISTS password_resets (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER
+);
 `;
 
 export class SchemaVersionError extends Error {

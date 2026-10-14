@@ -16,6 +16,7 @@ interface NavbarProps {
 
 const ROLE_BADGE: Record<User['role'], string> = {
   hr: 'bg-rose-100 text-rose-700 border-rose-200',
+  area_admin: 'bg-violet-100 text-violet-800 border-violet-200',
   dept_manager: 'bg-amber-100 text-amber-800 border-amber-200',
   employee: 'bg-sky-100 text-sky-800 border-sky-200',
 };

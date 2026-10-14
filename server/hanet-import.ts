@@ -2,7 +2,6 @@ import type { Db } from './db';
 import { newId, tx } from './db';
 import { hanetApi, type HanetDeps } from './hanet-api';
 import { enqueue } from './hanet-sync';
-import { generateTempPassword, hashPassword } from './auth';
 import { SYSTEM_ADMIN_CODE } from './bootstrap';
 import { CODE_RE } from './validation';
 import { toVnDate } from './vntime';
@@ -63,7 +62,7 @@ export function importPersons(db: Db, persons: HanetPerson[], departmentId: stri
   const insert = db.prepare(
     `INSERT INTO users(id, code, name, email, phone, role, department_id, position, avatar_url, hanet_person_id,
        face_registered, status, password_hash, must_change_password, created_at)
-     VALUES (?, ?, ?, '', '', 'employee', ?, ?, ?, ?, 1, 'active', ?, 1, ?)`,
+     VALUES (?, ?, ?, '', '', 'employee', ?, ?, ?, ?, 1, 'active', NULL, 1, ?)`,
   );
   return tx(db, () =>
     persons.map((p) => {
@@ -71,12 +70,11 @@ export function importPersons(db: Db, persons: HanetPerson[], departmentId: stri
       const fromAlias = aliasCode(p);
       const code = fromAlias && !exists.get(fromAlias) ? fromAlias : nextEmployeeCode(db, reserved);
       const id = newId('usr');
-      const tempPassword = generateTempPassword();
       const name = String(p.name ?? '').trim() || code;
-      insert.run(id, code, name, departmentId, String(p.title ?? '').trim(), String(p.avatar ?? ''), String(p.personID), hashPassword(tempPassword), toVnDate(now));
+      insert.run(id, code, name, departmentId, String(p.title ?? '').trim(), String(p.avatar ?? ''), String(p.personID), toVnDate(now));
       if (code !== alias) enqueue(db, 'user', id, 'user.alias', { personId: String(p.personID), code }, now);
       if (departmentId) enqueue(db, 'user', id, 'user.department', { fromHanetDeptId: null, toDepartmentId: departmentId }, now);
-      return { id, code, name, tempPassword };
+      return { id, code, name };
     }),
   );
 }

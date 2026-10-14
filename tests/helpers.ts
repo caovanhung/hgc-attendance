@@ -16,17 +16,29 @@ export function freshDb(): Db {
   return openDb(':memory:');
 }
 
-export function seedDepartment(db: Db, code: string, name = code): string {
+export function seedArea(db: Db, code: string, name = code): string {
+  const id = newId('area');
+  db.prepare('INSERT INTO areas(id, code, name, created_at) VALUES (?, ?, ?, ?)').run(id, code, name, '2026-10-14');
+  return id;
+}
+
+export function seedDepartment(db: Db, code: string, name = code, areaId: string | null = null): string {
   const id = newId('dep');
-  db.prepare('INSERT INTO departments(id, code, name, description, manager_id, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
+  db.prepare('INSERT INTO departments(id, code, name, description, manager_id, area_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
     id,
     code,
     name,
     '',
     null,
+    areaId,
     '2026-10-13',
   );
   return id;
+}
+
+/** Email và số điện thoại hợp lệ cho body tạo nhân sự trong test. */
+export function contact(code: string): { email: string; phone: string } {
+  return { email: `${code.toLowerCase()}@test.vn`, phone: '0912345678' };
 }
 
 export interface SeedUserOpts {
@@ -39,6 +51,9 @@ export interface SeedUserOpts {
   mustChange?: boolean;
   status?: UserStatus;
   hanetPersonId?: string | null;
+  email?: string;
+  /** Khu được giao (với area_admin) */
+  adminAreaIds?: string[];
 }
 
 export function seedUser(db: Db, o: SeedUserOpts): string {
@@ -46,11 +61,12 @@ export function seedUser(db: Db, o: SeedUserOpts): string {
   db.prepare(
     `INSERT INTO users(id, code, name, email, phone, role, department_id, position, avatar_url, hanet_person_id,
        face_registered, status, password_hash, must_change_password, created_at)
-     VALUES (?, ?, ?, '', '', ?, ?, '', '', ?, 0, ?, ?, ?, '2026-10-13')`,
+     VALUES (?, ?, ?, ?, '', ?, ?, '', '', ?, 0, ?, ?, ?, '2026-10-13')`,
   ).run(
     id,
     o.code,
     o.name ?? o.code,
+    o.email ?? '',
     o.role ?? 'employee',
     o.departmentId ?? null,
     o.hanetPersonId ?? null,
@@ -58,6 +74,7 @@ export function seedUser(db: Db, o: SeedUserOpts): string {
     o.password === null ? null : hashPassword(o.password ?? TEST_PASSWORD),
     o.mustChange ? 1 : 0,
   );
+  for (const areaId of o.adminAreaIds ?? []) db.prepare('INSERT INTO admin_areas(user_id, area_id) VALUES (?, ?)').run(id, areaId);
   return id;
 }
 

@@ -26,7 +26,8 @@ export const DAY_STATUS_LABEL: Record<DayStatus, string> = {
 };
 
 export const ROLE_LABEL: Record<UserRole, string> = {
-  hr: 'Quản trị viên Nhân sự (HR)',
+  hr: 'HR toàn hệ thống',
+  area_admin: 'Quản trị khu vực',
   dept_manager: 'Trưởng phòng',
   employee: 'Nhân viên',
 };

@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Download } from 'lucide-react';
 import type { Department, HanetPerson, ImportedUser } from '../types';
 import { api, errorMessage } from '../api';
-import { Modal, inputCls, primaryBtn, secondaryBtn } from './ui';
+import { Modal, inputCls, primaryBtn } from './ui';
 
 interface Props {
   departments: Department[];
@@ -12,16 +11,6 @@ interface Props {
 
 /** Trùng giới hạn của server (IMPORT_MAX trong server/hanet-import.ts). */
 const IMPORT_MAX = 100;
-
-function downloadCsv(rows: ImportedUser[]) {
-  const csv = ['Mã nhân viên,Họ tên,Mật khẩu tạm', ...rows.map((r) => [r.code, r.name, r.tempPassword].map((v) => `"${v.replace(/"/g, '""')}"`).join(','))].join('\n');
-  const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'mat-khau-tam.csv';
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 export const ImportFromHanetModal: React.FC<Props> = ({ departments, onClose, onImported }) => {
   const [persons, setPersons] = useState<HanetPerson[] | null>(null);
@@ -66,33 +55,12 @@ export const ImportFromHanetModal: React.FC<Props> = ({ departments, onClose, on
     <Modal title="Nhập nhân sự từ Camera AI" onClose={onClose} wide>
       {created ? (
         <div className="space-y-3">
-          <p className="text-emerald-700">Đã nhập {created.length} nhân sự. Mật khẩu tạm chỉ hiện một lần: tải về hoặc chép lại để phát cho từng người.</p>
-          <table className="w-full text-left">
-            <thead className="text-[11px] text-slate-500 border-b border-slate-100">
-              <tr>
-                <th className="py-1.5">Mã</th>
-                <th className="py-1.5">Họ tên</th>
-                <th className="py-1.5">Mật khẩu tạm</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {created.map((c) => (
-                <tr key={c.id}>
-                  <td className="py-1.5 font-mono">{c.code}</td>
-                  <td className="py-1.5">{c.name}</td>
-                  <td className="py-1.5 font-mono">{c.tempPassword}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="flex gap-2">
-            <button onClick={() => downloadCsv(created)} className={`${secondaryBtn} flex-1`}>
-              <Download className="w-3.5 h-3.5" /> Tải CSV
-            </button>
-            <button onClick={onClose} className={`${primaryBtn} flex-1`}>
-              Xong
-            </button>
-          </div>
+          <p className="text-emerald-700">
+            Đã nhập {created.length} nhân sự. Những người này chưa có email nên chưa đăng nhập được: vào tab Nhân sự, bấm Sửa từng người để bổ sung email và số điện thoại — hệ thống sẽ tự gửi mật khẩu qua email.
+          </p>
+          <button type="button" onClick={onClose} className={`${primaryBtn} w-full`}>
+            Đóng
+          </button>
         </div>
       ) : (
         <div className="space-y-3">

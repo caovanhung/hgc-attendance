@@ -23,7 +23,8 @@ import type { AttendanceDay, AttendanceRequest, Camera, Department, MeResponse, 
 type AuthState = 'loading' | 'anonymous' | 'must-change' | 'ready';
 
 const TABS_BY_ROLE: Record<User['role'], string[]> = {
-  hr: ['attendance', 'requests', 'cameras', 'departments', 'employees', 'hanet_config'],
+  hr: ['attendance', 'requests', 'cameras', 'departments', 'employees', 'areas', 'hanet_config'],
+  area_admin: ['attendance', 'requests', 'cameras', 'departments', 'employees'],
   dept_manager: ['attendance', 'requests', 'cameras', 'departments'],
   employee: ['attendance', 'requests'],
 };
