@@ -231,3 +231,25 @@ test('thư link đặt lại không gửi/thử lại quá 30 phút (hạn của
   assert.deepEqual([job(db, b).status, job(db, b).last_error, job(db, b).payload], ['error', expired, '{}']);
   assert.equal(user(db, b).email_status, 'error');
 });
+
+test('thư bị thay trong lúc thư khác cùng lượt đang gửi → không gửi bản cũ: mỗi người đúng một thư, mật khẩu trong thư dùng được', async () => {
+  const db = freshDb();
+  saveMailConfig(db, GMAIL);
+  const a = seedUser(db, { code: 'A', email: 'a@test.vn', password: null });
+  const b = seedUser(db, { code: 'B', email: 'b@test.vn', password: null });
+  const c = seedUser(db, { code: 'C', email: 'c@test.vn', password: null });
+  for (const id of [a, b, c]) enqueueMail(db, id, 'welcome', {}, T0); // thư của C đứng sau: id thư bị xóa không được dùng lại
+  const mails: MailMessage[] = [];
+  const send: SendMail = async (_cfg, msg) => {
+    if (msg.to === 'a@test.vn') enqueueMail(db, b, 'reset_temp', {}, T0); // thư của B bị thay khi thư của A đang gửi
+    mails.push(msg);
+  };
+  await runMailJobs({ db, sendMail: send, now: () => T0 });
+  await runMailJobs({ db, sendMail: send, now: () => T0 });
+  const toB = mails.filter((m) => m.to === 'b@test.vn');
+  assert.equal(toB.length, 1, 'B chỉ nhận một mật khẩu');
+  assert.ok(verifyPassword(/Mật khẩu tạm: (\S+)/.exec(toB[0].text)![1], user(db, b).password_hash));
+  assert.equal(mails.length, 3);
+  assert.equal(sentToday(db, T0), 3, 'mọi thư đã gửi đều được tính vào hạn mức');
+  assert.equal(user(db, b).email_status, 'sent');
+});

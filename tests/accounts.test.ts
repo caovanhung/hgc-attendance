@@ -155,3 +155,22 @@ test('đăng nhập: tài khoản chưa có mật khẩu báo cùng lỗi như s
     await app.close();
   }
 });
+
+test('đặt lại mật khẩu qua link hủy thư mật khẩu tạm đang chờ: mật khẩu tự chọn không bị ghi đè', async () => {
+  const { app, hr } = await setup();
+  try {
+    const nv = seedUser(app.db, { code: 'NV01', email: 'nv01@test.vn' });
+    const anon = new Client(app.baseUrl);
+    await anon.post('/api/auth/forgot-password', { login: 'NV01' });
+    await flush(app);
+    const token = decodeURIComponent(/\?reset=(\S+)/.exec(app.mails[0].text)![1]);
+    assert.deepEqual((await hr.post(`/api/users/${nv}/reset-password`)).body, { queued: true });
+    assert.equal((await anon.post('/api/auth/reset-password', { token, newPassword: 'MatKhauMoi@2026' })).status, 200);
+    assert.deepEqual(await flush(app), { sent: 0, failed: 0 });
+    assert.equal(app.mails.length, 1);
+    await loginAs(app, 'NV01', 'MatKhauMoi@2026');
+    assert.equal((await hr.get('/api/users')).body.users.find((u: any) => u.id === nv).emailStatus, 'sent');
+  } finally {
+    await app.close();
+  }
+});

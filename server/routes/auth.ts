@@ -4,7 +4,7 @@ import { HttpError } from '../errors';
 import { clearSessionCookie, currentUser, jsonOnly, setSessionCookie } from '../middleware';
 import { createSession, deleteSession, deleteUserSessions, hashPassword, LoginLimiter, validateNewPassword, verifyPassword } from '../auth';
 import { consumeResetToken, createResetToken, findLoginUser } from '../accounts';
-import { enqueueMail } from '../mail-queue';
+import { cancelPasswordMails, enqueueMail } from '../mail-queue';
 import { getAppUrl } from '../mail';
 import { getUser } from '../repo';
 import { isSystemAdmin } from '../access';
@@ -74,6 +74,7 @@ export function authPublicRoutes(ctx: AppContext): Router {
     if (!u || u.status !== 'active') throw new HttpError(400, 'Link đặt lại mật khẩu không hợp lệ hoặc đã hết hạn');
     db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(hashPassword(newPassword), u.id);
     deleteUserSessions(db, u.id);
+    cancelPasswordMails(db, u.id);
     res.json({ success: true });
   });
 

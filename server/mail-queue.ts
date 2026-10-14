@@ -37,17 +37,34 @@ const RESET_EXPIRED = 'Link đặt lại mật khẩu đã hết hạn trước 
 export function enqueueMail(db: Db, userId: string, kind: MailKind, payload: Record<string, string>, now: number): void {
   const row = db.prepare('SELECT email FROM users WHERE id = ?').get(userId) as { email: string } | undefined;
   if (!row || !row.email) return;
-  const replaces = PASSWORD_KINDS.includes(kind) ? PASSWORD_KINDS : [kind];
-  const sending = [...inFlightIds(db)];
-  db.prepare(
-    `DELETE FROM email_jobs WHERE user_id = ? AND status = 'pending' AND kind IN (${replaces.map(() => '?').join(', ')})
-       AND id NOT IN (${sending.map(() => '?').join(', ')})`,
-  ).run(userId, ...replaces, ...sending);
+  dropPendingMails(db, userId, PASSWORD_KINDS.includes(kind) ? PASSWORD_KINDS : [kind]);
   db.prepare(
     `INSERT INTO email_jobs(user_id, kind, to_email, status, attempts, payload, next_run_at, created_at)
      VALUES (?, ?, ?, 'pending', 0, ?, ?, ?)`,
   ).run(userId, kind, row.email, JSON.stringify(payload), now, now);
   db.prepare("UPDATE users SET email_status = 'pending', email_error = NULL WHERE id = ?").run(userId);
+}
+
+/** Xóa các thư đang chờ (chưa gửi dở) thuộc các loại cho trước của một người. */
+function dropPendingMails(db: Db, userId: string, kinds: MailKind[]): void {
+  const sending = [...inFlightIds(db)];
+  db.prepare(
+    `DELETE FROM email_jobs WHERE user_id = ? AND status = 'pending' AND kind IN (${kinds.map(() => '?').join(', ')})
+       AND id NOT IN (${sending.map(() => '?').join(', ')})`,
+  ).run(userId, ...kinds, ...sending);
+}
+
+/**
+ * Người dùng vừa tự đặt mật khẩu (link quên mật khẩu): hủy các thư mật khẩu tạm đang chờ, để thư đó không ghi đè mật khẩu
+ * họ vừa chọn. Không còn thư chờ thì trạng thái thư lấy theo thư đã xử lý gần nhất.
+ */
+export function cancelPasswordMails(db: Db, userId: string): void {
+  dropPendingMails(db, userId, PASSWORD_KINDS);
+  if (db.prepare("SELECT 1 FROM email_jobs WHERE user_id = ? AND status = 'pending'").get(userId)) return;
+  const last = db.prepare('SELECT status, last_error FROM email_jobs WHERE user_id = ? ORDER BY id DESC LIMIT 1').get(userId) as
+    | { status: 'sent' | 'error'; last_error: string | null }
+    | undefined;
+  db.prepare('UPDATE users SET email_status = ?, email_error = ? WHERE id = ?').run(last?.status ?? 'none', last?.status === 'error' ? last.last_error : null, userId);
 }
 
 export function sentToday(db: Db, now: number): number {
@@ -77,9 +94,13 @@ export async function runMailJobs(deps: MailDeps, limit = 20): Promise<{ sent: n
   running.add(db);
   try {
     const now = deps.now();
-    const jobs = db.prepare("SELECT id, user_id, kind, attempts, payload, created_at FROM email_jobs WHERE status = 'pending' AND next_run_at <= ? ORDER BY id LIMIT ?").all(now, limit) as JobRow[];
+    const due = db.prepare("SELECT id FROM email_jobs WHERE status = 'pending' AND next_run_at <= ? ORDER BY id LIMIT ?").all(now, limit) as { id: number }[];
+    const fresh = db.prepare("SELECT id, user_id, kind, attempts, payload, created_at FROM email_jobs WHERE id = ? AND status = 'pending'");
     let budget = getDailyLimit(db) - sentToday(db, now);
-    for (const job of jobs) {
+    for (const { id } of due) {
+      // Đọc lại ngay trước khi gửi: trong lúc thư trước đang gửi, thư này có thể đã bị thư mới thay (xóa) — bỏ qua, không tính
+      const job = fresh.get(id) as JobRow | undefined;
+      if (!job) continue;
       if (budget <= 0) {
         const tomorrow = vnDayStart(addDays(toVnDate(now), 1));
         db.prepare("UPDATE email_jobs SET next_run_at = ? WHERE status = 'pending' AND next_run_at <= ?").run(tomorrow, now);
