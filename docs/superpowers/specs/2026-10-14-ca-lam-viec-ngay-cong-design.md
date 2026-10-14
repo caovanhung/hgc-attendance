@@ -58,7 +58,7 @@
 - `openDb`:
   - DB mới (chưa có `schema_version`): chạy SCHEMA v4, ghi version 4 (như hiện nay).
   - `version === SCHEMA_VERSION`: mở bình thường.
-  - `version < SCHEMA_VERSION` và có đủ các bước từ version đó: **sao lưu file trước** (`backups/attendance-<thời điểm>-pre-migrate-v<n>.db`, dùng `VACUUM INTO`), chạy lần lượt từng bước trong một giao dịch, cập nhật `schema_version`, in `[MIGRATE] v3 → v4 xong (sao lưu: <tên file>)`.
+  - `version < SCHEMA_VERSION` và có đủ các bước từ version đó: **sao lưu file trước** (`backups/attendance-pre-migrate-v<n>.db`, dùng `VACUUM INTO`; đã có file này thì không tạo lại, và file này không bị dọn bởi cơ chế giữ 30 bản), chạy lần lượt từng bước trong một giao dịch, cập nhật `schema_version`, in `[MIGRATE] v3 → v4 xong (sao lưu: <tên file>)`.
   - `version < 3`: giữ thông báo cũ `[STARTUP] Database phiên bản cũ (v<n>)…` và thoát mã 1.
   - `version > SCHEMA_VERSION`: in `[STARTUP] Database được tạo bởi phiên bản mới hơn (v<n>). Hãy cập nhật code.` và thoát mã 1.
   - Migration lỗi: giao dịch hoàn tác, in lỗi kèm tên file sao lưu, thoát mã 1; DB giữ nguyên v3.
