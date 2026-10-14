@@ -1,5 +1,6 @@
 import type { Db } from './db';
 import type { LoginLimiter } from './auth';
+import type { SendMail } from './mail';
 
 export interface AppConfig {
   production: boolean;
@@ -16,4 +17,6 @@ export interface AppContext {
   limiter: LoginLimiter;
   fetch: typeof fetch;
   now: () => number;
+  /** Gửi một thư qua SMTP (production: nodemailer; test: hộp thư giả). */
+  sendMail: SendMail;
 }

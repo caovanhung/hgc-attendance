@@ -9,6 +9,7 @@ import { areaRoutes } from './routes/areas';
 import { cameraRoutes } from './routes/cameras';
 import { attendanceRoutes } from './routes/attendance';
 import { settingsRoutes } from './routes/settings';
+import { mailRoutes } from './routes/mail';
 import { requestRoutes } from './routes/requests';
 import { hanetPublicRoutes, hanetRoutes } from './routes/hanet';
 import { adminRoutes } from './routes/admin';
@@ -43,6 +44,7 @@ export function createApp(ctx: AppContext): express.Express {
   api.use(cameraRoutes(ctx));
   api.use(attendanceRoutes(ctx));
   api.use(settingsRoutes(ctx));
+  api.use(mailRoutes(ctx));
   api.use(requestRoutes(ctx));
   api.use(hanetRoutes(ctx));
   api.use(adminRoutes(ctx));

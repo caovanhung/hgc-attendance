@@ -305,3 +305,19 @@ export interface ImportedUser {
   code: string;
   name: string;
 }
+
+/** Cấu hình gửi thư (tab Cấu hình); không bao giờ trả mật khẩu SMTP. */
+export interface MailConfigView {
+  host: string;
+  port: number;
+  secure: 'ssl' | 'starttls';
+  user: string;
+  hasPassword: boolean;
+  fromName: string;
+  fromEmail: string;
+  appUrl: string; // địa chỉ web dùng trong thư (link đặt lại mật khẩu)
+  dailyLimit: number;
+  configured: boolean;
+  sentToday: number;
+  pending: number;
+}

@@ -7,6 +7,7 @@ import { createApp } from './app';
 import { LoginLimiter } from './auth';
 import { DEFAULT_ADMIN_PASSWORD, ensureAdminAccess } from './bootstrap';
 import { startJobs } from './jobs';
+import { nodemailerSend } from './mail';
 import type { AppContext } from './context';
 
 const production = process.env.NODE_ENV === 'production';
@@ -38,6 +39,7 @@ async function main() {
     limiter: new LoginLimiter(),
     fetch: globalThis.fetch,
     now: () => Date.now(),
+    sendMail: nodemailerSend,
   };
 
   const app = createApp(ctx);

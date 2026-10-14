@@ -7,6 +7,7 @@ import { hashPassword, LoginLimiter } from '../server/auth';
 import { recomputeDay } from '../server/attendance';
 import { toVnDate } from '../server/vntime';
 import { createApp } from '../server/app';
+import type { MailMessage, SendMail } from '../server/mail';
 import type { AppConfig, AppContext } from '../server/context';
 import type { UserRole, UserStatus, DetectionSource } from '../shared/types';
 
@@ -92,6 +93,7 @@ export interface TestApp {
   baseUrl: string;
   ctx: AppContext;
   db: Db;
+  mails: MailMessage[];
   close: () => Promise<void>;
 }
 
@@ -101,17 +103,20 @@ export interface TestAppOverrides {
   fetch?: typeof fetch;
   now?: () => number;
   limiter?: LoginLimiter;
+  sendMail?: SendMail;
 }
 
 export async function startTestApp(overrides: TestAppOverrides = {}): Promise<TestApp> {
   const db = overrides.db ?? freshDb();
   const backupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hgc-backup-'));
+  const mails: MailMessage[] = [];
   const ctx: AppContext = {
     db,
     config: { production: false, simulatorEnabled: true, trustProxy: false, backupDir, kickSync: false, ...overrides.config },
     limiter: overrides.limiter ?? new LoginLimiter(),
     fetch: overrides.fetch ?? ((async () => { throw new Error('fetch không được dùng trong test này'); }) as unknown as typeof fetch),
     now: overrides.now ?? (() => Date.now()),
+    sendMail: overrides.sendMail ?? (async (_cfg, msg) => { mails.push(msg); }),
   };
   const server = createApp(ctx).listen(0);
   await new Promise<void>((resolve) => server.once('listening', () => resolve()));
@@ -120,6 +125,7 @@ export async function startTestApp(overrides: TestAppOverrides = {}): Promise<Te
     baseUrl: `http://127.0.0.1:${port}`,
     ctx,
     db,
+    mails,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }

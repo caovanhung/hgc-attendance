@@ -7,6 +7,7 @@ import { purgeSightings } from './sightings';
 import { purgeDoneJobs, runDueJobs } from './hanet-sync';
 import { SYNC_HANDLERS } from './sync-handlers';
 import { reconcileDate, type HanetDeps } from './hanet-api';
+import { runMailJobs } from './mail-queue';
 import { addDays, toVnDate, vnMinutesOfDay } from './vntime';
 
 export interface DueJobs {
@@ -56,6 +57,7 @@ export function startJobs(ctx: AppContext): () => void {
     if (due.purgeHourly) run('purge-sightings', () => purgeSightings(ctx.db, now));
     if (due.purgeHourly) run('purge-sync-jobs', () => purgeDoneJobs(ctx.db, now));
     run('sync', () => runDueJobs(deps, SYNC_HANDLERS));
+    run('mail', () => runMailJobs({ db: ctx.db, sendMail: ctx.sendMail, now: ctx.now }));
     if (reconcileEnabled(ctx.db)) {
       if (due.cameraStatus) run('camera-status', () => refreshCameraStatus(deps));
       if (due.reconcileToday) run('reconcile-today', () => reconcileDate(deps, today));
