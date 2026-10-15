@@ -407,3 +407,54 @@ export interface MonthLock {
   lockedByName: string;
   lockedAt: string;
 }
+
+/** Ký hiệu lưới chấm công (spec đợt C §6); ô có điều chỉnh thêm dấu `*`. */
+export type MonthlySymbol = 'X' | 'M' | 'S' | 'MS' | 'T' | 'CT' | 'P' | 'V' | 'L';
+
+export interface MonthlyDay {
+  date: string;
+  weekday: number; // 1 = thứ 2 … 7 = chủ nhật
+  holiday: string | null;
+}
+
+export interface MonthlyRow {
+  userId: string;
+  employeeCode: string;
+  employeeName: string;
+  departmentName: string | null;
+  cells: (string | null)[]; // theo days; ký hiệu, kèm '*' nếu đã điều chỉnh
+  requiredDays: number;
+  workDays: number;
+  lateCount: number;
+  lateMinutes: number;
+  earlyCount: number;
+  earlyMinutes: number;
+  missingOutDays: number;
+  absentDays: number;
+  leaveDays: number;
+  businessTripDays: number;
+  attendanceRate: number | null; // %, 1 chữ số thập phân; null khi không có ngày phải làm
+}
+
+export interface MonthlyReport {
+  month: string;
+  days: MonthlyDay[];
+  lock: MonthLock | null;
+  scopeLabel: string;
+  rows: MonthlyRow[];
+}
+
+export interface MyAttendance {
+  tracked: boolean; // false: tài khoản quản trị hệ thống không chấm công
+  profile: {
+    code: string;
+    name: string;
+    departmentName: string | null;
+    position: string;
+    shift: { name: string; workStart: string; workEnd: string; workDays: number[] };
+  } | null;
+  today: AttendanceDay | null;
+  report: MonthlyRow | null;
+  lock: MonthLock | null;
+  days: (MonthlyDay & { workday: boolean; record: AttendanceDay | null })[];
+}

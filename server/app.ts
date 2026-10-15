@@ -16,6 +16,7 @@ import { hanetPublicRoutes, hanetRoutes } from './routes/hanet';
 import { adminRoutes } from './routes/admin';
 import { auditRoutes } from './routes/audit';
 import { monthLockRoutes } from './routes/month-locks';
+import { reportRoutes } from './routes/reports';
 
 export function createApp(ctx: AppContext): express.Express {
   const app = express();
@@ -52,6 +53,7 @@ export function createApp(ctx: AppContext): express.Express {
   api.use(requestRoutes(ctx));
   api.use(auditRoutes(ctx));
   api.use(monthLockRoutes(ctx));
+  api.use(reportRoutes(ctx));
   api.use(hanetRoutes(ctx));
   api.use(adminRoutes(ctx));
   app.use('/api', api);
