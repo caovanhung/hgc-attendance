@@ -28,15 +28,15 @@ export function assertEmailFree(db: Db, email: string, userId: string | null): v
 }
 
 /** Tài khoản theo chuỗi đăng nhập: có '@' thì theo email (không phân biệt hoa thường), ngược lại theo mã nhân viên. */
-export function findLoginUser(db: Db, login: string): { id: string; code: string; email: string; password_hash: string | null; status: string } | undefined {
+export function findLoginUser(db: Db, login: string): { id: string; code: string; name: string; role: string; email: string; password_hash: string | null; status: string } | undefined {
   const s = login.trim();
   if (!s) return undefined;
-  const sql = 'SELECT id, code, email, password_hash, status FROM users WHERE ';
+  const sql = 'SELECT id, code, name, role, email, password_hash, status FROM users WHERE ';
   return (
     s.includes('@')
       ? db.prepare(`${sql} email != '' AND lower(email) = ?`).get(s.toLowerCase())
       : db.prepare(`${sql} code = ?`).get(s.toUpperCase())
-  ) as { id: string; code: string; email: string; password_hash: string | null; status: string } | undefined;
+  ) as { id: string; code: string; name: string; role: string; email: string; password_hash: string | null; status: string } | undefined;
 }
 
 /** Token đặt lại mật khẩu: chỉ lưu băm, hạn 30 phút, hủy các token cũ của người đó. */

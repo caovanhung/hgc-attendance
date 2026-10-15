@@ -14,6 +14,7 @@ import { mailRoutes } from './routes/mail';
 import { requestRoutes } from './routes/requests';
 import { hanetPublicRoutes, hanetRoutes } from './routes/hanet';
 import { adminRoutes } from './routes/admin';
+import { auditRoutes } from './routes/audit';
 
 export function createApp(ctx: AppContext): express.Express {
   const app = express();
@@ -48,6 +49,7 @@ export function createApp(ctx: AppContext): express.Express {
   api.use(settingsRoutes(ctx));
   api.use(mailRoutes(ctx));
   api.use(requestRoutes(ctx));
+  api.use(auditRoutes(ctx));
   api.use(hanetRoutes(ctx));
   api.use(adminRoutes(ctx));
   app.use('/api', api);

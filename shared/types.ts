@@ -378,3 +378,17 @@ export interface CsvPreviewRow {
   name: string;
   email: string;
 }
+
+/** Một dòng nhật ký kiểm toán (spec đợt C §5). */
+export interface AuditLogEntry {
+  id: number;
+  at: string;
+  actorLabel: string;
+  ip: string | null;
+  action: string;
+  targetLabel: string | null;
+  workDate: string | null;
+  before: unknown;
+  after: unknown;
+  reason: string | null;
+}

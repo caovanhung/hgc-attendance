@@ -9,7 +9,11 @@ import { getAppUrl } from '../mail';
 import { getUser } from '../repo';
 import { isSystemAdmin } from '../access';
 import { listAreasFor } from './areas';
+import { personLabel, writeAudit } from '../audit';
 import type { MeResponse } from '../../shared/types';
+
+/** Đăng nhập của các vai trò quản trị được ghi nhật ký (spec đợt C §5). */
+const AUDITED_ROLES = new Set(['hr', 'area_admin']);
 
 export function authPublicRoutes(ctx: AppContext): Router {
   const { db } = ctx;
@@ -22,17 +26,33 @@ export function authPublicRoutes(ctx: AppContext): Router {
     const password = typeof b.password === 'string' ? b.password : '';
     const key = `${login}|${req.ip}`;
     const now = ctx.now();
+    // Tài khoản lạ hoặc tài khoản quản trị: ghi nhật ký đăng nhập thất bại
+    const auditFailure = (u: ReturnType<typeof findLoginUser>, reason: string | null) => {
+      if (u && !AUDITED_ROLES.has(u.role)) return;
+      writeAudit(db, now, {
+        actorId: u?.id ?? null,
+        actorLabel: u ? personLabel(u.name, u.code) : login || '(trống)',
+        ip: req.ip ?? null,
+        action: 'auth.login_failed',
+        reason,
+      });
+    };
     if (ctx.limiter.isBlocked(key, now)) {
       console.warn(`[SECURITY] login_blocked login=${login} ip=${req.ip}`);
+      auditFailure(findLoginUser(db, login), 'Bị chặn tạm thời');
       throw new HttpError(429, 'Bạn đã nhập sai quá nhiều lần. Vui lòng thử lại sau 15 phút');
     }
     const row = findLoginUser(db, login);
     if (!row || row.status !== 'active' || !verifyPassword(password, row.password_hash)) {
       ctx.limiter.recordFailure(key, now);
       console.warn(`[SECURITY] login_failed login=${login} ip=${req.ip}`);
+      auditFailure(row, null);
       throw new HttpError(401, 'Mã nhân viên/email hoặc mật khẩu không đúng');
     }
     ctx.limiter.reset(key);
+    if (AUDITED_ROLES.has(row.role)) {
+      writeAudit(db, now, { actorId: row.id, actorLabel: personLabel(row.name, row.code), ip: req.ip ?? null, action: 'auth.login' });
+    }
     setSessionCookie(res, createSession(db, row.id, now), ctx);
     res.json({ success: true });
   });
