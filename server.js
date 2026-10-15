@@ -1216,7 +1216,7 @@ function parseStranger(body, now) {
   const d = b.data && typeof b.data === "object" ? b.data : b;
   const deviceId = str(d.deviceID);
   const imageUrl = str(d.detected_image_url);
-  if (num(d.personType) !== 2 || !deviceId || !imageUrl) return null;
+  if (!STRANGER_TYPES.has(num(d.personType) ?? -1) || !deviceId || !imageUrl) return null;
   return { deviceId, deviceName: str(d.deviceName), ts: normalizeTs(num(d.time), now).ts, imageUrl };
 }
 function ingestCheckin(db, input, source) {
@@ -1297,7 +1297,7 @@ function updateHanetConfig(db, body) {
     setSetting(db, "hanet.place_ids", JSON.stringify(ids));
   }
 }
-var str, num, STRANGER_MESSAGE, UNMATCHED_MESSAGE, WEBHOOK_LOG_LIMIT, WEBHOOK_TOKEN_KEY, HANET_DEFAULT_API_BASE, TEXT_FIELDS;
+var str, num, STRANGER_MESSAGE, STRANGER_TYPES, UNMATCHED_MESSAGE, WEBHOOK_LOG_LIMIT, WEBHOOK_TOKEN_KEY, HANET_DEFAULT_API_BASE, TEXT_FIELDS;
 var init_hanet = __esm({
   "server/hanet.ts"() {
     init_db();
@@ -1313,6 +1313,7 @@ var init_hanet = __esm({
       return Number.isFinite(n) ? n : null;
     };
     STRANGER_MESSAGE = "Ng\u01B0\u1EDDi l\u1EA1";
+    STRANGER_TYPES = /* @__PURE__ */ new Set([2, 3]);
     UNMATCHED_MESSAGE = "Kh\xF4ng kh\u1EDBp nh\xE2n vi\xEAn n\xE0o";
     WEBHOOK_LOG_LIMIT = 500;
     WEBHOOK_TOKEN_KEY = "hanet.webhook_token";
