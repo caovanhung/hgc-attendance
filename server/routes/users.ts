@@ -22,6 +22,7 @@ import { fetchAllPersons, hanetAliases, IMPORT_MAX, importPersons, nextEmployeeC
 import { getPlaceIds, reconcileEnabled } from '../hanet';
 import { CODE_ERROR, CODE_RE } from '../validation';
 import { checkCsvRows, createCsvUsers } from '../csv-import';
+import { actorOf, personLabel, writeAudit, type AuditAction } from '../audit';
 import type { FaceCandidates, FaceResult, User, UserRole } from '../../shared/types';
 
 const ROLES: UserRole[] = ['hr', 'area_admin', 'dept_manager', 'employee'];
@@ -343,9 +344,19 @@ export function userRoutes(ctx: AppContext): Router {
       adminAreas = [];
     }
 
+    const a = actorOf(req);
+    const audit = (action: AuditAction, before: unknown, after: unknown) =>
+      writeAudit(db, ctx.now(), { ...a, action, targetUserId: target.id, targetLabel: personLabel(target.name, target.code), areaId: target.areaId, before, after });
     tx(db, () => {
       if (sets.length) db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...params, target.id);
       if (adminAreas !== null) setAdminAreas(db, target.id, adminAreas);
+      if (changesRole) audit('user.role', { role: target.role }, { role: b.role });
+      if (b.status !== undefined && b.status !== target.status) audit('user.status', { status: target.status }, { status: b.status });
+      if (adminAreas !== null && [...adminAreas].sort().join(',') !== target.adminAreaIds.join(',')) {
+        audit('user.areas', { areaIds: target.adminAreaIds }, { areaIds: adminAreas });
+      }
+      const cur = db.prepare('SELECT shift_id FROM users WHERE id = ?').get(target.id) as { shift_id: string | null };
+      if (cur.shift_id !== target.shiftId) audit('shift.assign', { shiftId: target.shiftId }, { shiftId: cur.shift_id });
     });
     if (changesShift || changesDept) recomputeForShiftChange(db, [target.id], ctx.now());
     // Người chưa đăng nhập được (nhập từ Camera AI, hoặc thư chào mừng lỗi) vừa có/đổi email: gửi thư chào mừng
@@ -429,7 +440,19 @@ export function userRoutes(ctx: AppContext): Router {
       dropEntityJobs(db, 'user', target.id);
     }
     // Khóa ngoại tự xóa phiên, lượt nhận diện, bảng công, đơn của người này; bỏ chức trưởng phòng nếu có.
-    db.prepare('DELETE FROM users WHERE id = ?').run(target.id);
+    tx(db, () => {
+      writeAudit(db, ctx.now(), {
+        ...actorOf(req),
+        action: 'user.delete',
+        targetUserId: target.id,
+        targetLabel: personLabel(target.name, target.code),
+        areaId: target.areaId,
+        before: { code: target.code, name: target.name, role: target.role, departmentName: target.departmentName, email: target.email },
+        after: null,
+        reason: `Sao lưu trước khi xóa: ${backup}`,
+      });
+      db.prepare('DELETE FROM users WHERE id = ?').run(target.id);
+    });
     console.warn(`[SECURITY] user_deleted by=${actor.code} target=${target.code} backup=${backup} ip=${req.ip}`);
     kickEntity(ctx, 'user', target.id);
     res.json({ success: true, backup });

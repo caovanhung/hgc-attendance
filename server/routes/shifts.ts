@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import type { AppContext } from '../context';
 import type { Db } from '../db';
-import { newId } from '../db';
+import { newId, tx } from '../db';
+import { actorOf, writeAudit } from '../audit';
 import { HttpError } from '../errors';
 import { currentUser } from '../middleware';
 import { areaColumnSql, isGlobalHr, managesArea, notFound, parseAreaFilter, requireGlobalHr, requireManager, resolveAreaFor } from '../access';
@@ -68,10 +69,13 @@ export function shiftRoutes(ctx: AppContext): Router {
     const s = validateShiftInput(b);
     if (db.prepare('SELECT 1 FROM shifts WHERE area_id = ? AND name = ?').get(areaId, s.name)) throw new HttpError(409, 'Khu này đã có ca cùng tên');
     const id = newId('shift');
-    db.prepare(
-      `INSERT INTO shifts(id, area_id, name, work_start, work_end, work_days, late_grace_minutes, early_arrival_minutes, early_leave_minutes, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, areaId, s.name, s.workStart, s.workEnd, formatWorkDays(s.workDays), s.lateGraceMinutes, s.earlyArrivalMinutes, s.earlyLeaveMinutes, toVnDate(ctx.now()));
+    tx(db, () => {
+      db.prepare(
+        `INSERT INTO shifts(id, area_id, name, work_start, work_end, work_days, late_grace_minutes, early_arrival_minutes, early_leave_minutes, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(id, areaId, s.name, s.workStart, s.workEnd, formatWorkDays(s.workDays), s.lateGraceMinutes, s.earlyArrivalMinutes, s.earlyLeaveMinutes, toVnDate(ctx.now()));
+      writeAudit(db, ctx.now(), { ...actorOf(req), action: 'shift.create', targetLabel: `Ca ${s.name}`, areaId, after: s });
+    });
     res.json({ shift: getShift(db, id) });
   });
 
@@ -81,9 +85,21 @@ export function shiftRoutes(ctx: AppContext): Router {
     const s = validateShiftInput({ ...cur, ...(req.body ?? {}) });
     const dup = db.prepare('SELECT id FROM shifts WHERE area_id = ? AND name = ?').get(cur.areaId, s.name) as { id: string } | undefined;
     if (dup && dup.id !== cur.id) throw new HttpError(409, 'Khu này đã có ca cùng tên');
-    db.prepare(
-      `UPDATE shifts SET name = ?, work_start = ?, work_end = ?, work_days = ?, late_grace_minutes = ?, early_arrival_minutes = ?, early_leave_minutes = ? WHERE id = ?`,
-    ).run(s.name, s.workStart, s.workEnd, formatWorkDays(s.workDays), s.lateGraceMinutes, s.earlyArrivalMinutes, s.earlyLeaveMinutes, cur.id);
+    tx(db, () => {
+      db.prepare(
+        `UPDATE shifts SET name = ?, work_start = ?, work_end = ?, work_days = ?, late_grace_minutes = ?, early_arrival_minutes = ?, early_leave_minutes = ? WHERE id = ?`,
+      ).run(s.name, s.workStart, s.workEnd, formatWorkDays(s.workDays), s.lateGraceMinutes, s.earlyArrivalMinutes, s.earlyLeaveMinutes, cur.id);
+      const before = {
+        name: cur.name,
+        workStart: cur.workStart,
+        workEnd: cur.workEnd,
+        workDays: cur.workDays,
+        lateGraceMinutes: cur.lateGraceMinutes,
+        earlyArrivalMinutes: cur.earlyArrivalMinutes,
+        earlyLeaveMinutes: cur.earlyLeaveMinutes,
+      };
+      writeAudit(db, ctx.now(), { ...actorOf(req), action: 'shift.update', targetLabel: `Ca ${s.name}`, areaId: cur.areaId, before, after: s });
+    });
     const recomputed = recomputeForShiftChange(db, usersOfShift(db, cur.id), ctx.now());
     res.json({ shift: getShift(db, cur.id), recomputed });
   });
@@ -92,7 +108,16 @@ export function shiftRoutes(ctx: AppContext): Router {
     const cur = getShift(db, req.params.id);
     if (!cur || !managesArea(currentUser(req), cur.areaId)) throw notFound('ca');
     if (cur.departmentCount > 0 || cur.userCount > 0) throw new HttpError(409, 'Ca đang được phòng ban hoặc nhân sự sử dụng');
-    db.prepare('DELETE FROM shifts WHERE id = ?').run(cur.id);
+    tx(db, () => {
+      db.prepare('DELETE FROM shifts WHERE id = ?').run(cur.id);
+      writeAudit(db, ctx.now(), {
+        ...actorOf(req),
+        action: 'shift.delete',
+        targetLabel: `Ca ${cur.name}`,
+        areaId: cur.areaId,
+        before: { name: cur.name, workStart: cur.workStart, workEnd: cur.workEnd },
+      });
+    });
     res.json({ success: true });
   });
 
@@ -112,13 +137,21 @@ export function shiftRoutes(ctx: AppContext): Router {
     if (!isValidDate(b.date)) throw new HttpError(400, 'Ngày không hợp lệ (định dạng YYYY-MM-DD)');
     if (!name) throw new HttpError(400, 'Tên ngày lễ là bắt buộc');
     if (db.prepare('SELECT 1 FROM holidays WHERE date = ?').get(b.date)) throw new HttpError(409, 'Ngày này đã là ngày lễ');
-    db.prepare('INSERT INTO holidays(date, name) VALUES (?, ?)').run(b.date, name);
+    tx(db, () => {
+      db.prepare('INSERT INTO holidays(date, name) VALUES (?, ?)').run(b.date, name);
+      writeAudit(db, ctx.now(), { ...actorOf(req), action: 'holiday.add', targetLabel: `Ngày lễ ${b.date}`, after: { date: b.date, name } });
+    });
     res.json({ holiday: { date: b.date, name }, recomputed: recomputeDate(b.date) });
   });
 
   r.delete('/holidays/:date', requireGlobalHr, (req, res) => {
-    const result = db.prepare('DELETE FROM holidays WHERE date = ?').run(req.params.date);
-    if (Number(result.changes) === 0) throw notFound('ngày lễ');
+    const date = req.params.date;
+    const old = db.prepare('SELECT name FROM holidays WHERE date = ?').get(date) as { name: string } | undefined;
+    if (!old) throw notFound('ngày lễ');
+    tx(db, () => {
+      db.prepare('DELETE FROM holidays WHERE date = ?').run(date);
+      writeAudit(db, ctx.now(), { ...actorOf(req), action: 'holiday.remove', targetLabel: `Ngày lễ ${date}`, before: { date, name: old.name } });
+    });
     res.json({ success: true, recomputed: recomputeDate(req.params.date) });
   });
 

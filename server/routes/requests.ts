@@ -10,6 +10,7 @@ import { areaFilterSql, deptAreaId, managesArea, notFound, parseAreaFilter } fro
 import { applyDayAdjustment, recomputeUsers, type DayAdjustment } from '../attendance';
 import { daysBetween, isValidDate, parseHHmm, toVnDate, vnDateTimeToTs } from '../vntime';
 import { assertRangeUnlocked } from '../month-lock';
+import { actorOf, personLabel, userAreaId, writeAudit } from '../audit';
 import type { AttendanceRequest, RequestType } from '../../shared/types';
 
 const TYPES: RequestType[] = ['missed_punch', 'late_explanation', 'leave_request', 'business_trip'];
@@ -137,6 +138,22 @@ export function requestRoutes(ctx: AppContext): Router {
         new Date(ctx.now()).toISOString(),
         target.id,
       );
+      writeAudit(db, ctx.now(), {
+        ...actorOf(req),
+        action: status === 'approved' ? 'request.approve' : 'request.reject',
+        targetUserId: target.userId,
+        targetLabel: personLabel(target.employeeName, target.employeeCode),
+        areaId: userAreaId(db, target.userId),
+        workDate: target.workDate,
+        before: { status: 'pending' },
+        after: {
+          status,
+          comment: typeof comment === 'string' ? comment.trim() : '',
+          type: target.type,
+          from: target.workDate,
+          to: target.endDate ?? target.workDate,
+        },
+      });
       if (status !== 'approved') return;
       if (target.type === 'late_explanation') {
         applyDayAdjustment(db, target.userId, target.workDate, { lateExcused: true });

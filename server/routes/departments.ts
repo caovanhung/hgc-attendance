@@ -12,6 +12,7 @@ import { getUser, type Row } from '../repo';
 import { CODE_RE } from '../validation';
 import { toVnDate } from '../vntime';
 import { recomputeForShiftChange } from '../attendance';
+import { actorOf, writeAudit } from '../audit';
 import type { Department } from '../../shared/types';
 
 const DEPT_SELECT = `SELECT d.id, d.code, d.name, d.description, d.manager_id, m.name AS manager_name, d.hanet_sync_status, d.hanet_sync_error, d.created_at,
@@ -131,6 +132,16 @@ export function departmentRoutes(ctx: AppContext): Router {
         db.prepare('UPDATE departments SET description = ? WHERE id = ?').run(typeof b.description === 'string' ? b.description.trim() : '', dept.id);
       }
       if (shiftId !== undefined) db.prepare('UPDATE departments SET shift_id = ? WHERE id = ?').run(shiftId, dept.id);
+      if (shiftId !== undefined && shiftId !== dept.shiftId) {
+        writeAudit(db, ctx.now(), {
+          ...actorOf(req),
+          action: 'shift.assign',
+          targetLabel: `Phòng ${dept.name}`,
+          areaId: areaAfter,
+          before: { shiftId: dept.shiftId },
+          after: { shiftId },
+        });
+      }
       if (areaId !== undefined) db.prepare('UPDATE departments SET area_id = ? WHERE id = ?').run(areaId, dept.id);
       if (managerId !== undefined) db.prepare('UPDATE departments SET manager_id = ? WHERE id = ?').run(managerId, dept.id);
     });
