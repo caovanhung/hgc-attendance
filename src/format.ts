@@ -122,6 +122,7 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   'holiday.remove': 'Xóa ngày lễ',
   'month.lock': 'Khóa sổ tháng',
   'month.unlock': 'Mở khóa sổ tháng',
+  'face.delete': 'Xóa FaceID trên Camera AI',
   'auth.login': 'Đăng nhập',
   'auth.login_failed': 'Đăng nhập thất bại',
 };

@@ -21,6 +21,9 @@ const FIELD_LABEL: Record<string, string> = {
   areaIds: 'Khu',
   shiftId: 'Ca',
   comment: 'Ghi chú',
+  personId: 'Person ID',
+  aliasId: 'Mã trên Camera AI',
+  name: 'Tên',
 };
 
 /** Giá trị trước/sau dạng dễ đọc: giờ HH:MM, nhãn trạng thái/vai trò thay cho mã. */

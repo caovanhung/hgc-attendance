@@ -8,13 +8,16 @@ import type { Db } from '../db';
 import { deptAreaId, deviceAreaId, isGlobalHr, isSystemAdmin, managesArea, notFound, requireGlobalHr, requireManager } from '../access';
 import {
   getHanetConfigView, getWebhookToken, ingestCheckin, logWebhook, parseCheckin, rotateWebhookToken, updateHanetConfig,
-  reconcileEnabled, getPlaceIds, parseStranger, STRANGER_MESSAGE, UNMATCHED_MESSAGE, type CheckinInput, type IngestResult,
+  reconcileEnabled, parseStranger, STRANGER_MESSAGE, UNMATCHED_MESSAGE, type CheckinInput, type IngestResult,
 } from '../hanet';
 import { hanetApi, reconcileDate } from '../hanet-api';
 import { getSetting } from '../settings';
 import { getConnectConfig, saveConnectConfig, testConnectLogin } from '../hanet-connect';
 import { isValidDate, toVnDate, vnDateTimeToTs } from '../vntime';
-import { fetchAllPersons, unlinkedPersons } from '../hanet-import';
+import { fetchPersonsAllPlaces, unlinkedPersons } from '../hanet-import';
+import { tx } from '../db';
+import { actorOf, writeAudit } from '../audit';
+import { parseReason } from '../overrides';
 import { listSightings, recordSighting } from '../sightings';
 import { kickAll, retryJobs, syncSummary } from '../hanet-sync';
 import type { HanetConnectionTest, SightingKind, SyncEntity, WebhookLog } from '../../shared/types';
@@ -180,15 +183,49 @@ export function hanetRoutes(ctx: AppContext): Router {
     '/hanet/persons/unlinked',
     requireManager,
     ah(async (_req, res) => {
-      const placeId = getPlaceIds(db)[0];
-      if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, 'Chưa cấu hình kết nối Camera AI (Client ID, Refresh Token, địa điểm)');
-      let persons;
-      try {
-        persons = await fetchAllPersons({ db, fetch: ctx.fetch, now: ctx.now }, placeId);
-      } catch (err) {
-        throw new HttpError(502, `Không lấy được danh sách người từ Camera AI: ${(err as Error).message}`);
+      res.json({ persons: unlinkedPersons(db, await cameraPersons()) });
+    }),
+  );
+
+  /** Mọi người (nhân viên) trên Camera AI ở các địa điểm đã chọn; chưa cấu hình ⇒ 400, Camera AI lỗi ⇒ 502. */
+  const cameraPersons = async () => {
+    if (!reconcileEnabled(db)) throw new HttpError(400, 'Chưa cấu hình kết nối Camera AI (Client ID, Refresh Token, địa điểm)');
+    try {
+      return await fetchPersonsAllPlaces({ db, fetch: ctx.fetch, now: ctx.now });
+    } catch (err) {
+      throw new HttpError(502, `Không lấy được danh sách người từ Camera AI: ${(err as Error).message}`);
+    }
+  };
+
+  /** Xóa FaceID chưa liên kết với nhân sự nào (chỉ HR toàn hệ thống; bắt buộc lý do; ghi nhật ký). */
+  r.delete(
+    '/hanet/persons/:personId',
+    requireGlobalHr,
+    ah(async (req, res) => {
+      const reason = parseReason((req.body ?? {}).reason);
+      const all = await cameraPersons();
+      const p = all.find((x) => String(x.personID) === req.params.personId);
+      if (!p) throw notFound('người này trên Camera AI');
+      if (unlinkedPersons(db, [p]).length === 0) {
+        throw new HttpError(400, 'Người này đã liên kết với một nhân sự: hãy xóa nhân sự đó ở tab Nhân sự');
       }
-      res.json({ persons: unlinkedPersons(db, persons) });
+      try {
+        await hanetApi.removeById({ db, fetch: ctx.fetch, now: ctx.now }, String(p.personID));
+      } catch (err) {
+        throw new HttpError(502, `Không xóa được FaceID trên Camera AI: ${(err as Error).message}`);
+      }
+      const snapshot = { personId: String(p.personID), aliasId: String(p.aliasID ?? ''), name: String(p.name ?? '') };
+      tx(db, () =>
+        writeAudit(db, ctx.now(), {
+          ...actorOf(req),
+          action: 'face.delete',
+          targetLabel: `${snapshot.name || '(không tên)'}${snapshot.aliasId ? ` (${snapshot.aliasId})` : ''}`,
+          before: snapshot,
+          after: null,
+          reason,
+        }),
+      );
+      res.json({ success: true });
     }),
   );
 

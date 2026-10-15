@@ -238,7 +238,7 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
           </p>
         </ConfirmDeleteDialog>
       )}
-      {importing && <ImportFromHanetModal departments={departments} onClose={() => setImporting(false)} onImported={onRefresh} />}
+      {importing && <ImportFromHanetModal departments={departments} canDelete={currentUser.role === 'hr'} onClose={() => setImporting(false)} onImported={onRefresh} />}
       {csvOpen && <CsvImportModal onClose={() => setCsvOpen(false)} onImported={onRefresh} />}
     </div>
   );

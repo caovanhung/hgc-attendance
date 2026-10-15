@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import type { Department, HanetPerson, ImportedUser } from '../types';
 import { api, errorMessage } from '../api';
-import { Modal, inputCls, primaryBtn } from './ui';
+import { Field, Modal, dangerBtn, inputCls, primaryBtn, secondaryBtn } from './ui';
 
 interface Props {
   departments: Department[];
+  /** HR toàn hệ thống: được xóa FaceID chưa liên kết trên Camera AI. */
+  canDelete: boolean;
   onClose: () => void;
   onImported: () => void;
 }
@@ -12,13 +15,16 @@ interface Props {
 /** Trùng giới hạn của server (IMPORT_MAX trong server/hanet-import.ts). */
 const IMPORT_MAX = 100;
 
-export const ImportFromHanetModal: React.FC<Props> = ({ departments, onClose, onImported }) => {
+export const ImportFromHanetModal: React.FC<Props> = ({ departments, canDelete, onClose, onImported }) => {
   const [persons, setPersons] = useState<HanetPerson[] | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [departmentId, setDepartmentId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<ImportedUser[] | null>(null);
+  const [deleting, setDeleting] = useState<HanetPerson | null>(null);
+  const [reason, setReason] = useState('');
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     api<{ persons: HanetPerson[] }>('/api/hanet/persons/unlinked')
@@ -50,6 +56,57 @@ export const ImportFromHanetModal: React.FC<Props> = ({ departments, onClose, on
       setBusy(false);
     }
   };
+
+  const removeFace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deleting) return;
+    setBusy(true);
+    setDeleteError(null);
+    try {
+      await api(`/api/hanet/persons/${encodeURIComponent(deleting.personID)}`, { method: 'DELETE', body: { reason } });
+      setPersons((list) => (list ?? []).filter((p) => p.personID !== deleting.personID));
+      const next = new Set(selected);
+      next.delete(deleting.personID);
+      setSelected(next);
+      setDeleting(null);
+      setReason('');
+    } catch (err) {
+      setDeleteError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (deleting) {
+    return (
+      <Modal title="Xóa FaceID trên Camera AI" onClose={() => setDeleting(null)}>
+        <form onSubmit={removeFace} className="space-y-3.5">
+          <div className="flex items-center gap-3">
+            {deleting.avatar ? <img src={deleting.avatar} alt="" className="w-14 h-14 rounded-xl object-cover bg-slate-100" /> : <div className="w-14 h-14 rounded-xl bg-slate-100" />}
+            <div>
+              <div className="font-semibold text-slate-900">{deleting.name || '(không tên)'}</div>
+              <div className="text-xs text-slate-500">
+                aliasID <span className="font-mono">{deleting.aliasID || '—'}</span> · Person ID <span className="font-mono">{deleting.personID}</span>
+              </div>
+            </div>
+          </div>
+          <p>Khuôn mặt này sẽ bị xóa khỏi Camera AI; camera sẽ coi người này là người lạ. Không hoàn tác được.</p>
+          <Field label="Lý do (bắt buộc)" hint={`${reason.trim().length}/500 ký tự, tối thiểu 5`}>
+            <textarea rows={3} maxLength={500} className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)} required />
+          </Field>
+          {deleteError && <p className="text-rose-600">{deleteError}</p>}
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setDeleting(null)} className={`${secondaryBtn} flex-1`}>
+              Hủy
+            </button>
+            <button type="submit" disabled={busy || reason.trim().length < 5} className={`${dangerBtn} flex-1`}>
+              Xóa FaceID
+            </button>
+          </div>
+        </form>
+      </Modal>
+    );
+  }
 
   return (
     <Modal title="Nhập nhân sự từ Camera AI" onClose={onClose} wide>
@@ -100,12 +157,28 @@ export const ImportFromHanetModal: React.FC<Props> = ({ departments, onClose, on
                       onChange={() => toggle(p.personID)}
                     />
                     {p.avatar ? <img src={p.avatar} alt="" className="w-9 h-9 rounded-lg object-cover bg-slate-100" /> : <div className="w-9 h-9 rounded-lg bg-slate-100" />}
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="font-semibold text-slate-900 truncate">{p.name || '(không tên)'}</div>
                       <div className="text-[11px] text-slate-500">
                         aliasID: <span className="font-mono">{p.aliasID || '— (hệ thống sẽ tự sinh mã)'}</span>
                       </div>
                     </div>
+                    {canDelete && (
+                      <button
+                        type="button"
+                        title="Xóa FaceID trên Camera AI"
+                        aria-label="Xóa FaceID trên Camera AI"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setReason('');
+                          setDeleteError(null);
+                          setDeleting(p);
+                        }}
+                        className="shrink-0 p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </label>
                 ))}
               </div>

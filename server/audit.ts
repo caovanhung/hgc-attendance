@@ -20,6 +20,7 @@ export type AuditAction =
   | 'holiday.remove'
   | 'month.lock'
   | 'month.unlock'
+  | 'face.delete'
   | 'auth.login'
   | 'auth.login_failed';
 

@@ -18,8 +18,8 @@ import {
 import { deleteSighting, getSighting, listSightings, SIGHTING_TTL_MS } from '../sightings';
 import { registerFace } from '../hanet-face';
 import { dropEntityJobs, enqueue, kickAll, kickEntity } from '../hanet-sync';
-import { fetchAllPersons, hanetAliases, IMPORT_MAX, importPersons, nextEmployeeCode, unlinkedPersons } from '../hanet-import';
-import { getPlaceIds, reconcileEnabled } from '../hanet';
+import { fetchPersonsAllPlaces, hanetAliases, IMPORT_MAX, importPersons, nextEmployeeCode, unlinkedPersons } from '../hanet-import';
+import { reconcileEnabled } from '../hanet';
 import { CODE_ERROR, CODE_RE } from '../validation';
 import { checkCsvRows, createCsvUsers } from '../csv-import';
 import { actorOf, personLabel, writeAudit, type AuditAction } from '../audit';
@@ -158,11 +158,10 @@ export function userRoutes(ctx: AppContext): Router {
       if (wanted.size === 0) throw new HttpError(400, 'Chưa chọn người nào để nhập');
       if (wanted.size > IMPORT_MAX) throw new HttpError(400, `Mỗi lần nhập tối đa ${IMPORT_MAX} người`);
       const departmentId = resolveDepartmentFor(db, currentUser(req), b.departmentId);
-      const placeId = getPlaceIds(db)[0];
-      if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, 'Chưa cấu hình kết nối Camera AI (Client ID, Refresh Token, địa điểm)');
+      if (!reconcileEnabled(db)) throw new HttpError(400, 'Chưa cấu hình kết nối Camera AI (Client ID, Refresh Token, địa điểm)');
       let all;
       try {
-        all = await fetchAllPersons(deps, placeId);
+        all = await fetchPersonsAllPlaces(deps);
       } catch (err) {
         throw new HttpError(502, `Không lấy được danh sách người từ Camera AI: ${(err as Error).message}`);
       }
@@ -178,10 +177,9 @@ export function userRoutes(ctx: AppContext): Router {
 
   /** aliasID đang có trên Camera AI để mã tự sinh không trùng; không cấu hình hoặc lỗi gọi thì bỏ qua. */
   const cameraAliases = async (): Promise<Set<string>> => {
-    const placeId = getPlaceIds(db)[0];
-    if (!reconcileEnabled(db) || !placeId) return new Set();
+    if (!reconcileEnabled(db)) return new Set();
     try {
-      return hanetAliases(await fetchAllPersons(deps, placeId));
+      return hanetAliases(await fetchPersonsAllPlaces(deps));
     } catch {
       return new Set();
     }

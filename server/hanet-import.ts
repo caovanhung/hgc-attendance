@@ -2,6 +2,7 @@ import type { Db } from './db';
 import { newId, tx } from './db';
 import { hanetApi, type HanetDeps } from './hanet-api';
 import { enqueue } from './hanet-sync';
+import { getPlaceIds } from './hanet';
 import { SYSTEM_ADMIN_CODE } from './bootstrap';
 import { CODE_RE } from './validation';
 import { toVnDate } from './vntime';
@@ -21,6 +22,18 @@ export async function fetchAllPersons(deps: HanetDeps, placeId: number): Promise
     if (items.length < IMPORT_PAGE_SIZE) break;
   }
   return all;
+}
+
+/** Nhân viên của mọi địa điểm đã chọn trong Cấu hình; một người có ở nhiều địa điểm chỉ lấy một lần. */
+export async function fetchPersonsAllPlaces(deps: HanetDeps): Promise<HanetPerson[]> {
+  const byId = new Map<string, HanetPerson>();
+  for (const placeId of getPlaceIds(deps.db)) {
+    for (const p of await fetchAllPersons(deps, placeId)) {
+      const key = String(p.personID ?? '');
+      if (key && !byId.has(key)) byId.set(key, p);
+    }
+  }
+  return [...byId.values()];
 }
 
 /** Mã dùng được từ aliasID: hợp lệ và không phải mã ADMIN (mã này mang quyền xóa dữ liệu). */
