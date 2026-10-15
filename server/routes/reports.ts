@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import type { AppContext } from '../context';
+import { ah } from '../errors';
 import { currentUser, requireRole } from '../middleware';
+import { personLabel } from '../audit';
+import { monthlyReportXlsx } from '../report-xlsx';
 import { getUser, type Row } from '../repo';
 import { SYSTEM_ADMIN_CODE } from '../bootstrap';
 import { effectiveShift, isWorkday } from '../shifts';
@@ -15,6 +18,20 @@ const hhmm = (m: number): string => `${String(Math.floor(m / 60)).padStart(2, '0
 export function reportRoutes(ctx: AppContext): Router {
   const { db } = ctx;
   const r = Router();
+
+  r.get(
+    '/reports/monthly.xlsx',
+    requireRole('hr', 'area_admin', 'dept_manager'),
+    ah(async (req, res) => {
+      const viewer = currentUser(req);
+      const month = parseMonthParam(req.query.month, ctx.now());
+      const report = buildMonthlyReport(db, viewer, { month, area: req.query.area, department: req.query.department }, ctx.now());
+      const buf = await monthlyReportXlsx(report, personLabel(viewer.name, viewer.code), ctx.now());
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="Bang_cong_${month}.xlsx"`);
+      res.send(buf);
+    }),
+  );
 
   r.get('/reports/monthly', requireRole('hr', 'area_admin', 'dept_manager'), (req, res) => {
     const month = parseMonthParam(req.query.month, ctx.now());
