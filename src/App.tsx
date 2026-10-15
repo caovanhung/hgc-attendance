@@ -17,6 +17,7 @@ import { areaParam, loadArea, saveArea } from './area';
 import { RequestsTab } from './components/RequestsTab';
 import { HanetConfigTab } from './components/HanetConfigTab';
 import { ShiftsTab } from './components/ShiftsTab';
+import { MonthlyReportTab } from './components/MonthlyReportTab';
 import { HanetSimulatorModal } from './components/HanetSimulatorModal';
 import { LoginScreen } from './components/LoginScreen';
 import { ForgotPasswordScreen } from './components/ForgotPasswordScreen';
@@ -29,9 +30,9 @@ import type { AttendanceDay, AttendanceRequest, Camera, Department, MeResponse, 
 type AuthState = 'loading' | 'anonymous' | 'must-change' | 'ready';
 
 const TABS_BY_ROLE: Record<User['role'], string[]> = {
-  hr: ['attendance', 'requests', 'cameras', 'departments', 'shifts', 'employees', 'areas', 'hanet_config'],
-  area_admin: ['attendance', 'requests', 'cameras', 'departments', 'shifts', 'employees'],
-  dept_manager: ['attendance', 'requests', 'cameras', 'departments'],
+  hr: ['attendance', 'report', 'requests', 'cameras', 'departments', 'shifts', 'employees', 'areas', 'hanet_config'],
+  area_admin: ['attendance', 'report', 'requests', 'cameras', 'departments', 'shifts', 'employees'],
+  dept_manager: ['attendance', 'report', 'requests', 'cameras', 'departments'],
   employee: ['attendance', 'requests'],
 };
 
@@ -248,6 +249,7 @@ export default function App() {
             onRefresh={fetchData}
           />
         )}
+        {tab === 'report' && <MonthlyReportTab me={me} departments={departments} area={activeArea} />}
         {tab === 'requests' && <RequestsTab requests={requests} currentUser={currentUser} onRefresh={fetchData} />}
         {tab === 'cameras' && <CamerasTab cameras={cameras} currentUser={currentUser} areas={me.areas} onRefresh={fetchData} />}
         {tab === 'departments' && <DepartmentsTab departments={departments} users={users} currentUser={currentUser} areas={me.areas} onRefresh={refreshAll} />}

@@ -11,6 +11,7 @@ import {
   MapPinned,
   Settings,
   CalendarClock,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 import type { User } from '../types';
@@ -56,6 +57,12 @@ export const Navbar: React.FC<NavbarProps> = ({
       label: 'Bảng công',
       icon: LayoutDashboard,
       visible: true,
+    },
+    {
+      id: 'report',
+      label: 'Báo cáo tháng',
+      icon: FileSpreadsheet,
+      visible: currentUser.role !== 'employee',
     },
     {
       id: 'requests',

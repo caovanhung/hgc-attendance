@@ -86,3 +86,20 @@ export function canAdjust(viewer: User, targetUserId: string): boolean {
 
 /** '2026-10-15' → '15/10/2026' */
 export const fmtDate = (date: string): string => date.split('-').reverse().join('/');
+
+/** Màu ô lưới chấm công, khớp DAY_STATUS_STYLE và file Excel. */
+export const SYMBOL_STYLE: Record<string, string> = {
+  X: 'bg-emerald-50 text-emerald-700',
+  M: 'bg-amber-50 text-amber-800',
+  S: 'bg-amber-50 text-amber-800',
+  MS: 'bg-rose-50 text-rose-700',
+  V: 'bg-rose-50 text-rose-700',
+  T: 'bg-slate-100 text-slate-700',
+  P: 'bg-violet-50 text-violet-700',
+  CT: 'bg-sky-50 text-sky-700',
+  L: 'bg-slate-100 text-slate-500',
+};
+
+export const SYMBOL_LEGEND = 'X đủ công · M đi muộn · S về sớm · MS muộn và về sớm · T thiếu giờ ra · CT công tác · P nghỉ phép · V vắng · L ngày lễ · * đã điều chỉnh';
+
+export const thisMonth = (): string => vnToday().slice(0, 7);
