@@ -19,6 +19,7 @@ import { HanetConfigTab } from './components/HanetConfigTab';
 import { ShiftsTab } from './components/ShiftsTab';
 import { MonthlyReportTab } from './components/MonthlyReportTab';
 import { MyAttendanceTab } from './components/MyAttendanceTab';
+import { AuditLogTab } from './components/AuditLogTab';
 import { HanetSimulatorModal } from './components/HanetSimulatorModal';
 import { LoginScreen } from './components/LoginScreen';
 import { ForgotPasswordScreen } from './components/ForgotPasswordScreen';
@@ -265,6 +266,7 @@ export default function App() {
           <EmployeesTab users={users} departments={departments} currentUser={currentUser} isSystemAdmin={me.isSystemAdmin} areas={me.areas} onRefresh={refreshAll} />
         )}
         {tab === 'areas' && <AreasTab onChanged={refreshAll} />}
+        {tab === 'audit' && <AuditLogTab />}
         {tab === 'hanet_config' && <HanetConfigTab isSystemAdmin={me.isSystemAdmin} onRefresh={fetchData} />}
       </main>
 

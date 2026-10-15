@@ -13,6 +13,7 @@ import {
   CalendarClock,
   FileSpreadsheet,
   UserRound,
+  ScrollText,
 } from 'lucide-react';
 
 import type { User } from '../types';
@@ -107,6 +108,12 @@ export const Navbar: React.FC<NavbarProps> = ({
       label: 'Khu vực',
       icon: MapPinned,
       visible: currentUser.role === 'hr',
+    },
+    {
+      id: 'audit',
+      label: 'Nhật ký',
+      icon: ScrollText,
+      visible: isManager,
     },
     {
       id: 'hanet_config',

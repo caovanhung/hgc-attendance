@@ -103,3 +103,25 @@ export const SYMBOL_STYLE: Record<string, string> = {
 export const SYMBOL_LEGEND = 'X đủ công · M đi muộn · S về sớm · MS muộn và về sớm · T thiếu giờ ra · CT công tác · P nghỉ phép · V vắng · L ngày lễ · * đã điều chỉnh';
 
 export const thisMonth = (): string => vnToday().slice(0, 7);
+
+export const AUDIT_ACTION_LABEL: Record<string, string> = {
+  'attendance.override': 'Điều chỉnh ngày công',
+  'attendance.override_remove': 'Bỏ điều chỉnh ngày công',
+  'request.approve': 'Duyệt đơn',
+  'request.reject': 'Từ chối đơn',
+  'user.role': 'Đổi vai trò',
+  'user.areas': 'Đổi khu được giao',
+  'user.status': 'Đổi trạng thái tài khoản',
+  'user.delete': 'Xóa tài khoản',
+  'shift.create': 'Thêm ca',
+  'shift.update': 'Sửa ca',
+  'shift.delete': 'Xóa ca',
+  'shift.assign': 'Gán ca',
+  'settings.work': 'Sửa ca mặc định / ngưỡng',
+  'holiday.add': 'Thêm ngày lễ',
+  'holiday.remove': 'Xóa ngày lễ',
+  'month.lock': 'Khóa sổ tháng',
+  'month.unlock': 'Mở khóa sổ tháng',
+  'auth.login': 'Đăng nhập',
+  'auth.login_failed': 'Đăng nhập thất bại',
+};
