@@ -1,4 +1,4 @@
-import type { DayStatus, SyncOp, SyncStatus, UserRole } from './types';
+import type { DayOverride, DayStatus, SyncOp, SyncStatus, User, UserRole } from './types';
 
 const VN_OFFSET_MS = 7 * 60 * 60 * 1000;
 
@@ -76,3 +76,13 @@ export function formatWorkDays(days: number[]): string {
   const consecutive = d.length >= 3 && d.every((n, i) => i === 0 || n === d[i - 1] + 1);
   return consecutive ? `${WEEKDAY_LABEL[d[0]]}–${WEEKDAY_LABEL[d[d.length - 1]]}` : d.map((n) => WEEKDAY_LABEL[n]).join(', ');
 }
+
+export const OVERRIDE_KIND_LABEL: Record<DayOverride['kind'], string> = { times: 'Sửa giờ', leave: 'Nghỉ phép', business_trip: 'Công tác' };
+
+/** HR toàn hệ thống và quản trị khu điều chỉnh được ngày công của người khác (server kiểm tra phạm vi). */
+export function canAdjust(viewer: User, targetUserId: string): boolean {
+  return (viewer.role === 'hr' || viewer.role === 'area_admin') && viewer.id !== targetUserId;
+}
+
+/** '2026-10-15' → '15/10/2026' */
+export const fmtDate = (date: string): string => date.split('-').reverse().join('/');

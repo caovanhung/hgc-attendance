@@ -245,6 +245,7 @@ export default function App() {
             setSelectedDept={setSelectedDept}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
+            onRefresh={fetchData}
           />
         )}
         {tab === 'requests' && <RequestsTab requests={requests} currentUser={currentUser} onRefresh={fetchData} />}

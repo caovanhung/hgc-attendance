@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { AlertCircle, Download, Eye, Lock, Search, Video } from 'lucide-react';
-import type { AttendanceDay, Department, Detection, User } from '../types';
-import { api, errorMessage } from '../api';
+import { AlertCircle, Download, Eye, Lock, Search } from 'lucide-react';
+import type { AttendanceDay, Department, User } from '../types';
 import { DAY_STATUS_LABEL, DAY_STATUS_STYLE, fmtTime } from '../format';
-import { Modal, inputCls } from './ui';
-import { VideoModal } from './VideoModal';
+import { inputCls } from './ui';
+import { DayDetailModal } from './DayDetailModal';
+import { OverrideBadge } from './OverrideBadge';
 
 interface AttendanceTableProps {
   records: AttendanceDay[];
@@ -16,9 +16,9 @@ interface AttendanceTableProps {
   setSelectedDept: (dept: string) => void;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
+  onRefresh: () => void;
 }
 
-const SOURCE_LABEL: Record<Detection['source'], string> = { webhook: 'Webhook', reconcile: 'Đối soát', simulator: 'Mô phỏng' };
 
 export const AttendanceTable: React.FC<AttendanceTableProps> = ({
   records,
@@ -30,20 +30,11 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
   setSelectedDept,
   searchQuery,
   setSearchQuery,
+  onRefresh,
 }) => {
-  const [detail, setDetail] = useState<{ day: AttendanceDay; detections: Detection[] | null; error: string | null } | null>(null);
-  const [videoOf, setVideoOf] = useState<Detection | null>(null);
+  const [detail, setDetail] = useState<AttendanceDay | null>(null);
   const role = currentUser.role;
 
-  const openDetail = async (day: AttendanceDay) => {
-    setDetail({ day, detections: null, error: null });
-    try {
-      const data = await api<{ detections: Detection[] }>(`/api/attendance/${day.userId}/${day.workDate}/detections`);
-      setDetail({ day, detections: data.detections, error: null });
-    } catch (err) {
-      setDetail({ day, detections: [], error: errorMessage(err) });
-    }
-  };
 
   const handleExportCSV = () => {
     const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
@@ -188,9 +179,14 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
                       <div className="text-[11px] text-sky-700 mt-0.5">Đang trong giờ làm</div>
                     )}
                     {r.lateExcused && <div className="text-[11px] text-emerald-700 mt-0.5">Đã duyệt giải trình</div>}
+                    {r.override && (
+                      <div className="mt-1">
+                        <OverrideBadge override={r.override} />
+                      </div>
+                    )}
                   </td>
                   <td className="py-3 px-4">
-                    <button onClick={() => openDetail(r)} className="text-xs text-brand-700 font-semibold hover:underline flex items-center gap-1 cursor-pointer">
+                    <button onClick={() => setDetail(r)} className="text-xs text-brand-700 font-semibold hover:underline flex items-center gap-1 cursor-pointer">
                       <Eye className="w-3 h-3" /> {r.detectionCount} lượt
                     </button>
                   </td>
@@ -202,42 +198,17 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
       </div>
 
       {detail && (
-        <Modal title={`${detail.day.employeeName} · ${detail.day.workDate.split('-').reverse().join('/')}`} onClose={() => setDetail(null)} wide>
-          {detail.error && <p className="text-rose-600 mb-2">{detail.error}</p>}
-          {detail.detections === null ? (
-            <p className="text-slate-500">Đang tải...</p>
-          ) : detail.detections.length === 0 ? (
-            <p className="text-slate-500">Không có lượt nhận diện (giờ công được bổ sung từ đơn).</p>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {detail.detections.map((d) => (
-                <div key={d.id} className="border border-slate-200 rounded-xl overflow-hidden">
-                  {d.imageUrl ? (
-                    <img src={d.imageUrl} alt="" className="w-full aspect-square object-cover bg-slate-100" />
-                  ) : (
-                    <div className="w-full aspect-square bg-slate-100 flex items-center justify-center text-slate-500">Không có ảnh</div>
-                  )}
-                  <div className="p-2">
-                    <div className="font-mono font-semibold">{fmtTime(d.ts)}</div>
-                    <div className="text-[11px] text-slate-500 truncate">{d.deviceName ?? d.deviceId}</div>
-                    <div className="text-[11px] text-slate-500">{SOURCE_LABEL[d.source]}</div>
-                    {d.hasVideo && (
-                      <button
-                        type="button"
-                        onClick={() => setVideoOf(d)}
-                        className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-brand-700 hover:underline cursor-pointer"
-                      >
-                        <Video className="w-3 h-3" /> Xem video lúc này
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Modal>
+        <DayDetailModal
+          userId={detail.userId}
+          userName={detail.employeeName}
+          date={detail.workDate}
+          day={detail}
+          currentUser={currentUser}
+          locked={false}
+          onClose={() => setDetail(null)}
+          onChanged={() => onRefresh()}
+        />
       )}
-      {videoOf && <VideoModal detection={videoOf} onClose={() => setVideoOf(null)} />}
     </div>
   );
 };
