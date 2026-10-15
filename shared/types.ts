@@ -392,3 +392,10 @@ export interface AuditLogEntry {
   after: unknown;
   reason: string | null;
 }
+
+/** Tháng đã khóa sổ. */
+export interface MonthLock {
+  month: string; // YYYY-MM
+  lockedByName: string;
+  lockedAt: string;
+}

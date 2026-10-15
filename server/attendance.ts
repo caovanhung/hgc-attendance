@@ -4,6 +4,7 @@ import type { Db } from './db';
 import { tx } from './db';
 import { effectiveShift, isWorkday, ruleFromSettings, type ShiftRule } from './shifts';
 import { SYSTEM_ADMIN_CODE } from './bootstrap';
+import { isMonthLocked } from './month-lock';
 
 export type DaySettings = ShiftRule;
 export const toDaySettings = ruleFromSettings;
@@ -122,10 +123,13 @@ function saveDay(db: Db, userId: string, workDate: string, adj: DayAdjustment, d
 }
 
 /**
- * Tính lại một ngày công (spec mục 6): đơn nghỉ/công tác đã duyệt > lượt quẹt/giờ chỉnh tay > vắng (ngày làm việc, đã qua giờ ra) > không có dòng.
+ * Tính lại một ngày công (spec mục 6): tháng đã khóa sổ ⇒ không ghi gì; đơn nghỉ/công tác đã duyệt > lượt quẹt/giờ chỉnh tay
+ * > vắng (ngày làm việc, đã qua giờ ra) > không có dòng.
  * Người không hoạt động, ADMIN, hoặc ngày trước ngày tạo tài khoản: không bao giờ vắng/nghỉ.
  */
 function writeDay(db: Db, userId: string, workDate: string, adj: DayAdjustment, now: number): void {
+  // Tháng đã khóa sổ: giữ nguyên ngày công (lượt quẹt vẫn lưu ở detections)
+  if (isMonthLocked(db, workDate)) return;
   const user = db.prepare('SELECT code, status, created_at FROM users WHERE id = ?').get(userId) as
     | { code: string; status: string; created_at: string }
     | undefined;

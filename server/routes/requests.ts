@@ -9,6 +9,7 @@ import { scopeFor, scopeWhere } from '../auth';
 import { areaFilterSql, deptAreaId, managesArea, notFound, parseAreaFilter } from '../access';
 import { applyDayAdjustment, recomputeUsers, type DayAdjustment } from '../attendance';
 import { daysBetween, isValidDate, parseHHmm, toVnDate, vnDateTimeToTs } from '../vntime';
+import { assertRangeUnlocked } from '../month-lock';
 import type { AttendanceRequest, RequestType } from '../../shared/types';
 
 const TYPES: RequestType[] = ['missed_punch', 'late_explanation', 'leave_request', 'business_trip'];
@@ -97,6 +98,7 @@ export function requestRoutes(ctx: AppContext): Router {
       suggestedOut = optionalTime(b.suggestedOut, 'Giờ ra đề xuất');
       if (!suggestedIn && !suggestedOut) throw new HttpError(400, 'Đơn quên quẹt cần ít nhất giờ vào hoặc giờ ra đề xuất');
     }
+    assertRangeUnlocked(db, b.workDate, endDate ?? b.workDate);
     const id = newId('req');
     db.prepare(
       `INSERT INTO requests(id, user_id, work_date, end_date, type, reason, suggested_in, suggested_out, status, created_at)
@@ -125,6 +127,7 @@ export function requestRoutes(ctx: AppContext): Router {
     const { status, comment } = req.body ?? {};
     if (status !== 'approved' && status !== 'rejected') throw new HttpError(400, 'Trạng thái duyệt không hợp lệ');
     if (target.status !== 'pending') throw new HttpError(409, 'Đơn đã được xử lý');
+    assertRangeUnlocked(db, target.workDate, target.endDate ?? target.workDate);
 
     tx(db, () => {
       db.prepare('UPDATE requests SET status = ?, comment = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ?').run(
