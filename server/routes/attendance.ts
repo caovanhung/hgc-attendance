@@ -1,22 +1,27 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import type { AppContext } from '../context';
 import { HttpError, ah } from '../errors';
 import { currentUser, requireRole } from '../middleware';
 import { canSeeUser, getUser, type Row } from '../repo';
 import { scopeFor, scopeWhere, type AuthUser } from '../auth';
-import { requireGlobalHr, areaColumnSql, areaFilterSql, cameraScopeSql, notFound, parseAreaFilter } from '../access';
-import { recomputeRange } from '../attendance';
-import { NOT_SYSTEM_ADMIN } from '../bootstrap';
+import { requireGlobalHr, areaColumnSql, areaFilterSql, cameraScopeSql, managesArea, notFound, parseAreaFilter } from '../access';
+import { recomputeDay, recomputeRange } from '../attendance';
+import { tx } from '../db';
+import { actorOf, personLabel, writeAudit } from '../audit';
+import { isMonthLocked, lockedError } from '../month-lock';
+import { OVERRIDE_KINDS, parseReason, readOverride } from '../overrides';
+import { NOT_SYSTEM_ADMIN, SYSTEM_ADMIN_CODE } from '../bootstrap';
 import { getVideoAt } from '../hanet-connect';
 import { effectiveShift, isWorkday } from '../shifts';
-import { daysBetween, isValidDate, toVnDate } from '../vntime';
-import type { AttendanceDay, Detection, DetectionVideo, StatsData, StatsDetailRow, StatsDetailType } from '../../shared/types';
+import { daysBetween, isValidDate, toVnDate, vnDateTimeToTs } from '../vntime';
+import type { AttendanceDay, Detection, User, DetectionVideo, StatsData, StatsDetailRow, StatsDetailType } from '../../shared/types';
 
-const DAY_SELECT = `SELECT a.*, u.code AS employee_code, u.name AS employee_name, u.avatar_url, u.department_id,
-  d.name AS department_name
-  FROM attendance_days a JOIN users u ON u.id = a.user_id LEFT JOIN departments d ON d.id = u.department_id`;
+export const DAY_SELECT = `SELECT a.*, u.code AS employee_code, u.name AS employee_name, u.avatar_url, u.department_id,
+  d.name AS department_name, o.kind AS ov_kind, o.reason AS ov_reason, o.created_by_label AS ov_by, o.created_at AS ov_at
+  FROM attendance_days a JOIN users u ON u.id = a.user_id LEFT JOIN departments d ON d.id = u.department_id
+  LEFT JOIN attendance_overrides o ON o.user_id = a.user_id AND o.work_date = a.work_date`;
 
-function mapDay(r: Row): AttendanceDay {
+export function mapDay(r: Row): AttendanceDay {
   return {
     userId: r.user_id,
     employeeCode: r.employee_code,
@@ -36,6 +41,7 @@ function mapDay(r: Row): AttendanceDay {
     manualIn: r.manual_in ?? null,
     manualOut: r.manual_out ?? null,
     detectionCount: r.detection_count,
+    override: r.ov_kind ? { kind: r.ov_kind, reason: r.ov_reason, byName: r.ov_by, at: r.ov_at } : null,
   };
 }
 
@@ -143,6 +149,109 @@ export function attendanceRoutes(ctx: AppContext): Router {
       res.json(body);
     }),
   );
+
+  /** Kiểm tra chung cho điều chỉnh (spec đợt C §7), theo đúng thứ tự mã lỗi. */
+  const overrideTarget = (req: Request): { target: User; date: string } => {
+    const actor = currentUser(req);
+    if (actor.role !== 'hr' && actor.role !== 'area_admin') throw new HttpError(403, 'Bạn không có quyền điều chỉnh ngày công');
+    const target = getUser(db, req.params.userId);
+    if (!target || !managesArea(actor, target.areaId)) throw notFound('nhân sự');
+    if (target.id === actor.id) throw new HttpError(403, 'Không thể tự điều chỉnh ngày công của mình');
+    if (target.code === SYSTEM_ADMIN_CODE) throw new HttpError(400, 'Tài khoản quản trị hệ thống không chấm công');
+    const date = req.params.date;
+    if (!isValidDate(date)) throw new HttpError(400, 'Ngày không hợp lệ (định dạng YYYY-MM-DD)');
+    if (date > toVnDate(ctx.now())) throw new HttpError(400, 'Không điều chỉnh ngày trong tương lai');
+    if (date < target.createdAt.slice(0, 10)) throw new HttpError(400, 'Ngày này trước khi tạo tài khoản nhân sự');
+    return { target, date };
+  };
+
+  const dayOf = (userId: string, date: string): AttendanceDay | null => {
+    const row = db.prepare(`${DAY_SELECT} WHERE a.user_id = ? AND a.work_date = ?`).get(userId, date) as Row | undefined;
+    return row ? mapDay(row) : null;
+  };
+  const snapshot = (d: AttendanceDay | null) => (d ? { firstIn: d.firstIn, lastOut: d.lastOut, status: d.status } : null);
+
+  r.put('/attendance/:userId/:date/adjustment', (req, res) => {
+    const { target, date } = overrideTarget(req);
+    const b = req.body ?? {};
+    if (!OVERRIDE_KINDS.includes(b.kind)) throw new HttpError(400, 'Kiểu điều chỉnh không hợp lệ');
+    const reason = parseReason(b.reason);
+    let firstIn: number | null = null;
+    let lastOut: number | null = null;
+    if (b.kind === 'times') {
+      const time = (v: unknown, label: string): number | null => {
+        if (v === undefined || v === null || v === '') return null;
+        try {
+          return vnDateTimeToTs(date, String(v));
+        } catch {
+          throw new HttpError(400, `${label} không hợp lệ (định dạng HH:mm)`);
+        }
+      };
+      firstIn = time(b.firstIn, 'Giờ vào');
+      lastOut = time(b.lastOut, 'Giờ ra');
+      if (firstIn === null && lastOut === null) throw new HttpError(400, 'Hãy nhập giờ vào hoặc giờ ra');
+    }
+    const hasRow = Boolean(db.prepare('SELECT 1 FROM attendance_days WHERE user_id = ? AND work_date = ?').get(target.id, date));
+    if (!hasRow && !isWorkday(db, effectiveShift(db, target.id), date)) throw new HttpError(400, 'Ngày này không phải ngày làm việc của nhân sự');
+    if (isMonthLocked(db, date)) throw lockedError(date.slice(0, 7));
+    const a = actorOf(req);
+    const day = tx(db, () => {
+      const before = dayOf(target.id, date);
+      db.prepare(
+        `INSERT INTO attendance_overrides(user_id, work_date, kind, first_in, last_out, reason, created_by, created_by_label, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, work_date) DO UPDATE SET kind = excluded.kind, first_in = excluded.first_in, last_out = excluded.last_out,
+           reason = excluded.reason, created_by = excluded.created_by, created_by_label = excluded.created_by_label, created_at = excluded.created_at`,
+      ).run(target.id, date, b.kind, firstIn, lastOut, reason, a.actorId, a.actorLabel, new Date(ctx.now()).toISOString());
+      recomputeDay(db, target.id, date, ctx.now());
+      const after = dayOf(target.id, date);
+      // Kiểm tra trên giờ hiệu lực (giờ sửa + giờ tự tính còn lại); sai thì rollback cả điều chỉnh
+      if (b.kind === 'times') {
+        if (!after || after.firstIn === null) throw new HttpError(400, 'Ngày này chưa có giờ vào: hãy nhập giờ vào');
+        if (after.lastOut !== null && after.lastOut <= after.firstIn) throw new HttpError(400, 'Giờ ra phải sau giờ vào');
+      }
+      writeAudit(db, ctx.now(), {
+        ...a,
+        action: 'attendance.override',
+        targetUserId: target.id,
+        targetLabel: personLabel(target.name, target.code),
+        areaId: target.areaId,
+        workDate: date,
+        before: snapshot(before),
+        after: { ...snapshot(after), kind: b.kind },
+        reason,
+      });
+      return after;
+    });
+    res.json({ day });
+  });
+
+  r.delete('/attendance/:userId/:date/adjustment', (req, res) => {
+    const { target, date } = overrideTarget(req);
+    const reason = parseReason((req.body ?? {}).reason);
+    if (!readOverride(db, target.id, date)) throw new HttpError(404, 'Ngày này chưa được điều chỉnh');
+    if (isMonthLocked(db, date)) throw lockedError(date.slice(0, 7));
+    const a = actorOf(req);
+    const day = tx(db, () => {
+      const before = dayOf(target.id, date);
+      db.prepare('DELETE FROM attendance_overrides WHERE user_id = ? AND work_date = ?').run(target.id, date);
+      recomputeDay(db, target.id, date, ctx.now());
+      const after = dayOf(target.id, date);
+      writeAudit(db, ctx.now(), {
+        ...a,
+        action: 'attendance.override_remove',
+        targetUserId: target.id,
+        targetLabel: personLabel(target.name, target.code),
+        areaId: target.areaId,
+        workDate: date,
+        before: snapshot(before),
+        after: snapshot(after),
+        reason,
+      });
+      return after;
+    });
+    res.json({ day });
+  });
 
   r.post('/attendance/recompute', requireGlobalHr, (req, res) => {
     const { from, to } = req.body ?? {};

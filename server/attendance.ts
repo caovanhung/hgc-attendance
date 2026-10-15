@@ -5,6 +5,7 @@ import { tx } from './db';
 import { effectiveShift, isWorkday, ruleFromSettings, type ShiftRule } from './shifts';
 import { SYSTEM_ADMIN_CODE } from './bootstrap';
 import { isMonthLocked } from './month-lock';
+import { readOverride } from './overrides';
 
 export type DaySettings = ShiftRule;
 export const toDaySettings = ruleFromSettings;
@@ -123,7 +124,8 @@ function saveDay(db: Db, userId: string, workDate: string, adj: DayAdjustment, d
 }
 
 /**
- * Tính lại một ngày công (spec mục 6): tháng đã khóa sổ ⇒ không ghi gì; đơn nghỉ/công tác đã duyệt > lượt quẹt/giờ chỉnh tay
+ * Tính lại một ngày công (spec mục 6, đợt C §7): tháng đã khóa sổ ⇒ không ghi gì; điều chỉnh phép/công tác
+ * > đơn nghỉ/công tác đã duyệt (bỏ qua khi có điều chỉnh giờ) > lượt quẹt/giờ chỉnh tay/giờ điều chỉnh
  * > vắng (ngày làm việc, đã qua giờ ra) > không có dòng.
  * Người không hoạt động, ADMIN, hoặc ngày trước ngày tạo tài khoản: không bao giờ vắng/nghỉ.
  */
@@ -141,16 +143,19 @@ function writeDay(db: Db, userId: string, workDate: string, adj: DayAdjustment, 
   const detections = db
     .prepare(`SELECT ts FROM detections WHERE user_id = ? AND work_date = ?${simulatorFilter()}`)
     .all(userId, workDate) as { ts: number }[];
+  const ov = readOverride(db, userId, workDate);
+  const times = ov?.kind === 'times' ? ov : null;
   const computed = computeDay({
     detectionTs: detections.map((d) => d.ts),
     settings: rule,
     lateExcused: adj.lateExcused,
-    manualIn: adj.manualIn,
-    manualOut: adj.manualOut,
+    manualIn: times?.firstIn ?? adj.manualIn,
+    manualOut: times?.lastOut ?? adj.manualOut,
     closed,
   });
 
-  const leave = eligible && workday ? approvedLeaveType(db, userId, workDate) : null;
+  // Điều chỉnh trực tiếp thắng mọi nguồn khác: phép/công tác cả ngày, hoặc giờ sửa (bỏ qua đơn nghỉ)
+  const leave = ov && ov.kind !== 'times' ? ov.kind : !ov && eligible && workday ? approvedLeaveType(db, userId, workDate) : null;
   if (leave) {
     saveDay(db, userId, workDate, adj, {
       firstIn: computed?.firstIn ?? null,

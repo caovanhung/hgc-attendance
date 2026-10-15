@@ -97,6 +97,14 @@ export interface AttendanceDay {
   manualIn: number | null;
   manualOut: number | null;
   detectionCount: number;
+  override: DayOverride | null; // điều chỉnh trực tiếp của HR / quản trị khu (đợt C)
+}
+
+export interface DayOverride {
+  kind: 'times' | 'leave' | 'business_trip';
+  reason: string;
+  byName: string;
+  at: string;
 }
 
 export interface Detection {
