@@ -3283,7 +3283,9 @@ function userRoutes(ctx) {
     ).all(target.id, now - SIGHTING_TTL_MS);
     const body = {
       detections: rows.map((d) => ({ id: d.id, ts: d.ts, imageUrl: d.image_url, deviceName: d.device_name ?? d.device_id })),
-      strangers: listSightings(db, now, "stranger").filter((s) => managesArea(actor, deviceAreaId(db, s.deviceId)))
+      strangers: listSightings(db, now, "stranger").filter((s) => managesArea(actor, deviceAreaId(db, s.deviceId))),
+      // Người chưa liên kết: khuôn mặt có thể đã đăng ký sẵn trên Camera AI (camera báo "đã biết", không phải người lạ)
+      unlinked: target.hanetPersonId ? [] : listSightings(db, now, "unlinked").filter((s) => managesArea(actor, deviceAreaId(db, s.deviceId)))
     };
     res.json(body);
   });
