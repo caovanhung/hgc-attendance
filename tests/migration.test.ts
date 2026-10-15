@@ -41,11 +41,49 @@ function makeV3(extra?: (raw: InstanceType<typeof DatabaseSync>) => void): { fil
 const cols = (db: { prepare: (s: string) => { all: () => unknown[] } }, t: string) =>
   (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string; notnull: number }[]).map((c) => `${c.name}:${c.notnull}`).sort();
 
-test('nâng cấp v3 → v4: giữ nguyên dữ liệu, thêm bảng/cột, sao lưu trước, mở lại không nâng cấp lại', () => {
+const V4 = fs.readFileSync(path.join(import.meta.dirname, 'fixtures', 'schema-v4.sql'), 'utf8');
+
+/** File DB v4 có dữ liệu mẫu. */
+function makeV4(): { file: string; backupDir: string } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hgc-mig4-'));
+  const file = path.join(dir, 'attendance.db');
+  const raw = new DatabaseSync(file);
+  raw.exec(V4);
+  raw.exec(`
+    INSERT INTO schema_version(version) VALUES (4);
+    INSERT INTO areas(id, code, name, created_at) VALUES ('ar1', 'KV01', 'Trụ sở', '2026-10-01');
+    INSERT INTO departments(id, code, name, area_id, created_at) VALUES ('d1', 'PB001', 'Kế toán', 'ar1', '2026-10-01');
+    INSERT INTO users(id, code, name, email, role, department_id, status, password_hash, created_at)
+      VALUES ('u1', 'NV0001', 'Nguyễn Văn An', 'an@test.vn', 'employee', 'd1', 'active', 'scrypt$x$y', '2026-10-01');
+    INSERT INTO attendance_days(user_id, work_date, first_in, last_out, late_minutes, early_minutes, status, final, detection_count)
+      VALUES ('u1', '2026-10-13', 1791853200000, NULL, 0, 0, 'absent', 1, 0);
+    INSERT INTO holidays(date, name) VALUES ('2026-09-02', 'Quốc khánh');
+  `);
+  raw.close();
+  return { file, backupDir: path.join(dir, 'backups') };
+}
+
+test('nâng cấp v4 → v5: giữ dữ liệu, thêm 3 bảng, sao lưu attendance-pre-migrate-v4.db', () => {
+  const { file, backupDir } = makeV4();
+  const db = openDb(file, { backupDir, now: () => NOW });
+  assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, SCHEMA_VERSION);
+  const count = (t: string) => (db.prepare(`SELECT COUNT(*) AS c FROM ${t}`).get() as { c: number }).c;
+  assert.deepEqual(['areas', 'departments', 'users', 'attendance_days', 'holidays'].map(count), [1, 1, 1, 1, 1]);
+  for (const t of ['attendance_overrides', 'audit_logs', 'month_locks']) assert.equal(count(t), 0);
+  assert.deepEqual(cols(db, 'attendance_overrides'), [
+    'created_at:1', 'created_by:1', 'created_by_label:1', 'first_in:0', 'kind:1', 'last_out:0', 'reason:1', 'user_id:1', 'work_date:1',
+  ]);
+  assert.deepEqual(cols(db, 'month_locks'), ['locked_at:1', 'locked_by:1', 'locked_by_label:1', 'month:0']);
+  assert.ok(cols(db, 'audit_logs').includes('before_json:0'));
+  assert.deepEqual(fs.readdirSync(backupDir), ['attendance-pre-migrate-v4.db']);
+  db.close();
+});
+
+test('nâng cấp v3 → v5 (qua v4): giữ nguyên dữ liệu, thêm bảng/cột, sao lưu trước, mở lại không nâng cấp lại', () => {
   const { file, backupDir } = makeV3();
   const db = openDb(file, { backupDir, now: () => NOW });
-  assert.equal(SCHEMA_VERSION, 4);
-  assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 4);
+  assert.equal(SCHEMA_VERSION, 5);
+  assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, SCHEMA_VERSION);
   const count = (t: string) => (db.prepare(`SELECT COUNT(*) AS c FROM ${t}`).get() as { c: number }).c;
   assert.deepEqual(['areas', 'departments', 'users', 'detections', 'attendance_days', 'requests', 'email_jobs'].map(count), [1, 1, 1, 1, 2, 1, 1]);
   const days = db.prepare('SELECT work_date, status, early_arrival_minutes, final FROM attendance_days ORDER BY work_date').all() as Record<string, unknown>[];
@@ -64,11 +102,11 @@ test('nâng cấp v3 → v4: giữ nguyên dữ liệu, thêm bảng/cột, sao 
   assert.equal(fs.readdirSync(backupDir).length, 1, 'mở lại không sao lưu/nâng cấp lại');
 });
 
-test('bảng sau nâng cấp có cùng cột như DB v4 tạo mới', () => {
+test('bảng sau nâng cấp có cùng cột như DB tạo mới', () => {
   const { file, backupDir } = makeV3();
   const migrated = openDb(file, { backupDir, now: () => NOW });
   const fresh = openDb(':memory:');
-  for (const t of ['attendance_days', 'requests', 'users', 'departments', 'shifts', 'holidays']) {
+  for (const t of ['attendance_days', 'requests', 'users', 'departments', 'shifts', 'holidays', 'attendance_overrides', 'audit_logs', 'month_locks']) {
     assert.deepEqual(cols(migrated, t), cols(fresh, t), t);
   }
   // ràng buộc mới có hiệu lực
@@ -82,7 +120,7 @@ test('nâng cấp lỗi (dữ liệu khóa ngoại hỏng) ⇒ hoàn tác, DB gi
   });
   assert.throws(
     () => openDb(file, { backupDir, now: () => NOW }),
-    (e: unknown) => e instanceof MigrationError && /\[MIGRATE\] Nâng cấp v3 → v4 thất bại/.test(e.message) && e.backup !== null,
+    (e: unknown) => e instanceof MigrationError && /\[MIGRATE\] Nâng cấp v3 → v5 thất bại/.test(e.message) && e.backup !== null,
   );
   const raw = new DatabaseSync(file);
   assert.equal((raw.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 3);
@@ -117,15 +155,15 @@ test('nâng cấp lỗi hai lần ⇒ vẫn một file sao lưu pre-migrate, đ�
   assert.deepEqual(fs.readdirSync(backupDir), ['attendance-pre-migrate-v3.db'], 'một file, không còn .tmp');
 });
 
-test('DB phiên bản mới hơn (v5) ⇒ SchemaTooNewError, không đụng vào', () => {
+test('DB phiên bản mới hơn (v6) ⇒ SchemaTooNewError, không đụng vào', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hgc-mig-'));
   const file = path.join(dir, 'attendance.db');
   const raw = new DatabaseSync(file);
-  raw.exec('CREATE TABLE schema_version (version INTEGER NOT NULL); INSERT INTO schema_version VALUES (5);');
+  raw.exec('CREATE TABLE schema_version (version INTEGER NOT NULL); INSERT INTO schema_version VALUES (6);');
   raw.close();
   assert.throws(
     () => openDb(file),
-    (e: unknown) => e instanceof SchemaTooNewError && e.message === '[STARTUP] Database được tạo bởi phiên bản mới hơn (v5). Hãy cập nhật code.',
+    (e: unknown) => e instanceof SchemaTooNewError && e.message === '[STARTUP] Database được tạo bởi phiên bản mới hơn (v6). Hãy cập nhật code.',
   );
 });
 
@@ -146,10 +184,10 @@ test('MIGRATE_ONLY=1: chạy thử nâng cấp trên bản sao DB_FILE rồi tho
   const { file } = makeV3();
   const r = runServer({ MIGRATE_ONLY: '1', DB_FILE: file });
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /\[MIGRATE\] Chạy thử xong: database v4/);
+  assert.match(r.stdout, /\[MIGRATE\] Chạy thử xong: database v5/);
   assert.ok(fs.existsSync(path.join(path.dirname(file), 'backups', 'attendance-pre-migrate-v3.db')), 'sao lưu cạnh file DB');
   const raw = new DatabaseSync(file);
-  assert.equal((raw.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 4);
+  assert.equal((raw.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 5);
   raw.close();
 });
 

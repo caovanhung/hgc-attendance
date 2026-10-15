@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 const ine = (b: boolean) => (b ? 'IF NOT EXISTS ' : '');
 
@@ -59,6 +59,52 @@ export function ddlAttendanceDays(name: string, ifNotExists: boolean): string {
   manual_out INTEGER,
   detection_count INTEGER NOT NULL,
   PRIMARY KEY (user_id, work_date)
+);`;
+}
+
+export function ddlOverrides(ifNotExists: boolean): string {
+  return `CREATE TABLE ${ine(ifNotExists)}attendance_overrides (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  work_date TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('times', 'leave', 'business_trip')),
+  first_in INTEGER,
+  last_out INTEGER,
+  reason TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_by_label TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, work_date),
+  CHECK (kind != 'times' OR first_in IS NOT NULL OR last_out IS NOT NULL)
+);`;
+}
+
+export function ddlAuditLogs(ifNotExists: boolean): string {
+  return `CREATE TABLE ${ine(ifNotExists)}audit_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at TEXT NOT NULL,
+  actor_id TEXT,
+  actor_label TEXT NOT NULL,
+  ip TEXT,
+  action TEXT NOT NULL,
+  target_user_id TEXT,
+  target_label TEXT,
+  area_id TEXT,
+  work_date TEXT,
+  before_json TEXT,
+  after_json TEXT,
+  reason TEXT
+);
+CREATE INDEX ${ine(ifNotExists)}idx_audit_at ON audit_logs(at);
+CREATE INDEX ${ine(ifNotExists)}idx_audit_target ON audit_logs(target_user_id);
+CREATE INDEX ${ine(ifNotExists)}idx_audit_area ON audit_logs(area_id);`;
+}
+
+export function ddlMonthLocks(ifNotExists: boolean): string {
+  return `CREATE TABLE ${ine(ifNotExists)}month_locks (
+  month TEXT PRIMARY KEY,
+  locked_by TEXT NOT NULL,
+  locked_by_label TEXT NOT NULL,
+  locked_at TEXT NOT NULL
 );`;
 }
 
@@ -164,6 +210,12 @@ CREATE INDEX IF NOT EXISTS idx_attendance_days_date ON attendance_days(work_date
 
 ${ddlRequests('requests', true)}
 CREATE INDEX IF NOT EXISTS idx_requests_user ON requests(user_id);
+
+${ddlOverrides(true)}
+
+${ddlAuditLogs(true)}
+
+${ddlMonthLocks(true)}
 
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,

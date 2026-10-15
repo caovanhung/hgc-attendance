@@ -76,6 +76,28 @@ pm2 logs hanet-attendance --lines 20              # thấy dòng [BOOTSTRAP] Đ�
 
 Sau đó đăng nhập `ADMIN` / `Admin@123`, đổi mật khẩu, rồi tạo lại phòng ban, nhân sự (mỗi người nhận mật khẩu tạm từ HR) và camera. Cập nhật URL webhook mới (có token) trên Hanet theo phần dưới.
 
+## Nâng cấp lên bản đợt C (database v5)
+
+Bản này **tự nâng cấp database v4 lên v5 và giữ nguyên dữ liệu** (chỉ thêm bảng điều chỉnh, nhật ký, khóa sổ). Server tự sao lưu vào `data/backups/attendance-pre-migrate-v4.db`. **Không xóa database.**
+
+```bash
+cd /home/ubuntu/hgc-attendance
+git rev-parse --short HEAD          # ghi lại để quay về khi cần
+pm2 stop hanet-attendance
+mkdir -p ~/hgc-backup && cp data/attendance.db* ~/hgc-backup/
+git pull && npm ci --omit=dev
+rm -f /tmp/try-v5.db /tmp/try-v5.db-wal /tmp/try-v5.db-shm
+cp data/attendance.db /tmp/try-v5.db; cp data/attendance.db-wal /tmp/try-v5.db-wal 2>/dev/null; cp data/attendance.db-shm /tmp/try-v5.db-shm 2>/dev/null
+MIGRATE_ONLY=1 DB_FILE=/tmp/try-v5.db NODE_ENV=production node server.js
+# Phải thấy: [MIGRATE] Chạy thử xong: database v5 — chỉ khi đó mới chạy tiếp
+pm2 restart hanet-attendance
+pm2 logs hanet-attendance --lines 20 --nostream    # thấy: [MIGRATE] v4 → v5 xong (sao lưu: attendance-pre-migrate-v4.db)
+```
+
+Nếu thất bại: xử lý như mục v4 bên dưới (`pm2 stop`, quay về commit cũ, gửi log).
+
+Sau khi nâng cấp: tab **Báo cáo tháng** xuất Excel; tab **Nhật ký** xem thao tác; cuối tháng HR bấm **Khóa sổ tháng** sau khi đã gửi file cho kế toán.
+
 ## Nâng cấp lên bản ca làm việc (database v4)
 
 Bản này **tự nâng cấp database v3 lên v4 và giữ nguyên dữ liệu** (khu vực, phòng ban, nhân sự, ngày công, đơn). Server tự sao lưu trước khi nâng cấp vào `data/backups/attendance-pre-migrate-v3.db` (mỗi lần khởi động nâng cấp đều làm mới file này; file này không bao giờ bị tự xóa). **Không xóa database.**

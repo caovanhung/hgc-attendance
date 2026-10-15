@@ -1,6 +1,6 @@
 import type { Db } from './db';
 import { backupPreMigrate } from './backup';
-import { ddlAttendanceDays, ddlHolidays, ddlRequests, ddlShifts, SCHEMA_VERSION } from './schema';
+import { ddlAttendanceDays, ddlAuditLogs, ddlHolidays, ddlMonthLocks, ddlOverrides, ddlRequests, ddlShifts, SCHEMA_VERSION } from './schema';
 import { toVnDate } from './vntime';
 
 export const MIN_MIGRATABLE_VERSION = 3;
@@ -47,7 +47,17 @@ function migrate3to4(db: Db, now: number): void {
   db.exec(`INSERT OR IGNORE INTO settings(key, value) VALUES ('work_days', '1,2,3,4,5'), ('early_arrival_minutes', '15'), ('early_leave_minutes', '10')`);
 }
 
-export const MIGRATIONS: Migration[] = [{ from: 3, run: migrate3to4 }];
+/** v4 → v5: điều chỉnh ngày công, nhật ký kiểm toán, khóa sổ tháng (chỉ thêm bảng, không đụng dữ liệu cũ). */
+function migrate4to5(db: Db): void {
+  db.exec(ddlOverrides(false));
+  db.exec(ddlAuditLogs(false));
+  db.exec(ddlMonthLocks(false));
+}
+
+export const MIGRATIONS: Migration[] = [
+  { from: 3, run: migrate3to4 },
+  { from: 4, run: migrate4to5 },
+];
 
 /**
  * Nâng cấp từ `from` lên SCHEMA_VERSION trong một giao dịch (sao lưu file trước). Lỗi ⇒ hoàn tác, DB giữ nguyên.

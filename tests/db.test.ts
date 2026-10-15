@@ -67,8 +67,9 @@ test('schema v4: bảng ca, ngày lễ, cột shift_id, early_arrival_minutes, f
   for (const c of ['early_arrival_minutes', 'final']) assert.ok(cols('attendance_days').includes(c), `attendance_days thiếu ${c}`);
   for (const c of ['end_date']) assert.ok(cols('requests').includes(c), `requests thiếu ${c}`);
   for (const t of ['sync_jobs', 'face_sightings', 'shifts', 'holidays']) assert.ok(cols(t).length > 0, `thiếu bảng ${t}`);
-  assert.equal(SCHEMA_VERSION, 4);
-  assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 4);
+  for (const t of ['attendance_overrides', 'audit_logs', 'month_locks']) assert.ok(cols(t).length > 0, `thiếu bảng ${t}`);
+  assert.equal(SCHEMA_VERSION, 5);
+  assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 5);
 });
 
 test('schema v3: vai trò area_admin hợp lệ, email không trùng (không phân biệt hoa thường), khu còn phòng ban thì không xóa được', () => {
