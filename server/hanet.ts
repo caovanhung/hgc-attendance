@@ -64,8 +64,11 @@ export function parseCheckin(body: unknown, now: number): { input: CheckinInput;
 
 export const STRANGER_MESSAGE = 'Người lạ';
 
+/** personType của người lạ trong webhook Camera AI (đã thấy cả 2 và 3 từ camera thật). */
+const STRANGER_TYPES = new Set([2, 3]);
+
 /**
- * Người lạ (personType 2): không có personID/aliasID nên parseCheckin trả null,
+ * Người lạ (personType 2, hoặc 3 khi camera gửi ảnh cảnh báo người lạ): không có personID/aliasID nên parseCheckin trả null,
  * nhưng có ảnh để HR chọn đăng ký FaceID. Trả null nếu không phải người lạ có ảnh.
  */
 export function parseStranger(body: unknown, now: number): { deviceId: string; deviceName: string | null; ts: number; imageUrl: string } | null {
@@ -74,7 +77,7 @@ export function parseStranger(body: unknown, now: number): { deviceId: string; d
   const d = (b.data && typeof b.data === 'object' ? b.data : b) as Record<string, unknown>;
   const deviceId = str(d.deviceID);
   const imageUrl = str(d.detected_image_url);
-  if (num(d.personType) !== 2 || !deviceId || !imageUrl) return null;
+  if (!STRANGER_TYPES.has(num(d.personType) ?? -1) || !deviceId || !imageUrl) return null;
   return { deviceId, deviceName: str(d.deviceName), ts: normalizeTs(num(d.time), now).ts, imageUrl };
 }
 

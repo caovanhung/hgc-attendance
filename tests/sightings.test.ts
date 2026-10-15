@@ -34,6 +34,27 @@ test('webhook người lạ có ảnh → lưu sighting stranger, nhật ký ghi
   }
 });
 
+// Payload người lạ thật từ camera C21271C257 (15/10/2026): personType 3, ảnh trong thư mục alarm
+const STRANGER_ALARM = {
+  action_type: 'update', aliasID: '', data: '', data_type: 'log', date: '2026-10-15 14:41:42',
+  detected_image_url: 'https://vcdn-z-image.hanet.ai/hanet-camera-image/alarm/upload/C21271C257/2026/10/15/de266315-c86b-11f1-ab37-ee54d8ec2954.jpg',
+  deviceID: 'C21271C257', deviceName: 'VP CS2 (Hà Đông)', hash: 'ef8031380797883df9ccf60df06f1fce', id: 'ac50f481-1fd2-42f4-837e-4a77df20708f',
+  keycode: '', mask: '0', personID: '', personName: '', personTitle: '', personType: '3', placeID: '998833', placeName: 'HRINTER', temp: 0,
+  time: 1792050102000,
+};
+
+test('webhook người lạ personType 3 (ảnh cảnh báo) → cũng lưu sighting stranger để chọn đăng ký FaceID', async () => {
+  const { app, url, hook } = await setup();
+  try {
+    assert.equal((await hook.post(url, STRANGER_ALARM)).status, 200);
+    assert.deepEqual({ ...lastLog(app.db) }, { status: 'ignored', message: 'Người lạ' });
+    const row = app.db.prepare('SELECT kind, device_id, image_url FROM face_sightings').get() as Record<string, unknown>;
+    assert.deepEqual({ ...row }, { kind: 'stranger', device_id: 'C21271C257', image_url: STRANGER_ALARM.detected_image_url });
+  } finally {
+    await app.close();
+  }
+});
+
 test('người lạ không có ảnh → không lưu sighting, nhật ký như cũ', async () => {
   const { app, url, hook } = await setup();
   try {
