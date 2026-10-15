@@ -222,7 +222,7 @@ export default function App() {
         extra={<AreaSelect me={me} value={activeArea} onChange={setArea} />}
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
           {loadError ? (
             <span className="flex items-center gap-1.5 text-rose-600">

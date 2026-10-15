@@ -100,14 +100,14 @@ export const RequestsTab: React.FC<RequestsTabProps> = ({ requests, currentUser,
                         <button
                           disabled={busyId === req.id}
                           onClick={() => review(req.id, 'approved')}
-                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
                         >
                           <CheckCircle className="w-3.5 h-3.5" /> Duyệt
                         </button>
                         <button
                           disabled={busyId === req.id}
                           onClick={() => review(req.id, 'rejected')}
-                          className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold border border-rose-200 flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                          className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold border border-rose-200 flex items-center gap-1 cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
                         >
                           <XCircle className="w-3.5 h-3.5" /> Từ chối
                         </button>

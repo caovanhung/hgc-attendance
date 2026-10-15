@@ -81,27 +81,31 @@ export const MonthlyReportTab: React.FC<{ me: MeResponse; departments: Departmen
             {report?.scopeLabel ?? '…'} · Ngày công = đi làm + công tác; tỷ lệ chuyên cần = (ngày công + nghỉ phép) / ngày phải làm.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <input type="month" className={`${inputCls} w-auto!`} value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} />
-          {managerView && (
-            <select className={`${inputCls} w-auto!`} value={department} onChange={(e) => setDepartment(e.target.value)}>
-              <option value="">Tất cả phòng ban</option>
-              {departments.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-          )}
-          <a href={`/api/reports/monthly.xlsx?${query}`} className={primaryBtn}>
-            <Download className="w-4 h-4" /> Xuất Excel
-          </a>
-          {user.role === 'hr' && report && (
-            <button type="button" className={secondaryBtn} onClick={() => setConfirm(report.lock ? 'unlock' : 'lock')}>
-              {report.lock ? <LockOpen className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
-              {report.lock ? 'Mở khóa sổ' : 'Khóa sổ tháng'}
-            </button>
-          )}
+        <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 w-full lg:w-auto">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <input type="month" className={`${inputCls} w-full sm:w-auto!`} value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} />
+            {managerView && (
+              <select className={`${inputCls} w-full sm:w-auto!`} value={department} onChange={(e) => setDepartment(e.target.value)}>
+                <option value="">Tất cả phòng ban</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <a href={`/api/reports/monthly.xlsx?${query}`} className={`${primaryBtn} flex-1 sm:flex-none justify-center whitespace-nowrap`}>
+              <Download className="w-4 h-4" /> Xuất Excel
+            </a>
+            {user.role === 'hr' && report && (
+              <button type="button" className={`${secondaryBtn} flex-1 sm:flex-none justify-center whitespace-nowrap`} onClick={() => setConfirm(report.lock ? 'unlock' : 'lock')}>
+                {report.lock ? <LockOpen className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+                {report.lock ? 'Mở khóa sổ' : 'Khóa sổ tháng'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

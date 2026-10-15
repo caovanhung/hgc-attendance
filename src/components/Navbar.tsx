@@ -130,23 +130,23 @@ export const Navbar: React.FC<NavbarProps> = ({
   ];
 
   const iconButtonClass =
-    'inline-flex size-9 shrink-0 items-center justify-center rounded-lg ' +
+    'inline-flex size-8 sm:size-9 shrink-0 items-center justify-center rounded-lg ' +
     'border border-border bg-surface text-text-secondary ' +
     'transition-colors hover:bg-surface-muted hover:text-text-primary ' +
     'focus-visible:outline-2 focus-visible:outline-brand-600';
 
   return (
     <header className="sticky top-0 z-40 border-b border-border border-t-4 border-t-brand-500 bg-surface/95 shadow-[0_1px_3px_rgb(15_23_42/4%)] backdrop-blur-md">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl px-3 sm:px-6 lg:px-8">
         {/* Brand and account toolbar */}
-        <div className="flex min-h-16 items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex size-9 sm:size-10 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-brand-500 to-brand-700 text-white shadow-sm shadow-brand-600/30">
-              <Camera className="size-5" strokeWidth={2} />
+        <div className="flex min-h-14 sm:min-h-16 items-center justify-between gap-2 sm:gap-3">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+            <div className="flex size-8 sm:size-10 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-brand-500 to-brand-700 text-white shadow-sm shadow-brand-600/30">
+              <Camera className="size-4 sm:size-5" strokeWidth={2} />
             </div>
 
             <div className="min-w-0">
-              <div className="truncate text-base font-bold tracking-tight text-brand-navy sm:text-lg">
+              <div className="truncate text-sm sm:text-lg font-bold tracking-tight text-brand-navy">
                 Petrolimex <span className="hidden sm:inline text-brand-600">Attendance</span>
               </div>
               <div className="hidden text-xs text-text-secondary sm:block">
@@ -155,7 +155,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             {extra}
 
             {showSimulator && (
@@ -217,48 +217,53 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* Primary navigation */}
-        <nav
-          aria-label="Điều hướng chính"
-          ref={navRef}
-          className="-mb-px -mx-4 px-4 sm:mx-0 sm:px-0 flex items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-t border-slate-100 py-2"
-        >
-          {tabs
-            .filter((tab) => tab.visible)
-            .map((tab) => {
-              const isActive = activeTab === tab.id;
-              const Icon = tab.icon;
+        <div className="relative border-t border-slate-100">
+          {/* Subtle fade hint on mobile right edge indicating tabs can be swiped */}
+          <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-white via-white/80 to-transparent sm:hidden z-10" />
 
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  aria-current={isActive ? 'page' : undefined}
-                  className={`inline-flex min-h-9 shrink-0 items-center gap-1.5 sm:gap-2 rounded-lg px-2.5 sm:px-3 text-[13px] sm:text-sm transition-colors focus-visible:outline-2 focus-visible:outline-brand-600 ${
-                    isActive
-                      ? 'bg-brand-50 font-semibold text-brand-700 ring-1 ring-inset ring-brand-200'
-                      : 'font-medium text-text-secondary hover:bg-brand-50/60 hover:text-brand-700'
-                  }`}
-                >
-                  <Icon className="size-4 shrink-0" strokeWidth={1.8} />
+          <nav
+            aria-label="Điều hướng chính"
+            ref={navRef}
+            className="-mb-px -mx-3 px-3 sm:mx-0 sm:px-0 flex items-center gap-1.5 overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden py-2"
+          >
+            {tabs
+              .filter((tab) => tab.visible)
+              .map((tab) => {
+                const isActive = activeTab === tab.id;
+                const Icon = tab.icon;
 
-                  <span>{tab.label}</span>
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={`inline-flex min-h-8 sm:min-h-9 shrink-0 items-center gap-1.5 sm:gap-2 rounded-lg px-2.5 sm:px-3 text-xs sm:text-sm whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-brand-600 ${
+                      isActive
+                        ? 'bg-brand-50 font-semibold text-brand-700 ring-1 ring-inset ring-brand-200'
+                        : 'font-medium text-text-secondary hover:bg-brand-50/60 hover:text-brand-700'
+                    }`}
+                  >
+                    <Icon className="size-3.5 sm:size-4 shrink-0" strokeWidth={1.8} />
 
-                  {'count' in tab && (
-                    <span
-                      className={`rounded-md px-1.5 py-0.5 text-xs tabular-nums ${
-                        isActive
-                          ? 'bg-brand-600 text-white'
-                          : 'bg-slate-100 text-slate-600'
-                      }`}
-                    >
-                      {tab.count}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-        </nav>
+                    <span>{tab.label}</span>
+
+                    {'count' in tab && (
+                      <span
+                        className={`rounded-md px-1.5 py-0.2 text-[11px] sm:text-xs tabular-nums ${
+                          isActive
+                            ? 'bg-brand-600 text-white'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        {tab.count}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+          </nav>
+        </div>
       </div>
     </header>
   );

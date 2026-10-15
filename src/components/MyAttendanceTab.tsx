@@ -137,7 +137,8 @@ export const MyAttendanceTab: React.FC<{ me: MeResponse }> = ({ me }) => {
           </div>
         )}
         {notice && <p className="mx-4 mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{notice}</p>}
-        <div className="overflow-x-auto">
+        {/* Desktop: Table View */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="bg-surface-muted border-b border-border text-xs font-semibold text-slate-600 uppercase tracking-wide">
               <tr>
@@ -179,7 +180,7 @@ export const MyAttendanceTab: React.FC<{ me: MeResponse }> = ({ me }) => {
                       {r && reqType && !data.lock && (
                         <button
                           type="button"
-                          className={`${secondaryBtn} py-1 px-2.5 text-xs`}
+                          className={`${secondaryBtn} py-1 px-2.5 text-xs whitespace-nowrap shrink-0`}
                           onClick={(e) => {
                             e.stopPropagation();
                             setRequestFor({ type: reqType, workDate: d.date });
@@ -194,6 +195,81 @@ export const MyAttendanceTab: React.FC<{ me: MeResponse }> = ({ me }) => {
               })}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile: Card View */}
+        <div className="md:hidden divide-y divide-slate-100">
+          {data.days.map((d) => {
+            const r = d.record;
+            const reqType = r ? requestTypeFor(r) : null;
+            const muted = !r && !d.workday;
+
+            return (
+              <div
+                key={d.date}
+                onClick={() => r && setDetail(r)}
+                className={`p-3.5 transition-colors ${r ? 'cursor-pointer hover:bg-brand-50/30' : ''} ${muted ? 'bg-slate-50/50 text-slate-400' : ''}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-bold text-sm text-slate-900">{fmtDate(d.date).slice(0, 5)}</span>
+                      <span className="text-xs text-slate-500 font-medium">{WEEKDAY_LABEL[d.weekday]}</span>
+                      {d.holiday && <span className="text-[11px] text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded font-medium">{d.holiday}</span>}
+                    </div>
+                  </div>
+                  <div className="shrink-0 flex items-center gap-1.5">
+                    {r ? (
+                      <>
+                        <StatusPill status={r.status} />
+                        {r.override && <OverrideBadge override={r.override} />}
+                      </>
+                    ) : (
+                      <span className="text-xs text-slate-400">{d.workday ? 'Chưa có công' : 'Nghỉ'}</span>
+                    )}
+                  </div>
+                </div>
+
+                {r && (
+                  <div className="mt-2 grid grid-cols-2 gap-2 p-2 rounded-xl bg-slate-50 text-xs">
+                    <div>
+                      <span className="text-slate-400 block text-[11px]">Giờ vào</span>
+                      <span className="font-mono font-semibold text-slate-800 text-sm">
+                        {r.firstIn !== null ? fmtTime(r.firstIn) : '—'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block text-[11px]">Giờ ra</span>
+                      <span className="font-mono font-semibold text-slate-800 text-sm">
+                        {!r.final && r.lastOut !== null ? (
+                          <span className="text-slate-600 text-xs font-sans">
+                            Gần nhất <span className="font-mono font-semibold">{fmtTime(r.lastOut)}</span>
+                          </span>
+                        ) : (
+                          r.lastOut !== null ? fmtTime(r.lastOut) : '—'
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {r && reqType && !data.lock && (
+                  <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-end">
+                    <button
+                      type="button"
+                      className={`${secondaryBtn} py-1 px-3 text-xs whitespace-nowrap shrink-0`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRequestFor({ type: reqType, workDate: d.date });
+                      }}
+                    >
+                      Nộp đơn giải trình / xin phép
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 
