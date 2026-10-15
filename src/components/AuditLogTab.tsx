@@ -85,7 +85,7 @@ export const AuditLogTab: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-2xl p-5 border border-border border-l-4 border-l-brand-500 shadow-card space-y-4">
+      <div className="bg-white rounded-2xl p-4 sm:p-5 border border-border border-l-4 border-l-brand-500 shadow-card space-y-4">
         <div>
           <h2 className="text-lg font-bold tracking-tight text-brand-navy">Nhật ký</h2>
           <p className="text-xs text-slate-500 mt-0.5">Các thao tác ảnh hưởng tới ngày công và quyền truy cập. Nhật ký không sửa, không xóa được.</p>

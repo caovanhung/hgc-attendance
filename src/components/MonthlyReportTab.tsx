@@ -74,7 +74,7 @@ export const MonthlyReportTab: React.FC<{ me: MeResponse; departments: Departmen
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-2xl p-5 border border-border border-l-4 border-l-brand-500 shadow-card flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="bg-white rounded-2xl p-4 sm:p-5 border border-border border-l-4 border-l-brand-500 shadow-card flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-bold tracking-tight text-brand-navy">Báo cáo tháng</h2>
           <p className="text-xs text-slate-500 mt-0.5">

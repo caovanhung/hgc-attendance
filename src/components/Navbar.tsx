@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   Camera,
   KeyRound,
@@ -49,6 +49,12 @@ export const Navbar: React.FC<NavbarProps> = ({
   setActiveTab,
   extra,
 }) => {
+  // Trên điện thoại thanh tab cuộn ngang: luôn kéo tab đang chọn vào tầm nhìn
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    navRef.current?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }, [activeTab]);
+
   const isManager =
     currentUser.role === 'hr' ||
     currentUser.role === 'area_admin';
@@ -135,13 +141,13 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Brand and account toolbar */}
         <div className="flex min-h-16 items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-brand-500 to-brand-700 text-white shadow-sm shadow-brand-600/30">
+            <div className="flex size-9 sm:size-10 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-brand-500 to-brand-700 text-white shadow-sm shadow-brand-600/30">
               <Camera className="size-5" strokeWidth={2} />
             </div>
 
             <div className="min-w-0">
               <div className="truncate text-base font-bold tracking-tight text-brand-navy sm:text-lg">
-                Petrolimex <span className="text-brand-600">Attendance</span>
+                Petrolimex <span className="hidden sm:inline text-brand-600">Attendance</span>
               </div>
               <div className="hidden text-xs text-text-secondary sm:block">
                 Hệ thống quản lý chấm công
@@ -213,7 +219,8 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Primary navigation */}
         <nav
           aria-label="Điều hướng chính"
-          className="-mb-px flex items-center gap-1 overflow-x-auto border-t border-slate-100 py-2"
+          ref={navRef}
+          className="-mb-px -mx-4 px-4 sm:mx-0 sm:px-0 flex items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-t border-slate-100 py-2"
         >
           {tabs
             .filter((tab) => tab.visible)
@@ -227,7 +234,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
                   aria-current={isActive ? 'page' : undefined}
-                  className={`inline-flex min-h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-brand-600 ${
+                  className={`inline-flex min-h-9 shrink-0 items-center gap-1.5 sm:gap-2 rounded-lg px-2.5 sm:px-3 text-[13px] sm:text-sm transition-colors focus-visible:outline-2 focus-visible:outline-brand-600 ${
                     isActive
                       ? 'bg-brand-50 font-semibold text-brand-700 ring-1 ring-inset ring-brand-200'
                       : 'font-medium text-text-secondary hover:bg-brand-50/60 hover:text-brand-700'

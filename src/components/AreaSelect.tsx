@@ -10,7 +10,7 @@ export const AreaSelect: React.FC<{ me: MeResponse; value: string; onChange: (v:
       aria-label="Khu vực"
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white cursor-pointer max-w-[180px]"
+      className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white cursor-pointer max-w-[120px] sm:max-w-[180px]"
     >
       <option value="all">{isHr ? 'Tất cả khu vực' : 'Tất cả khu của tôi'}</option>
       {me.areas.map((a) => (

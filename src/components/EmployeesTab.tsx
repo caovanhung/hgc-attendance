@@ -55,14 +55,14 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-2xl p-5 border border-border border-l-4 border-l-brand-500 shadow-card flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-white rounded-2xl p-4 sm:p-5 border border-border border-l-4 border-l-brand-500 shadow-card flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-bold tracking-tight text-brand-navy">Quản lý nhân sự</h2>
           <p className="text-xs text-slate-500 mt-0.5">
             Người mới: nhờ đứng trước Camera AI, rồi bấm Thêm nhân sự → Lấy từ camera để đăng ký FaceID. Thay đổi trên web tự đồng bộ sang Camera AI.
           </p>
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex flex-wrap gap-2">
           <button onClick={() => setCsvOpen(true)} className={secondaryBtn}>
             <FileSpreadsheet className="w-4 h-4" /> Nhập từ file CSV
           </button>
