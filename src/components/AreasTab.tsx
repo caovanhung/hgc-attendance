@@ -72,7 +72,7 @@ export const AreasTab: React.FC<{ onChanged: () => void }> = ({ onChanged }) => 
     <div className="space-y-6">
       <div className="bg-white rounded-2xl p-5 border border-border border-l-4 border-l-brand-500 shadow-card flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-bold tracking-tight text-slate-900">Khu vực</h2>
+          <h2 className="text-lg font-bold tracking-tight text-brand-navy">Khu vực</h2>
           <p className="text-xs text-slate-500 mt-0.5">
             Nhân sự thuộc khu của phòng ban. Quản trị khu vực chỉ xem và quản lý dữ liệu trong khu được giao (cấp quyền ở tab Nhân sự).
           </p>
@@ -103,7 +103,7 @@ export const AreasTab: React.FC<{ onChanged: () => void }> = ({ onChanged }) => 
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <span className="text-[11px] font-mono font-bold px-1.5 rounded bg-slate-100 text-slate-600">{a.code}</span>
-                    <h3 className="font-bold text-sm text-slate-900 mt-1">{a.name}</h3>
+                    <h3 className="font-bold text-sm text-brand-navy mt-1">{a.name}</h3>
                     {a.note && <p className="text-slate-500">{a.note}</p>}
                     <p className="text-slate-500 mt-1">
                       {a.memberCount} nhân sự · {a.departmentCount} phòng ban · {a.cameraCount} camera

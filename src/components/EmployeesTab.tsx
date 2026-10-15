@@ -57,7 +57,7 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
     <div className="space-y-6">
       <div className="bg-white rounded-2xl p-5 border border-border border-l-4 border-l-brand-500 shadow-card flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-bold tracking-tight text-slate-900">Quản lý nhân sự</h2>
+          <h2 className="text-lg font-bold tracking-tight text-brand-navy">Quản lý nhân sự</h2>
           <p className="text-xs text-slate-500 mt-0.5">
             Người mới: nhờ đứng trước Camera AI, rồi bấm Thêm nhân sự → Lấy từ camera để đăng ký FaceID. Thay đổi trên web tự đồng bộ sang Camera AI.
           </p>
@@ -114,7 +114,7 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({ users, departments, 
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <span className="text-[11px] font-mono font-bold px-1.5 rounded bg-slate-100 text-slate-600">{u.code}</span>
-                <h3 className="font-bold text-sm text-slate-900 mt-1 truncate">{u.name}</h3>
+                <h3 className="font-bold text-sm text-brand-navy mt-1 truncate">{u.name}</h3>
                 <p className="text-slate-500 truncate">{u.position || '—'}</p>
                 <div className="flex items-center gap-2 mt-1">
                   <SyncBadge status={u.hanetSyncStatus} error={u.hanetSyncError} />

@@ -49,7 +49,7 @@ export const WorkSettingsCard: React.FC<{ onRecomputed: () => void }> = ({ onRec
 
   return (
     <div className="bg-white rounded-2xl border border-border shadow-card p-5 text-sm space-y-4">
-      <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+      <h3 className="font-bold text-sm text-brand-navy flex items-center gap-2">
         <Clock className="w-4 h-4 text-brand-500" /> Ca mặc định công ty
       </h3>
       {ws && (

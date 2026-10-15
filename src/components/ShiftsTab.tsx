@@ -108,7 +108,7 @@ export const ShiftsTab: React.FC<{ me: MeResponse; area: string; onChanged: () =
     <div className="space-y-6">
       <div className="bg-white rounded-2xl p-5 border border-border border-l-4 border-l-brand-500 shadow-card flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-bold tracking-tight text-slate-900">Ca làm việc</h2>
+          <h2 className="text-lg font-bold tracking-tight text-brand-navy">Ca làm việc</h2>
           <p className="text-xs text-slate-500 mt-0.5">
             Mỗi khu có ca riêng. Phòng ban chọn ca ở tab Phòng ban; phòng chưa chọn ca dùng ca mặc định công ty. Sửa ca thì hệ thống tự tính lại công từ đầu tháng.
           </p>
@@ -129,7 +129,7 @@ export const ShiftsTab: React.FC<{ me: MeResponse; area: string; onChanged: () =
           <div key={s.id} className="bg-white rounded-2xl border border-border shadow-card p-4 text-sm space-y-1.5">
             <div className="flex items-start justify-between gap-2">
               <div>
-                <h3 className="font-bold text-sm text-slate-900">{s.name}</h3>
+                <h3 className="font-bold text-sm text-brand-navy">{s.name}</h3>
                 <p className="text-[11px] text-violet-700">{s.areaName}</p>
               </div>
               <div className="flex gap-1">
@@ -160,7 +160,7 @@ export const ShiftsTab: React.FC<{ me: MeResponse; area: string; onChanged: () =
         {isHr && <WorkSettingsCard onRecomputed={onChanged} />}
         <div className="bg-white rounded-2xl border border-border shadow-card p-5 text-sm space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+            <h3 className="font-bold text-sm text-brand-navy flex items-center gap-2">
               <CalendarDays className="w-4 h-4 text-brand-500" /> Ngày lễ
             </h3>
             <select className={`${inputCls} w-auto!`} value={year} onChange={(e) => setYear(Number(e.target.value))}>

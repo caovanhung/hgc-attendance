@@ -78,7 +78,7 @@ export const RequestsTab: React.FC<RequestsTabProps> = ({ requests, currentUser,
     <div className="space-y-6">
       <div className="bg-white rounded-2xl p-5 border border-border border-l-4 border-l-brand-500 shadow-card flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-bold tracking-tight text-slate-900">Đơn giải trình & xin phép</h2>
+          <h2 className="text-lg font-bold tracking-tight text-brand-navy">Đơn giải trình & xin phép</h2>
           <p className="text-xs text-slate-500 mt-0.5">
             {currentUser.role === 'employee'
               ? 'Gửi giải trình khi đi muộn có lý do, quên quẹt mặt, nghỉ phép, hoặc đi công tác.'

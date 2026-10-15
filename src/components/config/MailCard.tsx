@@ -59,7 +59,7 @@ export const MailCard: React.FC = () => {
 
   return (
     <div className="bg-white rounded-2xl border border-border shadow-card p-5 text-sm space-y-4">
-      <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+      <h3 className="font-bold text-sm text-brand-navy flex items-center gap-2">
         <Mail className="w-4 h-4 text-brand-500" /> Gửi thư (mật khẩu, đặt lại mật khẩu)
       </h3>
       {view && (

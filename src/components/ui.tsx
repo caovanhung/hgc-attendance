@@ -19,7 +19,7 @@ export const Modal: React.FC<{ title: string; onClose: () => void; children: Rea
   <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
     <div className={`bg-white rounded-3xl ${wide ? 'max-w-2xl' : 'max-w-md'} w-full overflow-hidden shadow-2xl border border-slate-200 border-t-4 border-t-brand-500 max-h-[90vh] flex flex-col`}>
       <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
-        <span className="font-bold text-base text-slate-900">{title}</span>
+        <span className="font-bold text-base text-brand-navy">{title}</span>
         <button onClick={onClose} className="size-8 shrink-0 inline-flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 cursor-pointer" aria-label="Đóng">
           ✕
         </button>

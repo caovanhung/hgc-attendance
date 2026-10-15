@@ -60,7 +60,7 @@ export const DepartmentsTab: React.FC<DepartmentsTabProps> = ({ departments, use
     <div className="space-y-6">
       <div className="bg-white rounded-2xl p-5 border border-border border-l-4 border-l-brand-500 shadow-card flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-bold tracking-tight text-slate-900">Phòng ban</h2>
+          <h2 className="text-lg font-bold tracking-tight text-brand-navy">Phòng ban</h2>
           <p className="text-xs text-slate-500 mt-0.5">Trưởng phòng chỉ xem và duyệt dữ liệu của nhân viên trong phòng mình.</p>
         </div>
         {isManager && (
@@ -103,7 +103,7 @@ export const DepartmentsTab: React.FC<DepartmentsTabProps> = ({ departments, use
                   <Users className="w-3.5 h-3.5" /> {d.memberCount}
                 </span>
               </div>
-              <h3 className="font-bold text-sm text-slate-900">{d.name}</h3>
+              <h3 className="font-bold text-sm text-brand-navy">{d.name}</h3>
               <p className="text-[11px] text-violet-700">{d.areaName ?? 'Chưa gán khu'}</p>
               <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">{d.description || 'Chưa có mô tả'}</p>
               <p className="text-[11px] text-slate-600 mt-1">🕘 {d.shiftName ?? 'Ca mặc định công ty'}</p>
@@ -121,7 +121,7 @@ export const DepartmentsTab: React.FC<DepartmentsTabProps> = ({ departments, use
       {active && (
         <div className="bg-white rounded-2xl border border-border shadow-card overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-            <h3 className="font-bold text-sm text-slate-900">Nhân sự: {active.name}</h3>
+            <h3 className="font-bold text-sm text-brand-navy">Nhân sự: {active.name}</h3>
             <div className="flex gap-2">
               {isManager && active.hanetSyncStatus === 'error' && <SyncRetryButton entityType="department" entityId={active.id} onDone={onRefresh} />}
               {isManager && (

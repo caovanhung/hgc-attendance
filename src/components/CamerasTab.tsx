@@ -151,7 +151,7 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
     <div className="space-y-6">
       <div className="bg-white rounded-2xl p-5 border border-border border-l-4 border-l-brand-500 shadow-card flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-bold tracking-tight text-slate-900">Camera AI</h2>
+          <h2 className="text-lg font-bold tracking-tight text-brand-navy">Camera AI</h2>
           <p className="text-xs text-slate-500 mt-0.5">
             Trạng thái online/offline tự cập nhật mỗi 5 phút. Đổi tên ở đây thì
             đổi luôn trên Camera AI.
@@ -211,7 +211,7 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
               className="bg-white rounded-2xl border border-border shadow-card p-4 text-sm space-y-2"
             >
               <div className="flex items-center justify-between">
-                <h3 className="font-bold text-sm text-slate-900 truncate">
+                <h3 className="font-bold text-sm text-brand-navy truncate">
                   {c.name}
                 </h3>
                 <div className="flex items-center gap-1.5">

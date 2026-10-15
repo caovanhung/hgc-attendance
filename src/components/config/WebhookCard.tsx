@@ -18,7 +18,7 @@ export const WebhookCard: React.FC<{ config: HanetConfigView; onChange: (c: Hane
   };
 
   return (
-    <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-3xl p-6 shadow-xl">
+    <div className="bg-linear-to-br from-brand-navy to-[#002847] text-white rounded-3xl p-6 shadow-xl">
       <h2 className="text-base font-bold">URL webhook cho Camera AI</h2>
       <p className="text-xs text-slate-300 mt-1 max-w-2xl">
         Dán URL này vào cấu hình webhook trên Camera AI. URL chứa token bí mật: không chia sẻ công khai. Nếu nghi bị lộ, hãy tạo token mới.

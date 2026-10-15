@@ -35,7 +35,7 @@ export const BackupsCard: React.FC<{ canWrite: boolean }> = ({ canWrite }) => {
   return (
     <div className="bg-white rounded-2xl border border-border shadow-card p-5 text-sm space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+        <h3 className="font-bold text-sm text-brand-navy flex items-center gap-2">
           <Database className="w-4 h-4 text-brand-500" /> Sao lưu
         </h3>
         <div className="flex gap-2">

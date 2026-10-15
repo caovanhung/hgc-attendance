@@ -30,7 +30,7 @@ export const WebhookLogsCard: React.FC = () => {
   return (
     <div className="bg-white rounded-2xl border border-border shadow-card p-5 text-sm flex flex-col">
       <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-        <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+        <h3 className="font-bold text-sm text-brand-navy flex items-center gap-2">
           <Cpu className="w-4 h-4 text-purple-600" /> Nhật ký webhook
         </h3>
         <button onClick={load} className="text-slate-500 hover:text-slate-800 flex items-center gap-1 cursor-pointer">

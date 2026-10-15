@@ -119,7 +119,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
 
             <div className="min-w-0">
-              <div className="truncate text-base font-bold tracking-tight text-text-primary sm:text-lg">
+              <div className="truncate text-base font-bold tracking-tight text-brand-navy sm:text-lg">
                 Petrolimex <span className="text-brand-600">Attendance</span>
               </div>
               <div className="hidden text-xs text-text-secondary sm:block">

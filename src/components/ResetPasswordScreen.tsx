@@ -29,7 +29,7 @@ export const ResetPasswordScreen: React.FC<{ token: string; onDone: (notice: str
   return (
     <div className="min-h-screen bg-linear-to-br from-brand-50 via-surface-muted to-white flex items-center justify-center p-4">
       <form onSubmit={submit} className="bg-white rounded-3xl border border-slate-200 border-t-4 border-t-brand-500 shadow-xl shadow-brand-900/5 p-6 w-full max-w-sm space-y-4">
-        <h1 className="font-bold text-slate-900">Đặt mật khẩu mới</h1>
+        <h1 className="font-bold text-brand-navy">Đặt mật khẩu mới</h1>
         <Field label="Mật khẩu mới" hint="Ít nhất 8 ký tự">
           <input className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" required autoFocus />
         </Field>
