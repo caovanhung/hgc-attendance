@@ -2753,6 +2753,9 @@ function getSighting(db, id) {
 function deleteSighting(db, id) {
   db.prepare("DELETE FROM face_sightings WHERE id = ?").run(id);
 }
+function deleteSightingsOfPerson(db, personId) {
+  db.prepare("DELETE FROM face_sightings WHERE person_id = ?").run(personId);
+}
 function purgeSightings(db, now) {
   return Number(db.prepare("DELETE FROM face_sightings WHERE created_at < ?").run(now - SIGHTING_TTL_MS).changes);
 }
@@ -3321,6 +3324,7 @@ function userRoutes(ctx) {
         reason: `Sao l\u01B0u tr\u01B0\u1EDBc khi x\xF3a: ${backup}`
       });
       db.prepare("DELETE FROM users WHERE id = ?").run(target.id);
+      if (target.hanetPersonId) deleteSightingsOfPerson(db, target.hanetPersonId);
     });
     console.warn(`[SECURITY] user_deleted by=${actor.code} target=${target.code} backup=${backup} ip=${req.ip}`);
     kickEntity(ctx, "user", target.id);
@@ -4636,17 +4640,17 @@ function hanetRoutes(ctx) {
         throw new HttpError(502, `Kh\xF4ng x\xF3a \u0111\u01B0\u1EE3c FaceID tr\xEAn Camera AI: ${err.message}`);
       }
       const snapshot = { personId: String(p.personID), aliasId: String(p.aliasID ?? ""), name: String(p.name ?? "") };
-      tx(
-        db,
-        () => writeAudit(db, ctx.now(), {
+      tx(db, () => {
+        deleteSightingsOfPerson(db, snapshot.personId);
+        writeAudit(db, ctx.now(), {
           ...actorOf(req),
           action: "face.delete",
           targetLabel: `${snapshot.name || "(kh\xF4ng t\xEAn)"}${snapshot.aliasId ? ` (${snapshot.aliasId})` : ""}`,
           before: snapshot,
           after: null,
           reason
-        })
-      );
+        });
+      });
       res.json({ success: true });
     })
   );
