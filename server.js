@@ -2806,6 +2806,7 @@ init_hanet_sync();
 init_db();
 init_hanet_api();
 init_hanet_sync();
+init_hanet();
 init_bootstrap();
 init_vntime();
 var IMPORT_PAGE_SIZE = 100;
@@ -2819,6 +2820,16 @@ async function fetchAllPersons(deps, placeId) {
     if (items.length < IMPORT_PAGE_SIZE) break;
   }
   return all;
+}
+async function fetchPersonsAllPlaces(deps) {
+  const byId = /* @__PURE__ */ new Map();
+  for (const placeId of getPlaceIds(deps.db)) {
+    for (const p of await fetchAllPersons(deps, placeId)) {
+      const key = String(p.personID ?? "");
+      if (key && !byId.has(key)) byId.set(key, p);
+    }
+  }
+  return [...byId.values()];
 }
 function aliasCode(p) {
   const upper = String(p.aliasID ?? "").trim().toUpperCase();
@@ -3058,11 +3069,10 @@ function userRoutes(ctx) {
       if (wanted.size === 0) throw new HttpError(400, "Ch\u01B0a ch\u1ECDn ng\u01B0\u1EDDi n\xE0o \u0111\u1EC3 nh\u1EADp");
       if (wanted.size > IMPORT_MAX) throw new HttpError(400, `M\u1ED7i l\u1EA7n nh\u1EADp t\u1ED1i \u0111a ${IMPORT_MAX} ng\u01B0\u1EDDi`);
       const departmentId = resolveDepartmentFor(db, currentUser(req), b.departmentId);
-      const placeId = getPlaceIds(db)[0];
-      if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, "Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Camera AI (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
+      if (!reconcileEnabled(db)) throw new HttpError(400, "Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Camera AI (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
       let all;
       try {
-        all = await fetchAllPersons(deps, placeId);
+        all = await fetchPersonsAllPlaces(deps);
       } catch (err) {
         throw new HttpError(502, `Kh\xF4ng l\u1EA5y \u0111\u01B0\u1EE3c danh s\xE1ch ng\u01B0\u1EDDi t\u1EEB Camera AI: ${err.message}`);
       }
@@ -3074,10 +3084,9 @@ function userRoutes(ctx) {
     })
   );
   const cameraAliases = async () => {
-    const placeId = getPlaceIds(db)[0];
-    if (!reconcileEnabled(db) || !placeId) return /* @__PURE__ */ new Set();
+    if (!reconcileEnabled(db)) return /* @__PURE__ */ new Set();
     try {
-      return hanetAliases(await fetchAllPersons(deps, placeId));
+      return hanetAliases(await fetchPersonsAllPlaces(deps));
     } catch {
       return /* @__PURE__ */ new Set();
     }
@@ -4453,6 +4462,8 @@ init_hanet();
 init_hanet_api();
 init_settings();
 init_vntime();
+init_db();
+init_overrides();
 init_hanet_sync();
 function hanetPublicRoutes(ctx) {
   const { db } = ctx;
@@ -4597,15 +4608,46 @@ function hanetRoutes(ctx) {
     "/hanet/persons/unlinked",
     requireManager,
     ah(async (_req, res) => {
-      const placeId = getPlaceIds(db)[0];
-      if (!reconcileEnabled(db) || !placeId) throw new HttpError(400, "Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Camera AI (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
-      let persons;
-      try {
-        persons = await fetchAllPersons({ db, fetch: ctx.fetch, now: ctx.now }, placeId);
-      } catch (err) {
-        throw new HttpError(502, `Kh\xF4ng l\u1EA5y \u0111\u01B0\u1EE3c danh s\xE1ch ng\u01B0\u1EDDi t\u1EEB Camera AI: ${err.message}`);
+      res.json({ persons: unlinkedPersons(db, await cameraPersons()) });
+    })
+  );
+  const cameraPersons = async () => {
+    if (!reconcileEnabled(db)) throw new HttpError(400, "Ch\u01B0a c\u1EA5u h\xECnh k\u1EBFt n\u1ED1i Camera AI (Client ID, Refresh Token, \u0111\u1ECBa \u0111i\u1EC3m)");
+    try {
+      return await fetchPersonsAllPlaces({ db, fetch: ctx.fetch, now: ctx.now });
+    } catch (err) {
+      throw new HttpError(502, `Kh\xF4ng l\u1EA5y \u0111\u01B0\u1EE3c danh s\xE1ch ng\u01B0\u1EDDi t\u1EEB Camera AI: ${err.message}`);
+    }
+  };
+  r.delete(
+    "/hanet/persons/:personId",
+    requireGlobalHr,
+    ah(async (req, res) => {
+      const reason = parseReason((req.body ?? {}).reason);
+      const all = await cameraPersons();
+      const p = all.find((x) => String(x.personID) === req.params.personId);
+      if (!p) throw notFound("ng\u01B0\u1EDDi n\xE0y tr\xEAn Camera AI");
+      if (unlinkedPersons(db, [p]).length === 0) {
+        throw new HttpError(400, "Ng\u01B0\u1EDDi n\xE0y \u0111\xE3 li\xEAn k\u1EBFt v\u1EDBi m\u1ED9t nh\xE2n s\u1EF1: h\xE3y x\xF3a nh\xE2n s\u1EF1 \u0111\xF3 \u1EDF tab Nh\xE2n s\u1EF1");
       }
-      res.json({ persons: unlinkedPersons(db, persons) });
+      try {
+        await hanetApi.removeById({ db, fetch: ctx.fetch, now: ctx.now }, String(p.personID));
+      } catch (err) {
+        throw new HttpError(502, `Kh\xF4ng x\xF3a \u0111\u01B0\u1EE3c FaceID tr\xEAn Camera AI: ${err.message}`);
+      }
+      const snapshot = { personId: String(p.personID), aliasId: String(p.aliasID ?? ""), name: String(p.name ?? "") };
+      tx(
+        db,
+        () => writeAudit(db, ctx.now(), {
+          ...actorOf(req),
+          action: "face.delete",
+          targetLabel: `${snapshot.name || "(kh\xF4ng t\xEAn)"}${snapshot.aliasId ? ` (${snapshot.aliasId})` : ""}`,
+          before: snapshot,
+          after: null,
+          reason
+        })
+      );
+      res.json({ success: true });
     })
   );
   r.get("/hanet/sync", requireGlobalHr, (_req, res) => {
