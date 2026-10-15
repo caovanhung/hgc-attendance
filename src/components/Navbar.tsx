@@ -12,6 +12,7 @@ import {
   Settings,
   CalendarClock,
   FileSpreadsheet,
+  UserRound,
 } from 'lucide-react';
 
 import type { User } from '../types';
@@ -53,10 +54,16 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const tabs = [
     {
+      id: 'mine',
+      label: 'Của tôi',
+      icon: UserRound,
+      visible: true,
+    },
+    {
       id: 'attendance',
       label: 'Bảng công',
       icon: LayoutDashboard,
-      visible: true,
+      visible: currentUser.role !== 'employee',
     },
     {
       id: 'report',

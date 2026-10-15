@@ -18,6 +18,7 @@ import { RequestsTab } from './components/RequestsTab';
 import { HanetConfigTab } from './components/HanetConfigTab';
 import { ShiftsTab } from './components/ShiftsTab';
 import { MonthlyReportTab } from './components/MonthlyReportTab';
+import { MyAttendanceTab } from './components/MyAttendanceTab';
 import { HanetSimulatorModal } from './components/HanetSimulatorModal';
 import { LoginScreen } from './components/LoginScreen';
 import { ForgotPasswordScreen } from './components/ForgotPasswordScreen';
@@ -30,10 +31,10 @@ import type { AttendanceDay, AttendanceRequest, Camera, Department, MeResponse, 
 type AuthState = 'loading' | 'anonymous' | 'must-change' | 'ready';
 
 const TABS_BY_ROLE: Record<User['role'], string[]> = {
-  hr: ['attendance', 'report', 'requests', 'cameras', 'departments', 'shifts', 'employees', 'areas', 'hanet_config'],
-  area_admin: ['attendance', 'report', 'requests', 'cameras', 'departments', 'shifts', 'employees'],
-  dept_manager: ['attendance', 'report', 'requests', 'cameras', 'departments'],
-  employee: ['attendance', 'requests'],
+  hr: ['mine', 'attendance', 'report', 'requests', 'cameras', 'departments', 'shifts', 'employees', 'areas', 'audit', 'hanet_config'],
+  area_admin: ['mine', 'attendance', 'report', 'requests', 'cameras', 'departments', 'shifts', 'employees', 'audit'],
+  dept_manager: ['mine', 'attendance', 'report', 'requests', 'cameras', 'departments'],
+  employee: ['mine', 'requests'],
 };
 
 export default function App() {
@@ -198,7 +199,9 @@ export default function App() {
   }
 
   const currentUser = me.user;
-  const tab = TABS_BY_ROLE[currentUser.role].includes(activeTab) ? activeTab : 'attendance';
+  // Nhân viên mở web vào thẳng "Của tôi"; các vai trò khác vào "Bảng công"
+  const fallback = currentUser.role === 'employee' ? 'mine' : 'attendance';
+  const tab = TABS_BY_ROLE[currentUser.role].includes(activeTab) ? activeTab : fallback;
   const refreshAll = () => {
     fetchData();
     loadMe();
@@ -233,7 +236,11 @@ export default function App() {
           </button>
         </div>
 
-        <StatsCards stats={stats} currentUser={currentUser} onOpenRequests={() => setActiveTab('requests')} />
+        {!(tab === 'mine' && currentUser.role === 'employee') && (
+          <StatsCards stats={stats} currentUser={currentUser} onOpenRequests={() => setActiveTab('requests')} />
+        )}
+
+        {tab === 'mine' && <MyAttendanceTab me={me} />}
 
         {tab === 'attendance' && (
           <AttendanceTable
