@@ -18,7 +18,7 @@ import { fetchPersonsAllPlaces, unlinkedPersons } from '../hanet-import';
 import { tx } from '../db';
 import { actorOf, writeAudit } from '../audit';
 import { parseReason } from '../overrides';
-import { listSightings, recordSighting } from '../sightings';
+import { deleteSightingsOfPerson, listSightings, recordSighting } from '../sightings';
 import { kickAll, retryJobs, syncSummary } from '../hanet-sync';
 import type { HanetConnectionTest, SightingKind, SyncEntity, WebhookLog } from '../../shared/types';
 
@@ -215,7 +215,8 @@ export function hanetRoutes(ctx: AppContext): Router {
         throw new HttpError(502, `Không xóa được FaceID trên Camera AI: ${(err as Error).message}`);
       }
       const snapshot = { personId: String(p.personID), aliasId: String(p.aliasID ?? ''), name: String(p.name ?? '') };
-      tx(db, () =>
+      tx(db, () => {
+        deleteSightingsOfPerson(db, snapshot.personId);
         writeAudit(db, ctx.now(), {
           ...actorOf(req),
           action: 'face.delete',
@@ -223,8 +224,8 @@ export function hanetRoutes(ctx: AppContext): Router {
           before: snapshot,
           after: null,
           reason,
-        }),
-      );
+        });
+      });
       res.json({ success: true });
     }),
   );

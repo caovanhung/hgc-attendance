@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { startTestApp, seedUser, seedArea, seedDepartment, loginAs } from './helpers';
 import { PLACE, configureHanet, fail, fakeHanet, ok, type Reply } from './fake-hanet';
 import { setSetting } from '../server/settings';
+import { recordSighting } from '../server/sightings';
 import type { HanetPerson } from '../shared/types';
 
 const PLACE2 = 777001;
@@ -91,6 +92,34 @@ test('Camera AI báo lỗi khi xóa ⇒ 502, không ghi nhật ký', async () =>
     assert.equal(r.status, 502);
     assert.match(r.body.error, /Không xóa được FaceID/);
     assert.equal((app.db.prepare("SELECT COUNT(*) AS c FROM audit_logs WHERE action = 'face.delete'").get() as { c: number }).c, 0);
+  } finally {
+    await app.close();
+  }
+});
+
+test('xóa FaceID chưa liên kết ⇒ ảnh chụp tạm của người đó không còn trong "Lấy từ camera"', async () => {
+  const { app } = await setup({ '/person/getListByPlace': byPlace(LISTS), '/person/removePersonByID': ok(null) });
+  try {
+    const now = Date.now();
+    recordSighting(app.db, { kind: 'unlinked', personId: 'P3', aliasId: 'NV77', personName: 'Nguyễn Kho', deviceId: 'C1', deviceName: 'Cửa', ts: now, imageUrl: 'https://img/p3.jpg' }, now);
+    const hr = await loginAs(app, 'HR01');
+    assert.deepEqual((await hr.get('/api/hanet/sightings')).body.sightings.map((s: { personId: string }) => s.personId), ['P3']);
+    assert.equal((await hr.req('DELETE', '/api/hanet/persons/P3', { reason: 'Đã nghỉ việc lâu' })).status, 200);
+    assert.deepEqual((await hr.get('/api/hanet/sightings')).body.sightings, []);
+  } finally {
+    await app.close();
+  }
+});
+
+test('xóa nhân sự đã có FaceID ⇒ ảnh chụp tạm theo Person ID của người đó cũng bị xóa', async () => {
+  const { app } = await setup({ '/person/getListByPlace': byPlace(LISTS) });
+  try {
+    const now = Date.now();
+    const id = seedUser(app.db, { code: 'NV50', hanetPersonId: 'P50' });
+    recordSighting(app.db, { kind: 'unlinked', personId: 'P50', aliasId: 'NV50', personName: 'X', deviceId: 'C1', deviceName: 'Cửa', ts: now, imageUrl: 'https://img/p50.jpg' }, now);
+    const hr = await loginAs(app, 'HR01');
+    assert.equal((await hr.del(`/api/users/${id}`)).status, 200);
+    assert.deepEqual((await hr.get('/api/hanet/sightings')).body.sightings, []);
   } finally {
     await app.close();
   }

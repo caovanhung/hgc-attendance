@@ -15,7 +15,7 @@ import { NOT_SYSTEM_ADMIN, SYSTEM_ADMIN_CODE } from '../bootstrap';
 import {
   areaFilterSql, canDeleteUser, deptAreaId, deviceAreaId, isGlobalHr, isSystemAdmin, managesArea, notFound, parseAreaFilter, requireManager,
 } from '../access';
-import { deleteSighting, getSighting, listSightings, SIGHTING_TTL_MS } from '../sightings';
+import { deleteSighting, deleteSightingsOfPerson, getSighting, listSightings, SIGHTING_TTL_MS } from '../sightings';
 import { registerFace } from '../hanet-face';
 import { dropEntityJobs, enqueue, kickAll, kickEntity } from '../hanet-sync';
 import { fetchPersonsAllPlaces, hanetAliases, IMPORT_MAX, importPersons, nextEmployeeCode, unlinkedPersons } from '../hanet-import';
@@ -454,6 +454,7 @@ export function userRoutes(ctx: AppContext): Router {
         reason: `Sao lưu trước khi xóa: ${backup}`,
       });
       db.prepare('DELETE FROM users WHERE id = ?').run(target.id);
+      if (target.hanetPersonId) deleteSightingsOfPerson(db, target.hanetPersonId);
     });
     console.warn(`[SECURITY] user_deleted by=${actor.code} target=${target.code} backup=${backup} ip=${req.ip}`);
     kickEntity(ctx, 'user', target.id);

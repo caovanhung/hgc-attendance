@@ -76,6 +76,11 @@ export function deleteSighting(db: Db, id: number): void {
   db.prepare('DELETE FROM face_sightings WHERE id = ?').run(id);
 }
 
+/** Bỏ mọi ảnh chụp tạm của một người trên Camera AI (FaceID của họ vừa bị xóa: không còn để chọn liên kết). */
+export function deleteSightingsOfPerson(db: Db, personId: string): void {
+  db.prepare('DELETE FROM face_sightings WHERE person_id = ?').run(personId);
+}
+
 export function purgeSightings(db: Db, now: number): number {
   return Number(db.prepare('DELETE FROM face_sightings WHERE created_at < ?').run(now - SIGHTING_TTL_MS).changes);
 }
