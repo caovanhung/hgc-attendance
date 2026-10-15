@@ -40,7 +40,8 @@
     first_in INTEGER,      -- ms, chỉ với kind='times'; NULL = giữ giá trị tự tính
     last_out INTEGER,      -- ms, chỉ với kind='times'; NULL = giữ giá trị tự tính
     reason TEXT NOT NULL,
-    created_by TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    created_by TEXT NOT NULL,            -- không khóa ngoại: xóa tài khoản người sửa không bị chặn
+    created_by_label TEXT NOT NULL,      -- "Tên (MÃ)" lúc sửa
     created_at TEXT NOT NULL,
     PRIMARY KEY (user_id, work_date),
     CHECK (kind != 'times' OR first_in IS NOT NULL OR last_out IS NOT NULL)
@@ -69,7 +70,7 @@
   CREATE INDEX idx_audit_area ON audit_logs(area_id);
   ```
   Không khóa ngoại tới `users` để nhật ký còn nguyên khi người bị xóa.
-- `month_locks(month TEXT PRIMARY KEY, locked_by TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT, locked_at TEXT NOT NULL)` — `month` dạng `YYYY-MM`.
+- `month_locks(month TEXT PRIMARY KEY, locked_by TEXT NOT NULL, locked_by_label TEXT NOT NULL, locked_at TEXT NOT NULL)` — `month` dạng `YYYY-MM`; không khóa ngoại (như trên).
 
 Không thêm cột vào `attendance_days`: cờ "Đã điều chỉnh" lấy bằng `LEFT JOIN attendance_overrides`.
 
