@@ -2578,6 +2578,7 @@ function writeAudit(db, now, e) {
 
 // server/routes/auth.ts
 var AUDITED_ROLES = /* @__PURE__ */ new Set(["hr", "area_admin"]);
+var MAX_LOGIN_LENGTH = 254;
 function authPublicRoutes(ctx) {
   const { db } = ctx;
   const r = Router2();
@@ -2586,13 +2587,14 @@ function authPublicRoutes(ctx) {
     const raw = typeof b.login === "string" ? b.login : typeof b.code === "string" ? b.code : "";
     const login = raw.includes("@") ? raw.trim().toLowerCase() : raw.trim().toUpperCase();
     const password = typeof b.password === "string" ? b.password : "";
+    if (login.length > MAX_LOGIN_LENGTH) throw new HttpError(400, "M\xE3 nh\xE2n vi\xEAn/email kh\xF4ng h\u1EE3p l\u1EC7");
     const key = `${login}|${req.ip}`;
     const now = ctx.now();
     const auditFailure = (u, reason) => {
       if (u && !AUDITED_ROLES.has(u.role)) return;
       writeAudit(db, now, {
         actorId: u?.id ?? null,
-        actorLabel: u ? personLabel(u.name, u.code) : login || "(tr\u1ED1ng)",
+        actorLabel: u ? personLabel(u.name, u.code) : login.slice(0, 64) || "(tr\u1ED1ng)",
         ip: req.ip ?? null,
         action: "auth.login_failed",
         reason
@@ -4080,6 +4082,7 @@ function attendanceRoutes(ctx) {
       if (b.kind === "times") {
         if (!after || after.firstIn === null) throw new HttpError(400, "Ng\xE0y n\xE0y ch\u01B0a c\xF3 gi\u1EDD v\xE0o: h\xE3y nh\u1EADp gi\u1EDD v\xE0o");
         if (after.lastOut !== null && after.lastOut <= after.firstIn) throw new HttpError(400, "Gi\u1EDD ra ph\u1EA3i sau gi\u1EDD v\xE0o");
+        if (lastOut === null && before?.lastOut != null && after.lastOut === null) throw new HttpError(400, "Gi\u1EDD ra ph\u1EA3i sau gi\u1EDD v\xE0o");
       }
       writeAudit(db, ctx.now(), {
         ...a,
@@ -4987,6 +4990,7 @@ init_bootstrap();
 init_shifts();
 init_month_lock();
 init_vntime();
+var deptLabel = (name) => /^phòng\s/i.test(name) ? name : `Ph\xF2ng ${name}`;
 function parseMonthParam(raw, now) {
   if (raw === void 0 || raw === "") return toVnDate(now).slice(0, 7);
   if (!isValidMonth(raw)) throw new HttpError(400, "Th\xE1ng kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng YYYY-MM)");
@@ -5095,19 +5099,19 @@ function buildMonthlyReport(db, viewer, q, now) {
     if (!dept) throw notFound("ph\xF2ng ban");
     deptSql = "u.department_id = ?";
     deptParams.push(q.department);
-    scopeLabel = `Ph\xF2ng ${dept.name}`;
+    scopeLabel = deptLabel(dept.name);
   } else if (viewer.role === "dept_manager" && viewer.departmentId) {
     const dept = db.prepare("SELECT name FROM departments WHERE id = ?").get(viewer.departmentId);
-    if (dept) scopeLabel = `Ph\xF2ng ${dept.name}`;
+    if (dept) scopeLabel = deptLabel(dept.name);
   }
   const days = monthDays(db, month);
   const users = db.prepare(
     `SELECT u.id, u.code, u.name, u.created_at, d.name AS department_name
          FROM users u LEFT JOIN departments d ON d.id = u.department_id
-         WHERE ${NOT_SYSTEM_ADMIN} AND ${w.sql} AND ${f.sql} AND ${deptSql}
+         WHERE ${NOT_SYSTEM_ADMIN} AND ${w.sql} AND ${f.sql} AND ${deptSql} AND substr(u.created_at, 1, 10) <= ?
            AND (u.status = 'active' OR EXISTS (SELECT 1 FROM attendance_days a WHERE a.user_id = u.id AND a.work_date BETWEEN ? AND ?))
          ORDER BY d.name IS NULL, d.name, u.code`
-  ).all(...w.params, ...f.params, ...deptParams, days[0].date, days[days.length - 1].date).map((u) => ({ id: u.id, code: u.code, name: u.name, departmentName: u.department_name, createdAt: u.created_at }));
+  ).all(...w.params, ...f.params, ...deptParams, days[days.length - 1].date, days[0].date, days[days.length - 1].date).map((u) => ({ id: u.id, code: u.code, name: u.name, departmentName: u.department_name, createdAt: u.created_at }));
   return { month, days, lock: lockOf(db, month), scopeLabel, rows: buildRows(db, users, month, now) };
 }
 
