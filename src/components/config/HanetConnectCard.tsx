@@ -49,9 +49,9 @@ export const HanetConnectCard: React.FC = () => {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 text-xs space-y-4">
+    <div className="bg-white rounded-2xl border border-border shadow-card p-5 text-sm space-y-4">
       <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-        <Video className="w-4 h-4 text-orange-500" /> Tài khoản xem video
+        <Video className="w-4 h-4 text-brand-500" /> Tài khoản xem video
       </h3>
       <p className="text-slate-500">
         Dùng để phát lại video camera ngay trong Bảng công. Nên tạo một tài khoản riêng chỉ có quyền xem, không dùng tài khoản chủ.

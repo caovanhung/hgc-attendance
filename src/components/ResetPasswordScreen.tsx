@@ -27,8 +27,8 @@ export const ResetPasswordScreen: React.FC<{ token: string; onDone: (notice: str
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <form onSubmit={submit} className="bg-white rounded-3xl border border-slate-200 shadow-xl p-6 w-full max-w-sm space-y-4">
+    <div className="min-h-screen bg-linear-to-br from-brand-50 via-surface-muted to-white flex items-center justify-center p-4">
+      <form onSubmit={submit} className="bg-white rounded-3xl border border-slate-200 border-t-4 border-t-brand-500 shadow-xl shadow-brand-900/5 p-6 w-full max-w-sm space-y-4">
         <h1 className="font-bold text-slate-900">Đặt mật khẩu mới</h1>
         <Field label="Mật khẩu mới" hint="Ít nhất 8 ký tự">
           <input className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" required autoFocus />
@@ -40,7 +40,7 @@ export const ResetPasswordScreen: React.FC<{ token: string; onDone: (notice: str
         <button type="submit" disabled={busy} className={`${primaryBtn} w-full py-2.5`}>
           {busy ? 'Đang lưu...' : 'Đặt mật khẩu'}
         </button>
-        <button type="button" onClick={() => onDone(null)} className="text-[11px] text-orange-600 hover:underline cursor-pointer">
+        <button type="button" onClick={() => onDone(null)} className="text-[11px] text-brand-600 hover:underline cursor-pointer">
           ← Quay lại đăng nhập
         </button>
       </form>

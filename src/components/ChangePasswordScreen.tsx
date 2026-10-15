@@ -36,10 +36,10 @@ export const ChangePasswordScreen: React.FC<Props> = ({ forced, onDone, onCancel
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <form onSubmit={submit} className="bg-white rounded-3xl border border-slate-200 shadow-xl p-6 w-full max-w-sm space-y-4">
+    <div className="min-h-screen bg-linear-to-br from-brand-50 via-surface-muted to-white flex items-center justify-center p-4">
+      <form onSubmit={submit} className="bg-white rounded-3xl border border-slate-200 border-t-4 border-t-brand-500 shadow-xl shadow-brand-900/5 p-6 w-full max-w-sm space-y-4">
         <div className="flex items-center gap-2">
-          <KeyRound className="w-5 h-5 text-orange-500" />
+          <KeyRound className="w-5 h-5 text-brand-500" />
           <h1 className="font-bold text-slate-900">Đổi mật khẩu</h1>
         </div>
         {forced && (

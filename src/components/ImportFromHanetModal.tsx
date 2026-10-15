@@ -78,7 +78,7 @@ export const ImportFromHanetModal: React.FC<Props> = ({ departments, onClose, on
                   />
                   <span>{persons.length > IMPORT_MAX ? `Chọn ${IMPORT_MAX} người đầu (trong ${persons.length})` : `Chọn tất cả (${persons.length})`}</span>
                 </label>
-                <select className={`${inputCls} w-auto`} value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}>
+                <select className={`${inputCls} w-auto!`} value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}>
                   <option value="">— Phòng ban cho nhóm đã chọn —</option>
                   {departments.map((d) => (
                     <option key={d.id} value={d.id}>

@@ -76,9 +76,9 @@ export const RequestsTab: React.FC<RequestsTabProps> = ({ requests, currentUser,
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-white rounded-2xl p-5 border border-border border-l-4 border-l-brand-500 shadow-card flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-base font-bold text-slate-900">Đơn giải trình & xin phép</h2>
+          <h2 className="text-lg font-bold tracking-tight text-slate-900">Đơn giải trình & xin phép</h2>
           <p className="text-xs text-slate-500 mt-0.5">
             {currentUser.role === 'employee'
               ? 'Gửi giải trình khi đi muộn có lý do, quên quẹt mặt, nghỉ phép, hoặc đi công tác.'
@@ -90,7 +90,7 @@ export const RequestsTab: React.FC<RequestsTabProps> = ({ requests, currentUser,
         </button>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+      <div className="bg-white rounded-2xl border border-border shadow-card overflow-hidden">
         <div className="p-4 border-b border-slate-100 text-xs font-bold text-slate-800">Danh sách đơn ({requests.length})</div>
         {reviewError && (
           <div role="alert" className="mx-4 mt-4 p-3 rounded-xl border border-rose-200 bg-rose-50 text-xs text-rose-700">
@@ -98,18 +98,18 @@ export const RequestsTab: React.FC<RequestsTabProps> = ({ requests, currentUser,
           </div>
         )}
         {requests.length === 0 ? (
-          <div className="p-12 text-center text-slate-400 text-xs">Chưa có đơn nào</div>
+          <div className="p-12 text-center text-slate-500 text-xs">Chưa có đơn nào</div>
         ) : (
           <div className="divide-y divide-slate-100">
             {requests.map((req) => (
               <div key={req.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
                 <div className="space-y-1.5 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${TYPE_META[req.type]?.badge || 'bg-slate-100 text-slate-800'}`}>
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${TYPE_META[req.type]?.badge || 'bg-slate-100 text-slate-800'}`}>
                       {TYPE_META[req.type]?.label || req.type}
                     </span>
                     <span className="font-bold text-slate-900">{req.employeeName}</span>
-                    <span className="text-[11px] text-slate-400">
+                    <span className="text-[11px] text-slate-500">
                       Ngày {req.endDate ? `${req.workDate.split('-').reverse().join('/')} → ${req.endDate.split('-').reverse().join('/')}` : req.workDate.split('-').reverse().join('/')}
                     </span>
                   </div>
@@ -189,7 +189,7 @@ export const RequestsTab: React.FC<RequestsTabProps> = ({ requests, currentUser,
                     <input type="date" min={workDate} value={endDate} onChange={(e) => setEndDate(e.target.value)} className={inputCls} />
                   </Field>
                 </div>
-                <span className="block text-[11px] text-slate-400">Tối đa 31 ngày, gửi trước tối đa 7 ngày; chỉ tính ngày làm việc của ca</span>
+                <span className="block text-[11px] text-slate-500">Tối đa 31 ngày, gửi trước tối đa 7 ngày; chỉ tính ngày làm việc của ca</span>
               </div>
             ) : (
               <Field label="Ngày áp dụng">

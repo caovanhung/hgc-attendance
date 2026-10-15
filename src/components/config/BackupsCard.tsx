@@ -33,10 +33,10 @@ export const BackupsCard: React.FC<{ canWrite: boolean }> = ({ canWrite }) => {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 text-xs space-y-3">
+    <div className="bg-white rounded-2xl border border-border shadow-card p-5 text-sm space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-          <Database className="w-4 h-4 text-orange-500" /> Sao lưu
+          <Database className="w-4 h-4 text-brand-500" /> Sao lưu
         </h3>
         <div className="flex gap-2">
           {canWrite && (
@@ -54,12 +54,12 @@ export const BackupsCard: React.FC<{ canWrite: boolean }> = ({ canWrite }) => {
       <p className="text-slate-500">Tự động sao lưu lúc 02:00 mỗi ngày, giữ 30 bản. Nên chép định kỳ thư mục data/backups ra ngoài máy chủ.</p>
       <div className="max-h-56 overflow-y-auto divide-y divide-slate-100">
         {backups.length === 0 ? (
-          <p className="py-4 text-center text-slate-400">Chưa có bản sao lưu</p>
+          <p className="py-4 text-center text-slate-500">Chưa có bản sao lưu</p>
         ) : (
           backups.map((b) => (
             <div key={b.name} className="py-1.5 flex justify-between gap-2">
               <span className="font-mono truncate">{b.name}</span>
-              <span className="text-slate-400 shrink-0">
+              <span className="text-slate-500 shrink-0">
                 {(b.size / 1024 / 1024).toFixed(1)} MB · {fmtDateTime(b.createdAt)}
               </span>
             </div>

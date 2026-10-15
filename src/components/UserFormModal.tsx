@@ -27,12 +27,12 @@ const Thumb: React.FC<{ url: string; title: string; sub: string; selected: boole
   <button
     type="button"
     onClick={onClick}
-    className={`text-left rounded-xl border overflow-hidden bg-white cursor-pointer ${selected ? 'border-orange-500 ring-2 ring-orange-300' : 'border-slate-200 hover:border-orange-400'}`}
+    className={`text-left rounded-xl border overflow-hidden bg-white cursor-pointer ${selected ? 'border-brand-500 ring-2 ring-brand-300' : 'border-slate-200 hover:border-brand-400'}`}
   >
     <img src={url} alt="" className="w-full aspect-[3/4] object-cover bg-slate-100" />
     <div className="p-1.5">
       <div className="font-semibold text-[11px] truncate">{title}</div>
-      <div className="text-[10px] text-slate-500 truncate">{sub}</div>
+      <div className="text-[11px] text-slate-500 truncate">{sub}</div>
     </div>
   </button>
 );
@@ -183,7 +183,7 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, me, isSystem
     <Modal title={isEdit ? `Sửa nhân sự ${user?.code}` : 'Thêm nhân sự'} onClose={onClose} wide>
       <form onSubmit={submit} className="space-y-3.5">
         {faceAllowed && (
-        <div className="rounded-2xl border border-orange-200 bg-orange-50/60 p-3 space-y-2.5">
+        <div className="rounded-2xl border border-brand-200 bg-brand-50/60 p-3 space-y-2.5">
           <div className="flex items-center justify-between gap-2">
             <p className="text-[11px] text-slate-600">
               {isEdit
@@ -241,7 +241,7 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, me, isSystem
                   key={s.id}
                   type="button"
                   onClick={() => pickSighting(s)}
-                  className="w-full flex items-center gap-3 p-2 rounded-xl bg-white border border-slate-200 hover:border-orange-400 text-left cursor-pointer"
+                  className="w-full flex items-center gap-3 p-2 rounded-xl bg-white border border-slate-200 hover:border-brand-400 text-left cursor-pointer"
                 >
                   <img src={s.imageUrl} alt="" className="w-10 h-10 rounded-lg object-cover bg-slate-100 shrink-0" />
                   <div className="min-w-0 flex-1">
@@ -250,7 +250,7 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, me, isSystem
                       Mã: <span className="font-mono">{s.aliasId ?? '— (chưa có trên Camera AI)'}</span> · {fmtTime(s.ts)}
                     </div>
                   </div>
-                  <span className="text-[11px] font-semibold text-orange-600 shrink-0">Chọn</span>
+                  <span className="text-[11px] font-semibold text-brand-600 shrink-0">Chọn</span>
                 </button>
               ))}
             </div>

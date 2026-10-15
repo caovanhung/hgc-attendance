@@ -10,7 +10,7 @@ const TONE: Record<SyncStatus, string> = {
 };
 
 export const SyncBadge: React.FC<{ status: SyncStatus; error: string | null }> = ({ status, error }) => (
-  <span className={`inline-flex px-2 py-0.5 rounded-full border text-[10px] font-semibold ${TONE[status]}`} title={error ?? undefined}>
+  <span className={`inline-flex px-2 py-0.5 rounded-full border text-[11px] font-semibold ${TONE[status]}`} title={error ?? undefined}>
     {SYNC_STATUS_LABEL[status]}
   </span>
 );
@@ -30,7 +30,7 @@ export const SyncRetryButton: React.FC<{ entityType: SyncEntity; entityId: strin
     }
   };
   return (
-    <button type="button" onClick={retry} disabled={busy} className="text-[10px] font-semibold text-rose-700 hover:underline cursor-pointer disabled:opacity-50">
+    <button type="button" onClick={retry} disabled={busy} className="text-[11px] font-semibold text-rose-700 hover:underline cursor-pointer disabled:opacity-50">
       Đồng bộ lại
     </button>
   );

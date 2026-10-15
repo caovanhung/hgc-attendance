@@ -32,7 +32,7 @@ export const SyncStatusCard: React.FC = () => {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 text-xs space-y-3">
+    <div className="bg-white rounded-2xl border border-border shadow-card p-5 text-sm space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="font-bold text-sm text-slate-900">Đồng bộ Camera AI</h3>
         <button onClick={() => void load()} className="text-slate-500 hover:text-slate-900 cursor-pointer" aria-label="Làm mới">
@@ -59,7 +59,7 @@ export const SyncStatusCard: React.FC = () => {
                       {j.label} · {SYNC_OP_LABEL[j.op]}
                     </div>
                     <div className="text-rose-600">{j.lastError}</div>
-                    <div className="text-[10px] text-slate-400">
+                    <div className="text-[11px] text-slate-500">
                       {j.attempts} lần thử · {fmtDateTime(j.updatedAt)}
                     </div>
                   </div>

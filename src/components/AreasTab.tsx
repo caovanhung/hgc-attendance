@@ -70,9 +70,9 @@ export const AreasTab: React.FC<{ onChanged: () => void }> = ({ onChanged }) => 
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-white rounded-2xl p-5 border border-border border-l-4 border-l-brand-500 shadow-card flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-base font-bold text-slate-900">Khu vực</h2>
+          <h2 className="text-lg font-bold tracking-tight text-slate-900">Khu vực</h2>
           <p className="text-xs text-slate-500 mt-0.5">
             Nhân sự thuộc khu của phòng ban. Quản trị khu vực chỉ xem và quản lý dữ liệu trong khu được giao (cấp quyền ở tab Nhân sự).
           </p>
@@ -89,7 +89,7 @@ export const AreasTab: React.FC<{ onChanged: () => void }> = ({ onChanged }) => 
       )}
 
       {areas.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-12 text-center text-xs text-slate-500">
+        <div className="bg-white rounded-2xl border border-border p-12 text-center text-sm text-slate-500">
           <MapPinned className="w-8 h-8 mx-auto mb-2 text-slate-300" />
           Chưa có khu vực nào.
         </div>
@@ -99,10 +99,10 @@ export const AreasTab: React.FC<{ onChanged: () => void }> = ({ onChanged }) => 
             const depts = departments.filter((d) => d.areaId === a.id);
             const cams = cameras.filter((c) => c.areaId === a.id);
             return (
-              <div key={a.id} className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-4 text-xs space-y-3">
+              <div key={a.id} className="bg-white rounded-2xl border border-border shadow-card p-4 text-sm space-y-3">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <span className="text-[10px] font-mono font-bold px-1.5 rounded bg-slate-100 text-slate-600">{a.code}</span>
+                    <span className="text-[11px] font-mono font-bold px-1.5 rounded bg-slate-100 text-slate-600">{a.code}</span>
                     <h3 className="font-bold text-sm text-slate-900 mt-1">{a.name}</h3>
                     {a.note && <p className="text-slate-500">{a.note}</p>}
                     <p className="text-slate-500 mt-1">
@@ -131,7 +131,7 @@ export const AreasTab: React.FC<{ onChanged: () => void }> = ({ onChanged }) => 
                       {inArea.map((x) => (
                         <span key={x.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100">
                           {x.name}
-                          <button onClick={() => assign(kind, x.id, null)} className="text-slate-400 hover:text-rose-600 cursor-pointer" aria-label={`Bỏ ${x.name} khỏi khu`}>
+                          <button onClick={() => assign(kind, x.id, null)} className="text-slate-500 hover:text-rose-600 cursor-pointer" aria-label={`Bỏ ${x.name} khỏi khu`}>
                             <X className="w-3 h-3" />
                           </button>
                         </span>

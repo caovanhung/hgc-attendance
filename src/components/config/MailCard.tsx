@@ -28,7 +28,7 @@ export const MailCard: React.FC = () => {
       .catch((err) => setResult({ ok: false, message: errorMessage(err) }));
   }, []);
 
-  if (!form) return <div className="bg-white rounded-2xl border border-slate-200/80 p-5 text-xs text-slate-500">{result?.message ?? 'Đang tải cấu hình thư...'}</div>;
+  if (!form) return <div className="bg-white rounded-2xl border border-border p-5 text-sm text-slate-500">{result?.message ?? 'Đang tải cấu hình thư...'}</div>;
   const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm({ ...form, [k]: k === 'port' || k === 'dailyLimit' ? Number(e.target.value) : e.target.value });
 
   const save = async (e: React.FormEvent) => {
@@ -58,9 +58,9 @@ export const MailCard: React.FC = () => {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 text-xs space-y-4">
+    <div className="bg-white rounded-2xl border border-border shadow-card p-5 text-sm space-y-4">
       <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-        <Mail className="w-4 h-4 text-orange-500" /> Gửi thư (mật khẩu, đặt lại mật khẩu)
+        <Mail className="w-4 h-4 text-brand-500" /> Gửi thư (mật khẩu, đặt lại mật khẩu)
       </h3>
       {view && (
         <p className="text-slate-500">

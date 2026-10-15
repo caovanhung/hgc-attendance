@@ -22,8 +22,8 @@ export const ForgotPasswordScreen: React.FC<{ onBack: () => void }> = ({ onBack 
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <form onSubmit={submit} className="bg-white rounded-3xl border border-slate-200 shadow-xl p-6 w-full max-w-sm space-y-4">
+    <div className="min-h-screen bg-linear-to-br from-brand-50 via-surface-muted to-white flex items-center justify-center p-4">
+      <form onSubmit={submit} className="bg-white rounded-3xl border border-slate-200 border-t-4 border-t-brand-500 shadow-xl shadow-brand-900/5 p-6 w-full max-w-sm space-y-4">
         <h1 className="font-bold text-slate-900">Quên mật khẩu</h1>
         <p className="text-xs text-slate-500">Nhập mã nhân viên hoặc email. Hệ thống sẽ gửi link đặt lại mật khẩu (dùng được trong 30 phút) tới email của bạn.</p>
         {message ? (
@@ -39,7 +39,7 @@ export const ForgotPasswordScreen: React.FC<{ onBack: () => void }> = ({ onBack 
             </button>
           </>
         )}
-        <button type="button" onClick={onBack} className="text-[11px] text-orange-600 hover:underline cursor-pointer">
+        <button type="button" onClick={onBack} className="text-[11px] text-brand-600 hover:underline cursor-pointer">
           ← Quay lại đăng nhập
         </button>
       </form>

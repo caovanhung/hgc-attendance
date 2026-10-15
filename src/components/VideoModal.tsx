@@ -88,7 +88,7 @@ export const VideoModal: React.FC<{ detection: Detection; onClose: () => void }>
           </button>
         </div>
         {(at !== null || (clip !== null && clip.at !== null)) && (
-          <button type="button" className="text-[11px] text-blue-600 hover:underline cursor-pointer" onClick={() => go(null)} disabled={loading}>
+          <button type="button" className="text-[11px] text-brand-700 hover:underline cursor-pointer" onClick={() => go(null)} disabled={loading}>
             Về đoạn có lượt quẹt
           </button>
         )}

@@ -106,9 +106,9 @@ export const ShiftsTab: React.FC<{ me: MeResponse; area: string; onChanged: () =
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-white rounded-2xl p-5 border border-border border-l-4 border-l-brand-500 shadow-card flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-base font-bold text-slate-900">Ca làm việc</h2>
+          <h2 className="text-lg font-bold tracking-tight text-slate-900">Ca làm việc</h2>
           <p className="text-xs text-slate-500 mt-0.5">
             Mỗi khu có ca riêng. Phòng ban chọn ca ở tab Phòng ban; phòng chưa chọn ca dùng ca mặc định công ty. Sửa ca thì hệ thống tự tính lại công từ đầu tháng.
           </p>
@@ -126,7 +126,7 @@ export const ShiftsTab: React.FC<{ me: MeResponse; area: string; onChanged: () =
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {shifts.map((s) => (
-          <div key={s.id} className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-4 text-xs space-y-1.5">
+          <div key={s.id} className="bg-white rounded-2xl border border-border shadow-card p-4 text-sm space-y-1.5">
             <div className="flex items-start justify-between gap-2">
               <div>
                 <h3 className="font-bold text-sm text-slate-900">{s.name}</h3>
@@ -142,7 +142,7 @@ export const ShiftsTab: React.FC<{ me: MeResponse; area: string; onChanged: () =
               </div>
             </div>
             <div className="flex items-center gap-1.5 font-mono">
-              <Clock className="w-3.5 h-3.5 text-orange-500" /> {s.workStart}–{s.workEnd} · {formatWorkDays(s.workDays)}
+              <Clock className="w-3.5 h-3.5 text-brand-500" /> {s.workStart}–{s.workEnd} · {formatWorkDays(s.workDays)}
             </div>
             <div className="text-slate-500">
               Muộn sau {s.lateGraceMinutes}' · đi sớm trước {s.earlyArrivalMinutes}' · về sớm quá {s.earlyLeaveMinutes}'
@@ -158,12 +158,12 @@ export const ShiftsTab: React.FC<{ me: MeResponse; area: string; onChanged: () =
       {/* Ngày lễ: mọi quản lý xem được; chỉ HR toàn hệ thống thêm/xóa (spec mục 9) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {isHr && <WorkSettingsCard onRecomputed={onChanged} />}
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 text-xs space-y-3">
+        <div className="bg-white rounded-2xl border border-border shadow-card p-5 text-sm space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-              <CalendarDays className="w-4 h-4 text-orange-500" /> Ngày lễ
+              <CalendarDays className="w-4 h-4 text-brand-500" /> Ngày lễ
             </h3>
-            <select className={`${inputCls} w-auto`} value={year} onChange={(e) => setYear(Number(e.target.value))}>
+            <select className={`${inputCls} w-auto!`} value={year} onChange={(e) => setYear(Number(e.target.value))}>
               {[year - 1, year, year + 1].map((y) => (
                 <option key={y} value={y}>
                   {y}
@@ -188,7 +188,7 @@ export const ShiftsTab: React.FC<{ me: MeResponse; area: string; onChanged: () =
           </ul>
           {isHr && (
             <form onSubmit={addHoliday} className="flex flex-wrap gap-2">
-              <input type="date" className={`${inputCls} w-auto`} value={newHoliday.date} onChange={(e) => setNewHoliday({ ...newHoliday, date: e.target.value })} required />
+              <input type="date" className={`${inputCls} w-auto!`} value={newHoliday.date} onChange={(e) => setNewHoliday({ ...newHoliday, date: e.target.value })} required />
               <input className={`${inputCls} flex-1 min-w-[140px]`} placeholder="Tên ngày lễ" value={newHoliday.name} onChange={(e) => setNewHoliday({ ...newHoliday, name: e.target.value })} required />
               <button type="submit" className={secondaryBtn}>
                 Thêm

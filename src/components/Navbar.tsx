@@ -29,7 +29,7 @@ interface NavbarProps {
 }
 
 const ROLE_BADGE: Record<User['role'], string> = {
-  hr: 'bg-blue-50 text-blue-700 ring-blue-200',
+  hr: 'bg-brand-50 text-brand-700 ring-brand-200',
   area_admin: 'bg-violet-50 text-violet-700 ring-violet-200',
   dept_manager: 'bg-amber-50 text-amber-700 ring-amber-200',
   employee: 'bg-slate-100 text-slate-700 ring-slate-200',
@@ -109,18 +109,18 @@ export const Navbar: React.FC<NavbarProps> = ({
     'focus-visible:outline-2 focus-visible:outline-brand-600';
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-surface/95 shadow-[0_1px_3px_rgb(15_23_42/4%)] backdrop-blur-md">
+    <header className="sticky top-0 z-40 border-b border-border border-t-4 border-t-brand-500 bg-surface/95 shadow-[0_1px_3px_rgb(15_23_42/4%)] backdrop-blur-md">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         {/* Brand and account toolbar */}
         <div className="flex min-h-16 items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-navy text-white shadow-sm">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-brand-500 to-brand-700 text-white shadow-sm shadow-brand-600/30">
               <Camera className="size-5" strokeWidth={2} />
             </div>
 
             <div className="min-w-0">
               <div className="truncate text-base font-bold tracking-tight text-text-primary sm:text-lg">
-                Petrolimex Attendance
+                Petrolimex <span className="text-brand-600">Attendance</span>
               </div>
               <div className="hidden text-xs text-text-secondary sm:block">
                 Hệ thống quản lý chấm công
@@ -208,8 +208,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                   aria-current={isActive ? 'page' : undefined}
                   className={`inline-flex min-h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-brand-600 ${
                     isActive
-                      ? 'bg-brand-navy font-semibold text-white shadow-sm'
-                      : 'font-medium text-text-secondary hover:bg-surface-muted hover:text-text-primary'
+                      ? 'bg-brand-50 font-semibold text-brand-700 ring-1 ring-inset ring-brand-200'
+                      : 'font-medium text-text-secondary hover:bg-brand-50/60 hover:text-brand-700'
                   }`}
                 >
                   <Icon className="size-4 shrink-0" strokeWidth={1.8} />
@@ -220,7 +220,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <span
                       className={`rounded-md px-1.5 py-0.5 text-xs tabular-nums ${
                         isActive
-                          ? 'bg-white/15 text-white'
+                          ? 'bg-brand-600 text-white'
                           : 'bg-slate-100 text-slate-600'
                       }`}
                     >

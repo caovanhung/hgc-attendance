@@ -28,6 +28,18 @@ export const DAY_STATUS_LABEL: Record<DayStatus, string> = {
   business_trip: 'Công tác',
 };
 
+/** Màu trạng thái ngày công dùng chung (bảng công, thẻ thống kê). Cam dành cho thương hiệu nên không dùng ở đây. */
+export const DAY_STATUS_STYLE: Record<DayStatus, string> = {
+  on_time: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  late: 'bg-amber-50 text-amber-800 border-amber-200',
+  early_leave: 'bg-amber-50 text-amber-800 border-amber-200',
+  late_and_early: 'bg-rose-50 text-rose-700 border-rose-200',
+  missing_out: 'bg-slate-100 text-slate-700 border-slate-200',
+  absent: 'bg-rose-50 text-rose-700 border-rose-200',
+  leave: 'bg-violet-50 text-violet-700 border-violet-200',
+  business_trip: 'bg-sky-50 text-sky-700 border-sky-200',
+};
+
 export const ROLE_LABEL: Record<UserRole, string> = {
   hr: 'HR toàn hệ thống',
   area_admin: 'Quản trị khu vực',

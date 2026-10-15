@@ -149,9 +149,9 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-white rounded-2xl p-5 border border-border border-l-4 border-l-brand-500 shadow-card flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-base font-bold text-slate-900">Camera AI</h2>
+          <h2 className="text-lg font-bold tracking-tight text-slate-900">Camera AI</h2>
           <p className="text-xs text-slate-500 mt-0.5">
             Trạng thái online/offline tự cập nhật mỗi 5 phút. Đổi tên ở đây thì
             đổi luôn trên Camera AI.
@@ -199,7 +199,7 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
       )}
 
       {cameras.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-12 text-center text-xs text-slate-500">
+        <div className="bg-white rounded-2xl border border-border p-12 text-center text-sm text-slate-500">
           <Video className="w-8 h-8 mx-auto mb-2 text-slate-300" />
           Chưa có camera nào.
         </div>
@@ -208,14 +208,14 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
           {cameras.map((c) => (
             <div
               key={c.id}
-              className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-4 text-xs space-y-2"
+              className="bg-white rounded-2xl border border-border shadow-card p-4 text-sm space-y-2"
             >
               <div className="flex items-center justify-between">
                 <h3 className="font-bold text-sm text-slate-900 truncate">
                   {c.name}
                 </h3>
                 <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-[10px] px-1.5 rounded bg-slate-100 text-slate-600">
+                  <span className="font-mono text-[11px] px-1.5 rounded bg-slate-100 text-slate-600">
                     {c.deviceKey}
                   </span>
                   {canManage && (
@@ -232,7 +232,7 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
                           areaId: c.areaId ?? "",
                         })
                       }
-                      className="p-1 rounded-lg text-slate-400 hover:text-slate-900 hover:bg-slate-100 cursor-pointer"
+                      className="p-1 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 cursor-pointer"
                       title="Sửa camera"
                       aria-label={`Sửa camera ${c.name}`}
                     >
@@ -245,7 +245,7 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
                         setDeleteError(null);
                         setDeleting(c);
                       }}
-                      className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                      className="p-1 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
                       title="Xóa camera"
                       aria-label={`Xóa camera ${c.name}`}
                     >
@@ -257,30 +257,30 @@ export const CamerasTab: React.FC<CamerasTabProps> = ({
               <StatusDot camera={c} />
               {c.location && (
                 <div className="flex items-center gap-1.5 text-slate-500">
-                  <MapPin className="w-3 h-3 text-orange-500" /> {c.location}
+                  <MapPin className="w-3 h-3 text-brand-500" /> {c.location}
                 </div>
               )}
               <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2 rounded-xl">
                 <div className="col-span-2">
-                  <span className="block text-[10px] text-slate-400">
+                  <span className="block text-[11px] text-slate-500">
                     Khu vực
                   </span>
                   {c.areaName ?? "Chưa gán khu"}
                 </div>
                 <div>
-                  <span className="block text-[10px] text-slate-400">
+                  <span className="block text-[11px] text-slate-500">
                     Địa điểm
                   </span>
                   {c.placeName || "—"}
                 </div>
                 <div>
-                  <span className="block text-[10px] text-slate-400">
+                  <span className="block text-[11px] text-slate-500">
                     Place ID
                   </span>
                   <span className="font-mono">{c.placeId ?? "—"}</span>
                 </div>
                 <div className="col-span-2">
-                  <span className="block text-[10px] text-slate-400">
+                  <span className="block text-[11px] text-slate-500">
                     IP nội bộ
                   </span>
                   <span className="font-mono">{c.ipAddress || "—"}</span>

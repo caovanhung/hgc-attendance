@@ -24,14 +24,14 @@ export const WebhookCard: React.FC<{ config: HanetConfigView; onChange: (c: Hane
         Dán URL này vào cấu hình webhook trên Camera AI. URL chứa token bí mật: không chia sẻ công khai. Nếu nghi bị lộ, hãy tạo token mới.
       </p>
       <div className="mt-4 flex flex-wrap items-center gap-2 bg-slate-950/80 border border-slate-700 rounded-2xl p-2.5">
-        <Terminal className="w-4 h-4 text-orange-400 shrink-0 ml-1.5" />
+        <Terminal className="w-4 h-4 text-brand-400 shrink-0 ml-1.5" />
         <code className="text-xs font-mono text-emerald-400 flex-1 break-all">{url}</code>
         <button
           onClick={async () => {
             await navigator.clipboard.writeText(url);
             setCopied(true);
           }}
-          className="px-3 py-1.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+          className="px-3 py-1.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
         >
           {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copied ? 'Đã sao chép' : 'Sao chép'}
         </button>

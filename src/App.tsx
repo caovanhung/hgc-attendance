@@ -204,7 +204,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col text-slate-900 font-sans antialiased">
+    <div className="min-h-screen bg-surface-muted flex flex-col text-slate-900 font-sans antialiased">
       <Navbar
         currentUser={currentUser}
         totalCameraCount={cameras.length}
@@ -227,7 +227,7 @@ export default function App() {
             <span />
           )}
           <button onClick={() => fetchData()} className="flex items-center gap-1.5 text-slate-600 hover:text-slate-900 font-medium cursor-pointer">
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-orange-500' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-brand-500' : ''}`} />
             <span>Cập nhật ({lastRefreshed || 'mới nhất'})</span>
           </button>
         </div>

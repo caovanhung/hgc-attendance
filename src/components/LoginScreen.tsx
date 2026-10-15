@@ -24,10 +24,10 @@ export const LoginScreen: React.FC<{ onLoggedIn: () => void; onForgot: () => voi
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <form onSubmit={submit} className="bg-white rounded-3xl border border-slate-200 shadow-xl p-6 w-full max-w-sm space-y-4">
+    <div className="min-h-screen bg-linear-to-br from-brand-50 via-surface-muted to-white flex items-center justify-center p-4">
+      <form onSubmit={submit} className="bg-white rounded-3xl border border-slate-200 border-t-4 border-t-brand-500 shadow-xl shadow-brand-900/5 p-6 w-full max-w-sm space-y-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-600 to-orange-500 flex items-center justify-center text-white">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-600 to-brand-500 flex items-center justify-center text-white">
             <Camera className="w-6 h-6" />
           </div>
           <div>
@@ -46,7 +46,7 @@ export const LoginScreen: React.FC<{ onLoggedIn: () => void; onForgot: () => voi
         <button type="submit" disabled={busy} className={`${primaryBtn} w-full py-2.5`}>
           {busy ? 'Đang đăng nhập...' : 'Đăng nhập'}
         </button>
-        <button type="button" onClick={onForgot} className="text-[11px] text-orange-600 hover:underline cursor-pointer">
+        <button type="button" onClick={onForgot} className="text-[11px] text-brand-600 hover:underline cursor-pointer">
           Quên mật khẩu?
         </button>
       </form>

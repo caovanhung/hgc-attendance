@@ -36,13 +36,15 @@ interface Card {
   value: number;
   icon: LucideIcon;
   tone: string;
+  /** Màu số khi lớn hơn 0, cho các chỉ số cần chú ý. */
+  alert?: string;
   detail: StatsDetailType | 'requests';
 }
 
 const cardsBaseClass =
   'group flex min-w-0 items-center gap-3 rounded-card border ' +
   'border-border bg-surface p-3.5 text-left shadow-[var(--shadow-card)] ' +
-  'transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-100 ' +
+  'transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-200 ' +
   'hover:shadow-md focus-visible:outline-2 focus-visible:outline-brand-600 ' +
   'sm:p-4';
 
@@ -72,7 +74,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
       label: 'Nhân sự đang làm',
       value: stats.totalEmployees,
       icon: Users,
-      tone: 'bg-slate-100 text-slate-600',
+      tone: 'bg-brand-50 text-brand-600',
       detail: 'total',
     },
     {
@@ -101,13 +103,14 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
       value: stats.lateCount,
       icon: AlertTriangle,
       tone: 'bg-amber-50 text-amber-700',
+      alert: 'text-amber-700',
       detail: 'late',
     },
     {
       label: 'Chưa có giờ ra',
       value: stats.missingOutCount,
       icon: LogOut,
-      tone: 'bg-orange-50 text-orange-700',
+      tone: 'bg-slate-100 text-slate-600',
       detail: 'missing_out',
     },
     {
@@ -122,13 +125,14 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
       value: stats.absentCount,
       icon: UserMinus,
       tone: 'bg-rose-50 text-rose-700',
+      alert: 'text-rose-700',
       detail: 'absent',
     },
     {
       label: 'Nghỉ phép',
       value: stats.leaveCount,
       icon: Palmtree,
-      tone: 'bg-purple-50 text-purple-700',
+      tone: 'bg-violet-50 text-violet-700',
       detail: 'leave',
     },
     {
@@ -142,7 +146,8 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
       label: 'Đơn chờ duyệt',
       value: stats.pendingRequests,
       icon: FileText,
-      tone: 'bg-violet-50 text-violet-700',
+      tone: 'bg-brand-100 text-brand-700',
+      alert: 'text-brand-700',
       detail: 'requests',
     },
   ];
@@ -153,7 +158,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
     <section className="mb-6" aria-label="Thống kê điểm danh">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="text-xs font-bold uppercase tracking-wide text-text-secondary">
+          <span className="text-xs font-bold uppercase tracking-wide text-brand-700">
             Hôm nay {dateLabel}
           </span>
           <span className="hidden text-slate-300 sm:inline">/</span>
@@ -194,7 +199,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
               </span>
 
               <span className="min-w-0 flex-1">
-                <span className="block text-2xl font-bold leading-tight tracking-tight text-text-primary tabular-nums">
+                <span className={`block text-2xl font-bold leading-tight tracking-tight tabular-nums ${card.alert && card.value > 0 ? card.alert : 'text-text-primary'}`}>
                   {card.value.toLocaleString('vi-VN')}
                 </span>
 
@@ -374,7 +379,7 @@ const StatsDetailModal: React.FC<{
                             )}
 
                             {row.earlyMinutes > 0 && (
-                              <span className="inline-flex whitespace-nowrap rounded-full bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-800">
+                              <span className="inline-flex whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">
                                 Về sớm {row.earlyMinutes}'
                               </span>
                             )}
