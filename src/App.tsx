@@ -237,9 +237,7 @@ export default function App() {
           </button>
         </div>
 
-        {!(tab === 'mine' && currentUser.role === 'employee') && (
-          <StatsCards stats={stats} currentUser={currentUser} onOpenRequests={() => setActiveTab('requests')} />
-        )}
+        {tab === 'attendance' && <StatsCards stats={stats} currentUser={currentUser} onOpenRequests={() => setActiveTab('requests')} />}
 
         {tab === 'mine' && <MyAttendanceTab me={me} />}
 
