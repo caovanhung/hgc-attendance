@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertCircle } from 'lucide-react';
-import type { AuditLogEntry } from '../types';
+import type { AuditLogEntry, DayOverride, DayStatus, UserRole } from '../types';
 import { api, errorMessage } from '../api';
-import { AUDIT_ACTION_LABEL, fmtDate, fmtDateTime, vnToday } from '../format';
+import { AUDIT_ACTION_LABEL, DAY_STATUS_LABEL, OVERRIDE_KIND_LABEL, ROLE_LABEL, fmtDate, fmtDateTime, fmtTime, vnToday } from '../format';
 import { Field, Modal, inputCls, secondaryBtn } from './ui';
 
 interface AuditPage {
@@ -12,9 +12,36 @@ interface AuditPage {
   pageSize: number;
 }
 
-const short = (v: unknown): string => {
+const FIELD_LABEL: Record<string, string> = {
+  firstIn: 'Vào',
+  lastOut: 'Ra',
+  status: 'Trạng thái',
+  kind: 'Kiểu',
+  role: 'Vai trò',
+  areaIds: 'Khu',
+  shiftId: 'Ca',
+  comment: 'Ghi chú',
+};
+
+/** Giá trị trước/sau dạng dễ đọc: giờ HH:MM, nhãn trạng thái/vai trò thay cho mã. */
+function describe(v: unknown): string {
   if (v === null || v === undefined) return '—';
-  const s = JSON.stringify(v);
+  if (typeof v !== 'object' || Array.isArray(v)) return JSON.stringify(v);
+  return Object.entries(v as Record<string, unknown>)
+    .map(([k, x]) => {
+      let val: string;
+      if ((k === 'firstIn' || k === 'lastOut') && (typeof x === 'number' || x === null)) val = fmtTime(x as number | null);
+      else if (k === 'status' && typeof x === 'string') val = DAY_STATUS_LABEL[x as DayStatus] ?? x;
+      else if (k === 'kind' && typeof x === 'string') val = OVERRIDE_KIND_LABEL[x as DayOverride['kind']] ?? x;
+      else if (k === 'role' && typeof x === 'string') val = ROLE_LABEL[x as UserRole] ?? x;
+      else val = typeof x === 'string' ? x : JSON.stringify(x);
+      return `${FIELD_LABEL[k] ?? k}: ${val}`;
+    })
+    .join(', ');
+}
+
+const short = (v: unknown): string => {
+  const s = describe(v);
   return s.length > 80 ? `${s.slice(0, 77)}…` : s;
 };
 
@@ -110,16 +137,16 @@ export const AuditLogTab: React.FC = () => {
                   {data.entries.map((e) => (
                     <tr key={e.id} className={e.action === 'auth.login_failed' ? 'text-rose-700' : ''}>
                       <td className="py-2.5 px-4 whitespace-nowrap text-xs">{fmtDateTime(e.at)}</td>
-                      <td className="py-2.5 px-4">
+                      <td className="py-2.5 px-4 min-w-40">
                         <div className="font-semibold">{e.actorLabel}</div>
                         {e.ip && <div className="text-[11px] text-slate-500 font-mono">{e.ip}</div>}
                       </td>
                       <td className="py-2.5 px-4 whitespace-nowrap">{AUDIT_ACTION_LABEL[e.action] ?? e.action}</td>
-                      <td className="py-2.5 px-4">
+                      <td className="py-2.5 px-4 min-w-36">
                         {e.targetLabel ?? '—'}
                         {e.workDate && <div className="text-[11px] text-slate-500">ngày {fmtDate(e.workDate)}</div>}
                       </td>
-                      <td className="py-2.5 px-4 text-xs font-mono">
+                      <td className="py-2.5 px-4 text-xs">
                         {e.before === null && e.after === null ? (
                           '—'
                         ) : (
@@ -128,7 +155,7 @@ export const AuditLogTab: React.FC = () => {
                           </button>
                         )}
                       </td>
-                      <td className="py-2.5 px-4 text-xs max-w-64">{e.reason ?? ''}</td>
+                      <td className="py-2.5 px-4 text-xs min-w-40 max-w-64">{e.reason ?? ''}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -157,6 +184,7 @@ export const AuditLogTab: React.FC = () => {
             {(['before', 'after'] as const).map((k) => (
               <div key={k}>
                 <div className="text-xs font-semibold text-slate-600 mb-1">{k === 'before' ? 'Trước' : 'Sau'}</div>
+                <p className="text-sm text-slate-800 mb-2">{describe(viewing[k])}</p>
                 <pre className="text-xs bg-slate-50 border border-slate-200 rounded-xl p-3 overflow-auto max-h-80">{JSON.stringify(viewing[k], null, 2) ?? '—'}</pre>
               </div>
             ))}
