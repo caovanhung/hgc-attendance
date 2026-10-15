@@ -70,10 +70,53 @@ function ddlAttendanceDays(name, ifNotExists) {
   PRIMARY KEY (user_id, work_date)
 );`;
 }
+function ddlOverrides(ifNotExists) {
+  return `CREATE TABLE ${ine(ifNotExists)}attendance_overrides (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  work_date TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('times', 'leave', 'business_trip')),
+  first_in INTEGER,
+  last_out INTEGER,
+  reason TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_by_label TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, work_date),
+  CHECK (kind != 'times' OR first_in IS NOT NULL OR last_out IS NOT NULL)
+);`;
+}
+function ddlAuditLogs(ifNotExists) {
+  return `CREATE TABLE ${ine(ifNotExists)}audit_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at TEXT NOT NULL,
+  actor_id TEXT,
+  actor_label TEXT NOT NULL,
+  ip TEXT,
+  action TEXT NOT NULL,
+  target_user_id TEXT,
+  target_label TEXT,
+  area_id TEXT,
+  work_date TEXT,
+  before_json TEXT,
+  after_json TEXT,
+  reason TEXT
+);
+CREATE INDEX ${ine(ifNotExists)}idx_audit_at ON audit_logs(at);
+CREATE INDEX ${ine(ifNotExists)}idx_audit_target ON audit_logs(target_user_id);
+CREATE INDEX ${ine(ifNotExists)}idx_audit_area ON audit_logs(area_id);`;
+}
+function ddlMonthLocks(ifNotExists) {
+  return `CREATE TABLE ${ine(ifNotExists)}month_locks (
+  month TEXT PRIMARY KEY,
+  locked_by TEXT NOT NULL,
+  locked_by_label TEXT NOT NULL,
+  locked_at TEXT NOT NULL
+);`;
+}
 var SCHEMA_VERSION, ine, SCHEMA;
 var init_schema = __esm({
   "server/schema.ts"() {
-    SCHEMA_VERSION = 4;
+    SCHEMA_VERSION = 5;
     ine = (b) => b ? "IF NOT EXISTS " : "";
     SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
@@ -178,6 +221,12 @@ CREATE INDEX IF NOT EXISTS idx_attendance_days_date ON attendance_days(work_date
 ${ddlRequests("requests", true)}
 CREATE INDEX IF NOT EXISTS idx_requests_user ON requests(user_id);
 
+${ddlOverrides(true)}
+
+${ddlAuditLogs(true)}
+
+${ddlMonthLocks(true)}
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -270,9 +319,9 @@ function isValidDate(s) {
   const t = Date.parse(`${s}T00:00:00Z`);
   return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === s;
 }
-function vnDateTimeToTs(date, hhmm2) {
+function vnDateTimeToTs(date, hhmm3) {
   const [y, mo, d] = date.split("-").map(Number);
-  return Date.UTC(y, mo - 1, d, 0, parseHHmm(hhmm2)) - VN_OFFSET_MS;
+  return Date.UTC(y, mo - 1, d, 0, parseHHmm(hhmm3)) - VN_OFFSET_MS;
 }
 function vnDayStart(date) {
   return vnDateTimeToTs(date, "00:00");
@@ -375,6 +424,11 @@ function migrate3to4(db, now) {
   db.exec("CREATE INDEX IF NOT EXISTS idx_attendance_days_date ON attendance_days(work_date)");
   db.exec(`INSERT OR IGNORE INTO settings(key, value) VALUES ('work_days', '1,2,3,4,5'), ('early_arrival_minutes', '15'), ('early_leave_minutes', '10')`);
 }
+function migrate4to5(db) {
+  db.exec(ddlOverrides(false));
+  db.exec(ddlAuditLogs(false));
+  db.exec(ddlMonthLocks(false));
+}
 function runMigrations(db, file, from, opts) {
   const backup = opts.backupDir && file !== ":memory:" ? backupPreMigrate(db, opts.backupDir, from) : null;
   db.exec("PRAGMA foreign_keys = OFF");
@@ -418,7 +472,10 @@ var init_migrations = __esm({
         this.backup = backup;
       }
     };
-    MIGRATIONS = [{ from: 3, run: migrate3to4 }];
+    MIGRATIONS = [
+      { from: 3, run: migrate3to4 },
+      { from: 4, run: migrate4to5 }
+    ];
   }
 });
 
@@ -879,6 +936,57 @@ var init_shifts = __esm({
   }
 });
 
+// server/month-lock.ts
+function isValidMonth(s) {
+  return typeof s === "string" && MONTH_RE.test(s);
+}
+function monthLabel(month) {
+  return `${month.slice(5, 7)}/${month.slice(0, 4)}`;
+}
+function lockOf(db, month) {
+  const r = db.prepare("SELECT month, locked_by_label, locked_at FROM month_locks WHERE month = ?").get(month);
+  return r ? { month: r.month, lockedByName: r.locked_by_label, lockedAt: r.locked_at } : null;
+}
+function isMonthLocked(db, date) {
+  return Boolean(db.prepare("SELECT 1 FROM month_locks WHERE month = ?").get(date.slice(0, 7)));
+}
+function lockedError(month) {
+  return new HttpError(423, `Th\xE1ng ${monthLabel(month)} \u0111\xE3 kh\xF3a s\u1ED5`);
+}
+function assertRangeUnlocked(db, from, to) {
+  const r = db.prepare("SELECT month FROM month_locks WHERE month >= ? AND month <= ? ORDER BY month LIMIT 1").get(from.slice(0, 7), to.slice(0, 7));
+  if (r) throw lockedError(r.month);
+}
+var MONTH_RE;
+var init_month_lock = __esm({
+  "server/month-lock.ts"() {
+    init_errors();
+    MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+  }
+});
+
+// server/overrides.ts
+function readOverride(db, userId, workDate) {
+  const r = db.prepare("SELECT kind, first_in, last_out, reason, created_by_label, created_at FROM attendance_overrides WHERE user_id = ? AND work_date = ?").get(userId, workDate);
+  return r ? { kind: r.kind, firstIn: r.first_in, lastOut: r.last_out, reason: r.reason, byLabel: r.created_by_label, at: r.created_at } : null;
+}
+function parseReason(raw) {
+  const reason = typeof raw === "string" ? raw.trim() : "";
+  if (reason.length < REASON_MIN || reason.length > REASON_MAX) {
+    throw new HttpError(400, `Ph\u1EA3i nh\u1EADp l\xFD do \u0111i\u1EC1u ch\u1EC9nh (${REASON_MIN}\u2013${REASON_MAX} k\xFD t\u1EF1)`);
+  }
+  return reason;
+}
+var OVERRIDE_KINDS, REASON_MIN, REASON_MAX;
+var init_overrides = __esm({
+  "server/overrides.ts"() {
+    init_errors();
+    OVERRIDE_KINDS = ["times", "leave", "business_trip"];
+    REASON_MIN = 5;
+    REASON_MAX = 500;
+  }
+});
+
 // server/attendance.ts
 function computeDay(input) {
   const { detectionTs, settings, lateExcused, manualIn, manualOut, closed } = input;
@@ -949,6 +1057,7 @@ function saveDay(db, userId, workDate, adj, d) {
   );
 }
 function writeDay(db, userId, workDate, adj, now) {
+  if (isMonthLocked(db, workDate)) return;
   const user = db.prepare("SELECT code, status, created_at FROM users WHERE id = ?").get(userId);
   if (!user) return;
   const rule = effectiveShift(db, userId);
@@ -956,15 +1065,17 @@ function writeDay(db, userId, workDate, adj, now) {
   const eligible = user.status === "active" && user.code !== SYSTEM_ADMIN_CODE && workDate >= user.created_at.slice(0, 10);
   const workday = isWorkday(db, rule, workDate);
   const detections = db.prepare(`SELECT ts FROM detections WHERE user_id = ? AND work_date = ?${simulatorFilter()}`).all(userId, workDate);
+  const ov = readOverride(db, userId, workDate);
+  const times = ov?.kind === "times" ? ov : null;
   const computed = computeDay({
     detectionTs: detections.map((d) => d.ts),
     settings: rule,
     lateExcused: adj.lateExcused,
-    manualIn: adj.manualIn,
-    manualOut: adj.manualOut,
+    manualIn: times?.firstIn ?? adj.manualIn,
+    manualOut: times?.lastOut ?? adj.manualOut,
     closed
   });
-  const leave = eligible && workday ? approvedLeaveType(db, userId, workDate) : null;
+  const leave = ov && ov.kind !== "times" ? ov.kind : !ov && eligible && workday ? approvedLeaveType(db, userId, workDate) : null;
   if (leave) {
     saveDay(db, userId, workDate, adj, {
       firstIn: computed?.firstIn ?? null,
@@ -1064,6 +1175,8 @@ var init_attendance = __esm({
     init_db();
     init_shifts();
     init_bootstrap();
+    init_month_lock();
+    init_overrides();
   }
 });
 
@@ -1784,9 +1897,9 @@ init_errors();
 init_bootstrap();
 var SESSION_COOKIE = "sid";
 function readCookie(req, name) {
-  const header = req.headers.cookie;
-  if (!header) return void 0;
-  for (const part of header.split(";")) {
+  const header2 = req.headers.cookie;
+  if (!header2) return void 0;
+  for (const part of header2.split(";")) {
     const i = part.indexOf("=");
     if (i < 0) continue;
     if (part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
@@ -1887,7 +2000,7 @@ function assertEmailFree(db, email, userId) {
 function findLoginUser(db, login) {
   const s = login.trim();
   if (!s) return void 0;
-  const sql = "SELECT id, code, email, password_hash, status FROM users WHERE ";
+  const sql = "SELECT id, code, name, role, email, password_hash, status FROM users WHERE ";
   return s.includes("@") ? db.prepare(`${sql} email != '' AND lower(email) = ?`).get(s.toLowerCase()) : db.prepare(`${sql} code = ?`).get(s.toUpperCase());
 }
 function createResetToken(db, userId, now) {
@@ -2432,7 +2545,39 @@ function areaRoutes(ctx) {
   return r;
 }
 
+// server/audit.ts
+var personLabel = (name, code) => `${name} (${code})`;
+function userAreaId(db, userId) {
+  const r = db.prepare("SELECT d.area_id FROM users u LEFT JOIN departments d ON d.id = u.department_id WHERE u.id = ?").get(userId);
+  return r?.area_id ?? null;
+}
+function actorOf(req) {
+  const u = currentUser(req);
+  return { actorId: u.id, actorLabel: personLabel(u.name, u.code), ip: req.ip ?? null };
+}
+var json = (v) => v === void 0 || v === null ? null : JSON.stringify(v);
+function writeAudit(db, now, e) {
+  db.prepare(
+    `INSERT INTO audit_logs(at, actor_id, actor_label, ip, action, target_user_id, target_label, area_id, work_date, before_json, after_json, reason)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    new Date(now).toISOString(),
+    e.actorId,
+    e.actorLabel,
+    e.ip,
+    e.action,
+    e.targetUserId ?? null,
+    e.targetLabel ?? null,
+    e.areaId ?? null,
+    e.workDate ?? null,
+    json(e.before),
+    json(e.after),
+    e.reason ?? null
+  );
+}
+
 // server/routes/auth.ts
+var AUDITED_ROLES = /* @__PURE__ */ new Set(["hr", "area_admin"]);
 function authPublicRoutes(ctx) {
   const { db } = ctx;
   const r = Router2();
@@ -2443,17 +2588,32 @@ function authPublicRoutes(ctx) {
     const password = typeof b.password === "string" ? b.password : "";
     const key = `${login}|${req.ip}`;
     const now = ctx.now();
+    const auditFailure = (u, reason) => {
+      if (u && !AUDITED_ROLES.has(u.role)) return;
+      writeAudit(db, now, {
+        actorId: u?.id ?? null,
+        actorLabel: u ? personLabel(u.name, u.code) : login || "(tr\u1ED1ng)",
+        ip: req.ip ?? null,
+        action: "auth.login_failed",
+        reason
+      });
+    };
     if (ctx.limiter.isBlocked(key, now)) {
       console.warn(`[SECURITY] login_blocked login=${login} ip=${req.ip}`);
+      auditFailure(findLoginUser(db, login), "B\u1ECB ch\u1EB7n t\u1EA1m th\u1EDDi");
       throw new HttpError(429, "B\u1EA1n \u0111\xE3 nh\u1EADp sai qu\xE1 nhi\u1EC1u l\u1EA7n. Vui l\xF2ng th\u1EED l\u1EA1i sau 15 ph\xFAt");
     }
     const row = findLoginUser(db, login);
     if (!row || row.status !== "active" || !verifyPassword(password, row.password_hash)) {
       ctx.limiter.recordFailure(key, now);
       console.warn(`[SECURITY] login_failed login=${login} ip=${req.ip}`);
+      auditFailure(row, null);
       throw new HttpError(401, "M\xE3 nh\xE2n vi\xEAn/email ho\u1EB7c m\u1EADt kh\u1EA9u kh\xF4ng \u0111\xFAng");
     }
     ctx.limiter.reset(key);
+    if (AUDITED_ROLES.has(row.role)) {
+      writeAudit(db, now, { actorId: row.id, actorLabel: personLabel(row.name, row.code), ip: req.ip ?? null, action: "auth.login" });
+    }
     setSessionCookie(res, createSession(db, row.id, now), ctx);
     res.json({ success: true });
   });
@@ -3054,9 +3214,18 @@ function userRoutes(ctx) {
     } else if (changesRole && target.role === "area_admin") {
       adminAreas = [];
     }
+    const a = actorOf(req);
+    const audit = (action, before, after2) => writeAudit(db, ctx.now(), { ...a, action, targetUserId: target.id, targetLabel: personLabel(target.name, target.code), areaId: target.areaId, before, after: after2 });
     tx(db, () => {
       if (sets.length) db.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).run(...params, target.id);
       if (adminAreas !== null) setAdminAreas(db, target.id, adminAreas);
+      if (changesRole) audit("user.role", { role: target.role }, { role: b.role });
+      if (b.status !== void 0 && b.status !== target.status) audit("user.status", { status: target.status }, { status: b.status });
+      if (adminAreas !== null && [...adminAreas].sort().join(",") !== target.adminAreaIds.join(",")) {
+        audit("user.areas", { areaIds: target.adminAreaIds }, { areaIds: adminAreas });
+      }
+      const cur = db.prepare("SELECT shift_id FROM users WHERE id = ?").get(target.id);
+      if (cur.shift_id !== target.shiftId) audit("shift.assign", { shiftId: target.shiftId }, { shiftId: cur.shift_id });
     });
     if (changesShift || changesDept) recomputeForShiftChange(db, [target.id], ctx.now());
     if (b.email !== void 0 && !target.canLogin && parseEmail(b.email) !== target.email.toLowerCase()) {
@@ -3127,7 +3296,19 @@ function userRoutes(ctx) {
     } else {
       dropEntityJobs(db, "user", target.id);
     }
-    db.prepare("DELETE FROM users WHERE id = ?").run(target.id);
+    tx(db, () => {
+      writeAudit(db, ctx.now(), {
+        ...actorOf(req),
+        action: "user.delete",
+        targetUserId: target.id,
+        targetLabel: personLabel(target.name, target.code),
+        areaId: target.areaId,
+        before: { code: target.code, name: target.name, role: target.role, departmentName: target.departmentName, email: target.email },
+        after: null,
+        reason: `Sao l\u01B0u tr\u01B0\u1EDBc khi x\xF3a: ${backup}`
+      });
+      db.prepare("DELETE FROM users WHERE id = ?").run(target.id);
+    });
     console.warn(`[SECURITY] user_deleted by=${actor.code} target=${target.code} backup=${backup} ip=${req.ip}`);
     kickEntity(ctx, "user", target.id);
     res.json({ success: true, backup });
@@ -3246,6 +3427,16 @@ function departmentRoutes(ctx) {
         db.prepare("UPDATE departments SET description = ? WHERE id = ?").run(typeof b.description === "string" ? b.description.trim() : "", dept.id);
       }
       if (shiftId !== void 0) db.prepare("UPDATE departments SET shift_id = ? WHERE id = ?").run(shiftId, dept.id);
+      if (shiftId !== void 0 && shiftId !== dept.shiftId) {
+        writeAudit(db, ctx.now(), {
+          ...actorOf(req),
+          action: "shift.assign",
+          targetLabel: `Ph\xF2ng ${dept.name}`,
+          areaId: areaAfter,
+          before: { shiftId: dept.shiftId },
+          after: { shiftId }
+        });
+      }
       if (areaId !== void 0) db.prepare("UPDATE departments SET area_id = ? WHERE id = ?").run(areaId, dept.id);
       if (managerId !== void 0) db.prepare("UPDATE departments SET manager_id = ? WHERE id = ?").run(managerId, dept.id);
     });
@@ -3277,8 +3468,8 @@ function departmentRoutes(ctx) {
 
 // server/routes/shifts.ts
 init_db();
-init_errors();
 import { Router as Router5 } from "express";
+init_errors();
 init_bootstrap();
 init_shifts();
 init_attendance();
@@ -3318,10 +3509,13 @@ function shiftRoutes(ctx) {
     const s = validateShiftInput(b);
     if (db.prepare("SELECT 1 FROM shifts WHERE area_id = ? AND name = ?").get(areaId, s.name)) throw new HttpError(409, "Khu n\xE0y \u0111\xE3 c\xF3 ca c\xF9ng t\xEAn");
     const id = newId("shift");
-    db.prepare(
-      `INSERT INTO shifts(id, area_id, name, work_start, work_end, work_days, late_grace_minutes, early_arrival_minutes, early_leave_minutes, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, areaId, s.name, s.workStart, s.workEnd, formatWorkDays(s.workDays), s.lateGraceMinutes, s.earlyArrivalMinutes, s.earlyLeaveMinutes, toVnDate(ctx.now()));
+    tx(db, () => {
+      db.prepare(
+        `INSERT INTO shifts(id, area_id, name, work_start, work_end, work_days, late_grace_minutes, early_arrival_minutes, early_leave_minutes, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(id, areaId, s.name, s.workStart, s.workEnd, formatWorkDays(s.workDays), s.lateGraceMinutes, s.earlyArrivalMinutes, s.earlyLeaveMinutes, toVnDate(ctx.now()));
+      writeAudit(db, ctx.now(), { ...actorOf(req), action: "shift.create", targetLabel: `Ca ${s.name}`, areaId, after: s });
+    });
     res.json({ shift: getShift(db, id) });
   });
   r.put("/shifts/:id", requireManager, (req, res) => {
@@ -3330,9 +3524,21 @@ function shiftRoutes(ctx) {
     const s = validateShiftInput({ ...cur, ...req.body ?? {} });
     const dup = db.prepare("SELECT id FROM shifts WHERE area_id = ? AND name = ?").get(cur.areaId, s.name);
     if (dup && dup.id !== cur.id) throw new HttpError(409, "Khu n\xE0y \u0111\xE3 c\xF3 ca c\xF9ng t\xEAn");
-    db.prepare(
-      `UPDATE shifts SET name = ?, work_start = ?, work_end = ?, work_days = ?, late_grace_minutes = ?, early_arrival_minutes = ?, early_leave_minutes = ? WHERE id = ?`
-    ).run(s.name, s.workStart, s.workEnd, formatWorkDays(s.workDays), s.lateGraceMinutes, s.earlyArrivalMinutes, s.earlyLeaveMinutes, cur.id);
+    tx(db, () => {
+      db.prepare(
+        `UPDATE shifts SET name = ?, work_start = ?, work_end = ?, work_days = ?, late_grace_minutes = ?, early_arrival_minutes = ?, early_leave_minutes = ? WHERE id = ?`
+      ).run(s.name, s.workStart, s.workEnd, formatWorkDays(s.workDays), s.lateGraceMinutes, s.earlyArrivalMinutes, s.earlyLeaveMinutes, cur.id);
+      const before = {
+        name: cur.name,
+        workStart: cur.workStart,
+        workEnd: cur.workEnd,
+        workDays: cur.workDays,
+        lateGraceMinutes: cur.lateGraceMinutes,
+        earlyArrivalMinutes: cur.earlyArrivalMinutes,
+        earlyLeaveMinutes: cur.earlyLeaveMinutes
+      };
+      writeAudit(db, ctx.now(), { ...actorOf(req), action: "shift.update", targetLabel: `Ca ${s.name}`, areaId: cur.areaId, before, after: s });
+    });
     const recomputed = recomputeForShiftChange(db, usersOfShift(db, cur.id), ctx.now());
     res.json({ shift: getShift(db, cur.id), recomputed });
   });
@@ -3340,7 +3546,16 @@ function shiftRoutes(ctx) {
     const cur = getShift(db, req.params.id);
     if (!cur || !managesArea(currentUser(req), cur.areaId)) throw notFound("ca");
     if (cur.departmentCount > 0 || cur.userCount > 0) throw new HttpError(409, "Ca \u0111ang \u0111\u01B0\u1EE3c ph\xF2ng ban ho\u1EB7c nh\xE2n s\u1EF1 s\u1EED d\u1EE5ng");
-    db.prepare("DELETE FROM shifts WHERE id = ?").run(cur.id);
+    tx(db, () => {
+      db.prepare("DELETE FROM shifts WHERE id = ?").run(cur.id);
+      writeAudit(db, ctx.now(), {
+        ...actorOf(req),
+        action: "shift.delete",
+        targetLabel: `Ca ${cur.name}`,
+        areaId: cur.areaId,
+        before: { name: cur.name, workStart: cur.workStart, workEnd: cur.workEnd }
+      });
+    });
     res.json({ success: true });
   });
   r.get("/holidays", (req, res) => {
@@ -3355,12 +3570,20 @@ function shiftRoutes(ctx) {
     if (!isValidDate(b.date)) throw new HttpError(400, "Ng\xE0y kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng YYYY-MM-DD)");
     if (!name) throw new HttpError(400, "T\xEAn ng\xE0y l\u1EC5 l\xE0 b\u1EAFt bu\u1ED9c");
     if (db.prepare("SELECT 1 FROM holidays WHERE date = ?").get(b.date)) throw new HttpError(409, "Ng\xE0y n\xE0y \u0111\xE3 l\xE0 ng\xE0y l\u1EC5");
-    db.prepare("INSERT INTO holidays(date, name) VALUES (?, ?)").run(b.date, name);
+    tx(db, () => {
+      db.prepare("INSERT INTO holidays(date, name) VALUES (?, ?)").run(b.date, name);
+      writeAudit(db, ctx.now(), { ...actorOf(req), action: "holiday.add", targetLabel: `Ng\xE0y l\u1EC5 ${b.date}`, after: { date: b.date, name } });
+    });
     res.json({ holiday: { date: b.date, name }, recomputed: recomputeDate(b.date) });
   });
   r.delete("/holidays/:date", requireGlobalHr, (req, res) => {
-    const result = db.prepare("DELETE FROM holidays WHERE date = ?").run(req.params.date);
-    if (Number(result.changes) === 0) throw notFound("ng\xE0y l\u1EC5");
+    const date = req.params.date;
+    const old = db.prepare("SELECT name FROM holidays WHERE date = ?").get(date);
+    if (!old) throw notFound("ng\xE0y l\u1EC5");
+    tx(db, () => {
+      db.prepare("DELETE FROM holidays WHERE date = ?").run(date);
+      writeAudit(db, ctx.now(), { ...actorOf(req), action: "holiday.remove", targetLabel: `Ng\xE0y l\u1EC5 ${date}`, before: { date, name: old.name } });
+    });
     res.json({ success: true, recomputed: recomputeDate(req.params.date) });
   });
   return r;
@@ -3518,6 +3741,9 @@ init_errors();
 import { Router as Router7 } from "express";
 init_auth();
 init_attendance();
+init_db();
+init_month_lock();
+init_overrides();
 init_bootstrap();
 
 // server/hanet-connect.ts
@@ -3680,8 +3906,9 @@ async function testConnectLogin(deps) {
 init_shifts();
 init_vntime();
 var DAY_SELECT = `SELECT a.*, u.code AS employee_code, u.name AS employee_name, u.avatar_url, u.department_id,
-  d.name AS department_name
-  FROM attendance_days a JOIN users u ON u.id = a.user_id LEFT JOIN departments d ON d.id = u.department_id`;
+  d.name AS department_name, o.kind AS ov_kind, o.reason AS ov_reason, o.created_by_label AS ov_by, o.created_at AS ov_at
+  FROM attendance_days a JOIN users u ON u.id = a.user_id LEFT JOIN departments d ON d.id = u.department_id
+  LEFT JOIN attendance_overrides o ON o.user_id = a.user_id AND o.work_date = a.work_date`;
 function mapDay(r) {
   return {
     userId: r.user_id,
@@ -3701,7 +3928,8 @@ function mapDay(r) {
     lateExcused: r.late_excused === 1,
     manualIn: r.manual_in ?? null,
     manualOut: r.manual_out ?? null,
-    detectionCount: r.detection_count
+    detectionCount: r.detection_count,
+    override: r.ov_kind ? { kind: r.ov_kind, reason: r.ov_reason, byName: r.ov_by, at: r.ov_at } : null
   };
 }
 var MAX_RECOMPUTE_DAYS = 92;
@@ -3797,6 +4025,103 @@ function attendanceRoutes(ctx) {
       res.json(body);
     })
   );
+  const overrideTarget = (req) => {
+    const actor = currentUser(req);
+    if (actor.role !== "hr" && actor.role !== "area_admin") throw new HttpError(403, "B\u1EA1n kh\xF4ng c\xF3 quy\u1EC1n \u0111i\u1EC1u ch\u1EC9nh ng\xE0y c\xF4ng");
+    const target = getUser(db, req.params.userId);
+    if (!target || !managesArea(actor, target.areaId)) throw notFound("nh\xE2n s\u1EF1");
+    if (target.id === actor.id) throw new HttpError(403, "Kh\xF4ng th\u1EC3 t\u1EF1 \u0111i\u1EC1u ch\u1EC9nh ng\xE0y c\xF4ng c\u1EE7a m\xECnh");
+    if (target.code === SYSTEM_ADMIN_CODE) throw new HttpError(400, "T\xE0i kho\u1EA3n qu\u1EA3n tr\u1ECB h\u1EC7 th\u1ED1ng kh\xF4ng ch\u1EA5m c\xF4ng");
+    const date = req.params.date;
+    if (!isValidDate(date)) throw new HttpError(400, "Ng\xE0y kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng YYYY-MM-DD)");
+    if (date > toVnDate(ctx.now())) throw new HttpError(400, "Kh\xF4ng \u0111i\u1EC1u ch\u1EC9nh ng\xE0y trong t\u01B0\u01A1ng lai");
+    if (date < target.createdAt.slice(0, 10)) throw new HttpError(400, "Ng\xE0y n\xE0y tr\u01B0\u1EDBc khi t\u1EA1o t\xE0i kho\u1EA3n nh\xE2n s\u1EF1");
+    return { target, date };
+  };
+  const dayOf = (userId, date) => {
+    const row = db.prepare(`${DAY_SELECT} WHERE a.user_id = ? AND a.work_date = ?`).get(userId, date);
+    return row ? mapDay(row) : null;
+  };
+  const snapshot = (d) => d ? { firstIn: d.firstIn, lastOut: d.lastOut, status: d.status } : null;
+  r.put("/attendance/:userId/:date/adjustment", (req, res) => {
+    const { target, date } = overrideTarget(req);
+    const b = req.body ?? {};
+    if (!OVERRIDE_KINDS.includes(b.kind)) throw new HttpError(400, "Ki\u1EC3u \u0111i\u1EC1u ch\u1EC9nh kh\xF4ng h\u1EE3p l\u1EC7");
+    const reason = parseReason(b.reason);
+    let firstIn = null;
+    let lastOut = null;
+    if (b.kind === "times") {
+      const time = (v, label) => {
+        if (v === void 0 || v === null || v === "") return null;
+        try {
+          return vnDateTimeToTs(date, String(v));
+        } catch {
+          throw new HttpError(400, `${label} kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng HH:mm)`);
+        }
+      };
+      firstIn = time(b.firstIn, "Gi\u1EDD v\xE0o");
+      lastOut = time(b.lastOut, "Gi\u1EDD ra");
+      if (firstIn === null && lastOut === null) throw new HttpError(400, "H\xE3y nh\u1EADp gi\u1EDD v\xE0o ho\u1EB7c gi\u1EDD ra");
+    }
+    const hasRow = Boolean(db.prepare("SELECT 1 FROM attendance_days WHERE user_id = ? AND work_date = ?").get(target.id, date));
+    if (!hasRow && !isWorkday(db, effectiveShift(db, target.id), date)) throw new HttpError(400, "Ng\xE0y n\xE0y kh\xF4ng ph\u1EA3i ng\xE0y l\xE0m vi\u1EC7c c\u1EE7a nh\xE2n s\u1EF1");
+    if (isMonthLocked(db, date)) throw lockedError(date.slice(0, 7));
+    const a = actorOf(req);
+    const day = tx(db, () => {
+      const before = dayOf(target.id, date);
+      db.prepare(
+        `INSERT INTO attendance_overrides(user_id, work_date, kind, first_in, last_out, reason, created_by, created_by_label, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, work_date) DO UPDATE SET kind = excluded.kind, first_in = excluded.first_in, last_out = excluded.last_out,
+           reason = excluded.reason, created_by = excluded.created_by, created_by_label = excluded.created_by_label, created_at = excluded.created_at`
+      ).run(target.id, date, b.kind, firstIn, lastOut, reason, a.actorId, a.actorLabel, new Date(ctx.now()).toISOString());
+      recomputeDay(db, target.id, date, ctx.now());
+      const after = dayOf(target.id, date);
+      if (b.kind === "times") {
+        if (!after || after.firstIn === null) throw new HttpError(400, "Ng\xE0y n\xE0y ch\u01B0a c\xF3 gi\u1EDD v\xE0o: h\xE3y nh\u1EADp gi\u1EDD v\xE0o");
+        if (after.lastOut !== null && after.lastOut <= after.firstIn) throw new HttpError(400, "Gi\u1EDD ra ph\u1EA3i sau gi\u1EDD v\xE0o");
+      }
+      writeAudit(db, ctx.now(), {
+        ...a,
+        action: "attendance.override",
+        targetUserId: target.id,
+        targetLabel: personLabel(target.name, target.code),
+        areaId: target.areaId,
+        workDate: date,
+        before: snapshot(before),
+        after: { ...snapshot(after), kind: b.kind },
+        reason
+      });
+      return after;
+    });
+    res.json({ day });
+  });
+  r.delete("/attendance/:userId/:date/adjustment", (req, res) => {
+    const { target, date } = overrideTarget(req);
+    const reason = parseReason((req.body ?? {}).reason);
+    if (!readOverride(db, target.id, date)) throw new HttpError(404, "Ng\xE0y n\xE0y ch\u01B0a \u0111\u01B0\u1EE3c \u0111i\u1EC1u ch\u1EC9nh");
+    if (isMonthLocked(db, date)) throw lockedError(date.slice(0, 7));
+    const a = actorOf(req);
+    const day = tx(db, () => {
+      const before = dayOf(target.id, date);
+      db.prepare("DELETE FROM attendance_overrides WHERE user_id = ? AND work_date = ?").run(target.id, date);
+      recomputeDay(db, target.id, date, ctx.now());
+      const after = dayOf(target.id, date);
+      writeAudit(db, ctx.now(), {
+        ...a,
+        action: "attendance.override_remove",
+        targetUserId: target.id,
+        targetLabel: personLabel(target.name, target.code),
+        areaId: target.areaId,
+        workDate: date,
+        before: snapshot(before),
+        after: snapshot(after),
+        reason
+      });
+      return after;
+    });
+    res.json({ day });
+  });
   r.post("/attendance/recompute", requireGlobalHr, (req, res) => {
     const { from, to } = req.body ?? {};
     if (!isValidDate(from) || !isValidDate(to)) throw new HttpError(400, "Ng\xE0y kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng YYYY-MM-DD)");
@@ -3893,6 +4218,7 @@ function attendanceRoutes(ctx) {
 import { Router as Router8 } from "express";
 init_settings();
 init_attendance();
+init_db();
 function settingsRoutes(ctx) {
   const { db } = ctx;
   const r = Router8();
@@ -3900,7 +4226,12 @@ function settingsRoutes(ctx) {
     res.json({ settings: getWorkSettings(db) });
   });
   r.put("/settings/work", requireGlobalHr, (req, res) => {
-    saveWorkSettings(db, validateWorkSettings(req.body));
+    const before = getWorkSettings(db);
+    const after = validateWorkSettings(req.body);
+    tx(db, () => {
+      saveWorkSettings(db, after);
+      writeAudit(db, ctx.now(), { ...actorOf(req), action: "settings.work", targetLabel: "Ca m\u1EB7c \u0111\u1ECBnh c\xF4ng ty", before, after });
+    });
     const recomputed = recomputeForShiftChange(db, usersOnDefaultShift(db), ctx.now());
     res.json({ settings: getWorkSettings(db), recomputed });
   });
@@ -3949,6 +4280,7 @@ import { Router as Router10 } from "express";
 init_auth();
 init_attendance();
 init_vntime();
+init_month_lock();
 var TYPES = ["missed_punch", "late_explanation", "leave_request", "business_trip"];
 var LEAVE_TYPES = ["leave_request", "business_trip"];
 var MAX_LEAVE_DAYS = 31;
@@ -4028,6 +4360,7 @@ function requestRoutes(ctx) {
       suggestedOut = optionalTime(b.suggestedOut, "Gi\u1EDD ra \u0111\u1EC1 xu\u1EA5t");
       if (!suggestedIn && !suggestedOut) throw new HttpError(400, "\u0110\u01A1n qu\xEAn qu\u1EB9t c\u1EA7n \xEDt nh\u1EA5t gi\u1EDD v\xE0o ho\u1EB7c gi\u1EDD ra \u0111\u1EC1 xu\u1EA5t");
     }
+    assertRangeUnlocked(db, b.workDate, endDate ?? b.workDate);
     const id = newId("req");
     db.prepare(
       `INSERT INTO requests(id, user_id, work_date, end_date, type, reason, suggested_in, suggested_out, status, created_at)
@@ -4055,6 +4388,7 @@ function requestRoutes(ctx) {
     const { status, comment } = req.body ?? {};
     if (status !== "approved" && status !== "rejected") throw new HttpError(400, "Tr\u1EA1ng th\xE1i duy\u1EC7t kh\xF4ng h\u1EE3p l\u1EC7");
     if (target.status !== "pending") throw new HttpError(409, "\u0110\u01A1n \u0111\xE3 \u0111\u01B0\u1EE3c x\u1EED l\xFD");
+    assertRangeUnlocked(db, target.workDate, target.endDate ?? target.workDate);
     tx(db, () => {
       db.prepare("UPDATE requests SET status = ?, comment = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ?").run(
         status,
@@ -4063,6 +4397,22 @@ function requestRoutes(ctx) {
         new Date(ctx.now()).toISOString(),
         target.id
       );
+      writeAudit(db, ctx.now(), {
+        ...actorOf(req),
+        action: status === "approved" ? "request.approve" : "request.reject",
+        targetUserId: target.userId,
+        targetLabel: personLabel(target.employeeName, target.employeeCode),
+        areaId: userAreaId(db, target.userId),
+        workDate: target.workDate,
+        before: { status: "pending" },
+        after: {
+          status,
+          comment: typeof comment === "string" ? comment.trim() : "",
+          type: target.type,
+          from: target.workDate,
+          to: target.endDate ?? target.workDate
+        }
+      });
       if (status !== "approved") return;
       if (target.type === "late_explanation") {
         applyDayAdjustment(db, target.userId, target.workDate, { lateExcused: true });
@@ -4394,6 +4744,430 @@ function adminRoutes(ctx) {
   return r;
 }
 
+// server/routes/audit.ts
+init_errors();
+import { Router as Router13 } from "express";
+init_vntime();
+var AUDIT_PAGE_SIZE = 50;
+var parse = (s) => s === null ? null : JSON.parse(s);
+function auditRoutes(ctx) {
+  const { db } = ctx;
+  const r = Router13();
+  r.get("/audit", requireManager, (req, res) => {
+    const actor = currentUser(req);
+    const today = toVnDate(ctx.now());
+    const from = req.query.from === void 0 || req.query.from === "" ? addDays(today, -29) : req.query.from;
+    const to = req.query.to === void 0 || req.query.to === "" ? today : req.query.to;
+    if (!isValidDate(from) || !isValidDate(to)) throw new HttpError(400, "Ng\xE0y kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng YYYY-MM-DD)");
+    const where = ["at >= ?", "at < ?"];
+    const params = [new Date(vnDayStart(from)).toISOString(), new Date(vnDayStart(addDays(to, 1))).toISOString()];
+    if (typeof req.query.action === "string" && req.query.action) {
+      where.push("action = ?");
+      params.push(req.query.action);
+    }
+    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    if (q) {
+      where.push("(actor_label LIKE ? OR target_label LIKE ?)");
+      params.push(`%${q}%`, `%${q}%`);
+    }
+    if (!isGlobalHr(actor)) {
+      const areas = actor.areaIds.length ? `area_id IN (${actor.areaIds.map(() => "?").join(", ")}) OR ` : "";
+      where.push(`(${areas}target_user_id = ? OR actor_id = ?)`);
+      params.push(...actor.areaIds, actor.id, actor.id);
+    }
+    const page = Math.max(1, Number.parseInt(String(req.query.page ?? "1"), 10) || 1);
+    const sqlWhere = where.join(" AND ");
+    const total = db.prepare(`SELECT COUNT(*) AS c FROM audit_logs WHERE ${sqlWhere}`).get(...params).c;
+    const rows = db.prepare(`SELECT * FROM audit_logs WHERE ${sqlWhere} ORDER BY id DESC LIMIT ? OFFSET ?`).all(...params, AUDIT_PAGE_SIZE, (page - 1) * AUDIT_PAGE_SIZE);
+    const entries = rows.map((x) => ({
+      id: x.id,
+      at: x.at,
+      actorLabel: x.actor_label,
+      ip: x.ip ?? null,
+      action: x.action,
+      targetLabel: x.target_label ?? null,
+      workDate: x.work_date ?? null,
+      before: parse(x.before_json ?? null),
+      after: parse(x.after_json ?? null),
+      reason: x.reason ?? null
+    }));
+    res.json({ entries, total, page, pageSize: AUDIT_PAGE_SIZE });
+  });
+  return r;
+}
+
+// server/routes/month-locks.ts
+init_db();
+init_errors();
+import { Router as Router14 } from "express";
+init_month_lock();
+init_vntime();
+function monthLockRoutes(ctx) {
+  const { db } = ctx;
+  const r = Router14();
+  r.get("/month-locks", requireRole("hr", "area_admin", "dept_manager"), (req, res) => {
+    const year = typeof req.query.year === "string" && /^\d{4}$/.test(req.query.year) ? req.query.year : toVnDate(ctx.now()).slice(0, 4);
+    const rows = db.prepare("SELECT month FROM month_locks WHERE month LIKE ? ORDER BY month").all(`${year}-%`);
+    const locks = rows.map((x) => lockOf(db, x.month));
+    res.json({ locks });
+  });
+  r.post("/month-locks/:month", requireGlobalHr, (req, res) => {
+    const month = req.params.month;
+    if (!isValidMonth(month)) throw new HttpError(400, "Th\xE1ng kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng YYYY-MM)");
+    if (month > toVnDate(ctx.now()).slice(0, 7)) throw new HttpError(400, "Kh\xF4ng th\u1EC3 kh\xF3a s\u1ED5 th\xE1ng ch\u01B0a t\u1EDBi");
+    if (lockOf(db, month)) throw new HttpError(409, `Th\xE1ng ${monthLabel(month)} \u0111\xE3 kh\xF3a s\u1ED5 r\u1ED3i`);
+    const a = actorOf(req);
+    tx(db, () => {
+      db.prepare("INSERT INTO month_locks(month, locked_by, locked_by_label, locked_at) VALUES (?, ?, ?, ?)").run(
+        month,
+        a.actorId,
+        a.actorLabel,
+        new Date(ctx.now()).toISOString()
+      );
+      writeAudit(db, ctx.now(), { ...a, action: "month.lock", targetLabel: `Th\xE1ng ${monthLabel(month)}` });
+    });
+    res.json({ lock: lockOf(db, month) });
+  });
+  r.delete("/month-locks/:month", requireGlobalHr, (req, res) => {
+    const month = req.params.month;
+    if (!isValidMonth(month)) throw new HttpError(400, "Th\xE1ng kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng YYYY-MM)");
+    if (!lockOf(db, month)) throw new HttpError(404, `Th\xE1ng ${monthLabel(month)} ch\u01B0a kh\xF3a s\u1ED5`);
+    const a = actorOf(req);
+    tx(db, () => {
+      db.prepare("DELETE FROM month_locks WHERE month = ?").run(month);
+      writeAudit(db, ctx.now(), { ...a, action: "month.unlock", targetLabel: `Th\xE1ng ${monthLabel(month)}` });
+    });
+    res.json({ success: true });
+  });
+  return r;
+}
+
+// server/routes/reports.ts
+init_errors();
+import { Router as Router15 } from "express";
+
+// server/report-xlsx.ts
+init_month_lock();
+import ExcelJS from "exceljs";
+var NAVY = "FF003865";
+var ORANGE = "FFEA580C";
+var GREY = "FFF1F5F9";
+var SYMBOL_FILL = {
+  X: "FFD1FAE5",
+  M: "FFFEF3C7",
+  S: "FFFEF3C7",
+  MS: "FFFFE4E6",
+  V: "FFFFE4E6",
+  T: "FFE2E8F0",
+  P: "FFEDE9FE",
+  CT: "FFE0F2FE",
+  L: "FFE2E8F0"
+};
+var WEEKDAY = ["", "T2", "T3", "T4", "T5", "T6", "T7", "CN"];
+var pad = (n) => String(n).padStart(2, "0");
+function vnStamp(ms) {
+  const d = new Date(ms + 7 * 36e5);
+  return `${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
+function header(ws, title, report, exportedBy, now) {
+  ws.getCell("A1").value = "C\xD4NG TY TNHH MTV PETROLIMEX H\xC0 N\u1ED8I";
+  ws.getCell("A1").font = { bold: true };
+  ws.getCell("A2").value = `${title} TH\xC1NG ${monthLabel(report.month)}`;
+  ws.getCell("A2").font = { bold: true, size: 14, color: { argb: NAVY } };
+  ws.getCell("A3").value = `${report.scopeLabel} \xB7 Xu\u1EA5t l\xFAc ${vnStamp(now)} b\u1EDFi ${exportedBy}`;
+  if (report.lock) {
+    ws.getCell("A4").value = `\u0110\xE3 kh\xF3a s\u1ED5 ng\xE0y ${vnStamp(Date.parse(report.lock.lockedAt)).slice(0, 10)} b\u1EDFi ${report.lock.lockedByName}`;
+    ws.getCell("A4").font = { italic: true, color: { argb: ORANGE } };
+  }
+}
+function styleHeaderRow(row) {
+  row.eachCell((c) => {
+    c.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: ORANGE } };
+    c.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  });
+}
+function pageSetup(ws) {
+  ws.pageSetup = { paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
+}
+async function monthlyReportXlsx(report, exportedBy, now) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Petrolimex Attendance";
+  const sum = wb.addWorksheet("T\u1ED5ng h\u1EE3p");
+  header(sum, "B\u1EA2NG T\u1ED4NG H\u1EE2P C\xD4NG", report, exportedBy, now);
+  sum.getRow(6).values = [
+    "STT",
+    "M\xE3 NV",
+    "H\u1ECD t\xEAn",
+    "Ph\xF2ng ban",
+    "Ng\xE0y ph\u1EA3i l\xE0m",
+    "Ng\xE0y c\xF4ng",
+    "\u0110i mu\u1ED9n (l\u1EA7n)",
+    "\u0110i mu\u1ED9n (ph\xFAt)",
+    "V\u1EC1 s\u1EDBm (l\u1EA7n)",
+    "V\u1EC1 s\u1EDBm (ph\xFAt)",
+    "Thi\u1EBFu gi\u1EDD ra",
+    "V\u1EAFng",
+    "Ngh\u1EC9 ph\xE9p",
+    "C\xF4ng t\xE1c",
+    "T\u1EF7 l\u1EC7 chuy\xEAn c\u1EA7n (%)"
+  ];
+  styleHeaderRow(sum.getRow(6));
+  report.rows.forEach((r, i) => {
+    sum.getRow(7 + i).values = [
+      i + 1,
+      r.employeeCode,
+      r.employeeName,
+      r.departmentName ?? "",
+      r.requiredDays,
+      r.workDays,
+      r.lateCount,
+      r.lateMinutes,
+      r.earlyCount,
+      r.earlyMinutes,
+      r.missingOutDays,
+      r.absentDays,
+      r.leaveDays,
+      r.businessTripDays,
+      r.attendanceRate
+    ];
+  });
+  for (let c = 1; c <= 15; c++) sum.getColumn(c).width = c === 3 ? 28 : c === 4 ? 20 : c === 1 ? 6 : 12;
+  sum.views = [{ state: "frozen", xSplit: 3, ySplit: 6 }];
+  pageSetup(sum);
+  const grid = wb.addWorksheet("Ch\u1EA5m c\xF4ng");
+  header(grid, "B\u1EA2NG CH\u1EA4M C\xD4NG", report, exportedBy, now);
+  const totals = ["Ng\xE0y c\xF4ng", "Mu\u1ED9n", "V\u1EC1 s\u1EDBm", "V\u1EAFng", "Ph\xE9p", "C\xF4ng t\xE1c"];
+  grid.getRow(6).values = ["STT", "M\xE3 NV", "H\u1ECD t\xEAn", "Ph\xF2ng ban", ...report.days.map((_, i) => i + 1), ...totals];
+  grid.getRow(7).values = ["", "", "", "", ...report.days.map((d) => WEEKDAY[d.weekday]), ...totals.map(() => "")];
+  styleHeaderRow(grid.getRow(6));
+  styleHeaderRow(grid.getRow(7));
+  report.rows.forEach((r, i) => {
+    const row = grid.getRow(8 + i);
+    row.values = [
+      i + 1,
+      r.employeeCode,
+      r.employeeName,
+      r.departmentName ?? "",
+      ...r.cells.map((c) => c ?? ""),
+      r.workDays,
+      r.lateCount,
+      r.earlyCount,
+      r.absentDays,
+      r.leaveDays,
+      r.businessTripDays
+    ];
+    r.cells.forEach((c, k) => {
+      const cell2 = row.getCell(5 + k);
+      cell2.alignment = { horizontal: "center" };
+      const day = report.days[k];
+      const argb = (c ? SYMBOL_FILL[c.replace("*", "")] : void 0) ?? (day.weekday >= 6 || day.holiday ? GREY : void 0);
+      if (argb) cell2.fill = { type: "pattern", pattern: "solid", fgColor: { argb } };
+    });
+  });
+  grid.getColumn(1).width = 6;
+  grid.getColumn(3).width = 26;
+  grid.getColumn(4).width = 18;
+  for (let k = 0; k < report.days.length; k++) grid.getColumn(5 + k).width = 4.5;
+  grid.views = [{ state: "frozen", xSplit: 3, ySplit: 7 }];
+  grid.getCell(`A${8 + report.rows.length + 1}`).value = "K\xFD hi\u1EC7u: X = \u0111\u1EE7 c\xF4ng, M = \u0111i mu\u1ED9n, S = v\u1EC1 s\u1EDBm, MS = mu\u1ED9n v\xE0 v\u1EC1 s\u1EDBm, T = thi\u1EBFu gi\u1EDD ra, CT = c\xF4ng t\xE1c, P = ngh\u1EC9 ph\xE9p, V = v\u1EAFng, L = ng\xE0y l\u1EC5; * = \u0111\xE3 \u0111i\u1EC1u ch\u1EC9nh";
+  pageSetup(grid);
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+// server/routes/reports.ts
+init_bootstrap();
+init_shifts();
+init_month_lock();
+
+// server/reports.ts
+init_errors();
+init_auth();
+init_bootstrap();
+init_shifts();
+init_month_lock();
+init_vntime();
+function parseMonthParam(raw, now) {
+  if (raw === void 0 || raw === "") return toVnDate(now).slice(0, 7);
+  if (!isValidMonth(raw)) throw new HttpError(400, "Th\xE1ng kh\xF4ng h\u1EE3p l\u1EC7 (\u0111\u1ECBnh d\u1EA1ng YYYY-MM)");
+  return raw;
+}
+function monthDays(db, month) {
+  const holidays = new Map(
+    db.prepare("SELECT date, name FROM holidays WHERE date LIKE ?").all(`${month}-%`).map((h) => [h.date, h.name])
+  );
+  const out = [];
+  for (let d = `${month}-01`; d.startsWith(month); d = addDays(d, 1)) {
+    out.push({ date: d, weekday: isoWeekday(d), holiday: holidays.get(d) ?? null });
+  }
+  return out;
+}
+var SYMBOL = {
+  on_time: "X",
+  late: "M",
+  early_leave: "S",
+  late_and_early: "MS",
+  business_trip: "CT",
+  leave: "P",
+  absent: "V"
+};
+function symbolOf(status, final) {
+  if (status === "missing_out") return final ? "T" : "X";
+  return SYMBOL[status];
+}
+var WORK_SYMBOLS = /* @__PURE__ */ new Set(["X", "M", "S", "MS", "T", "CT"]);
+function buildRows(db, users, month, now) {
+  const days = monthDays(db, month);
+  const today = toVnDate(now);
+  const first = days[0].date;
+  const last = days[days.length - 1].date;
+  const dayRows = db.prepare(
+    `SELECT a.work_date, a.status, a.final, a.late_minutes, a.early_minutes, o.user_id IS NOT NULL AS ov
+     FROM attendance_days a LEFT JOIN attendance_overrides o ON o.user_id = a.user_id AND o.work_date = a.work_date
+     WHERE a.user_id = ? AND a.work_date BETWEEN ? AND ?`
+  );
+  return users.map((u) => {
+    const rule = effectiveShift(db, u.id);
+    const byDate = new Map(dayRows.all(u.id, first, last).map((r) => [r.work_date, r]));
+    const row = {
+      userId: u.id,
+      employeeCode: u.code,
+      employeeName: u.name,
+      departmentName: u.departmentName,
+      cells: [],
+      requiredDays: 0,
+      workDays: 0,
+      lateCount: 0,
+      lateMinutes: 0,
+      earlyCount: 0,
+      earlyMinutes: 0,
+      missingOutDays: 0,
+      absentDays: 0,
+      leaveDays: 0,
+      businessTripDays: 0,
+      attendanceRate: null
+    };
+    const created = u.createdAt.slice(0, 10);
+    for (const d of days) {
+      if (d.date <= today && d.date >= created && isWorkday(db, rule, d.date)) row.requiredDays++;
+      const r = byDate.get(d.date);
+      if (!r) {
+        row.cells.push(d.holiday ? "L" : null);
+        continue;
+      }
+      const sym = symbolOf(r.status, r.final === 1);
+      row.cells.push(r.ov ? `${sym}*` : sym);
+      if (WORK_SYMBOLS.has(sym)) row.workDays++;
+      if (sym === "M" || sym === "MS") {
+        row.lateCount++;
+        row.lateMinutes += r.late_minutes;
+      }
+      if (sym === "S" || sym === "MS") {
+        row.earlyCount++;
+        row.earlyMinutes += r.early_minutes;
+      }
+      if (sym === "T") row.missingOutDays++;
+      if (sym === "V") row.absentDays++;
+      if (sym === "P") row.leaveDays++;
+      if (sym === "CT") row.businessTripDays++;
+    }
+    row.attendanceRate = row.requiredDays ? Math.round((row.workDays + row.leaveDays) / row.requiredDays * 1e3) / 10 : null;
+    return row;
+  });
+}
+function buildMonthlyReport(db, viewer, q, now) {
+  const { month } = q;
+  const w = scopeWhere(scopeFor(viewer), "u.id", "u.department_id");
+  const managerView = viewer.role === "hr" || viewer.role === "area_admin";
+  const filter = managerView ? parseAreaFilter(db, viewer, q.area) : { kind: "all" };
+  const f = areaFilterSql(filter, "u.department_id");
+  let deptSql = "1=1";
+  const deptParams = [];
+  let scopeLabel = isGlobalHr(viewer) ? "To\xE0n c\xF4ng ty" : viewer.role === "area_admin" ? "C\xE1c khu \u0111\u01B0\u1EE3c giao" : "Ph\xF2ng c\u1EE7a b\u1EA1n";
+  if (filter.kind === "area") {
+    scopeLabel = `Khu ${db.prepare("SELECT name FROM areas WHERE id = ?").get(filter.areaId).name}`;
+  } else if (filter.kind === "none") {
+    scopeLabel = "Ch\u01B0a g\xE1n khu";
+  }
+  if (managerView && typeof q.department === "string" && q.department) {
+    const ds = departmentScopeSql(viewer);
+    const dept = db.prepare(`SELECT d.name FROM departments d WHERE d.id = ? AND ${ds.sql}`).get(q.department, ...ds.params);
+    if (!dept) throw notFound("ph\xF2ng ban");
+    deptSql = "u.department_id = ?";
+    deptParams.push(q.department);
+    scopeLabel = `Ph\xF2ng ${dept.name}`;
+  } else if (viewer.role === "dept_manager" && viewer.departmentId) {
+    const dept = db.prepare("SELECT name FROM departments WHERE id = ?").get(viewer.departmentId);
+    if (dept) scopeLabel = `Ph\xF2ng ${dept.name}`;
+  }
+  const days = monthDays(db, month);
+  const users = db.prepare(
+    `SELECT u.id, u.code, u.name, u.created_at, d.name AS department_name
+         FROM users u LEFT JOIN departments d ON d.id = u.department_id
+         WHERE ${NOT_SYSTEM_ADMIN} AND ${w.sql} AND ${f.sql} AND ${deptSql}
+           AND (u.status = 'active' OR EXISTS (SELECT 1 FROM attendance_days a WHERE a.user_id = u.id AND a.work_date BETWEEN ? AND ?))
+         ORDER BY d.name IS NULL, d.name, u.code`
+  ).all(...w.params, ...f.params, ...deptParams, days[0].date, days[days.length - 1].date).map((u) => ({ id: u.id, code: u.code, name: u.name, departmentName: u.department_name, createdAt: u.created_at }));
+  return { month, days, lock: lockOf(db, month), scopeLabel, rows: buildRows(db, users, month, now) };
+}
+
+// server/routes/reports.ts
+init_vntime();
+var hhmm2 = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+function reportRoutes(ctx) {
+  const { db } = ctx;
+  const r = Router15();
+  r.get(
+    "/reports/monthly.xlsx",
+    requireRole("hr", "area_admin", "dept_manager"),
+    ah(async (req, res) => {
+      const viewer = currentUser(req);
+      const month = parseMonthParam(req.query.month, ctx.now());
+      const report = buildMonthlyReport(db, viewer, { month, area: req.query.area, department: req.query.department }, ctx.now());
+      const buf = await monthlyReportXlsx(report, personLabel(viewer.name, viewer.code), ctx.now());
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="Bang_cong_${month}.xlsx"`);
+      res.send(buf);
+    })
+  );
+  r.get("/reports/monthly", requireRole("hr", "area_admin", "dept_manager"), (req, res) => {
+    const month = parseMonthParam(req.query.month, ctx.now());
+    res.json(buildMonthlyReport(db, currentUser(req), { month, area: req.query.area, department: req.query.department }, ctx.now()));
+  });
+  r.get("/me/attendance", (req, res) => {
+    const month = parseMonthParam(req.query.month, ctx.now());
+    const user = getUser(db, currentUser(req).id);
+    if (user.code === SYSTEM_ADMIN_CODE) {
+      const body2 = { tracked: false, profile: null, today: null, report: null, lock: null, days: [] };
+      res.json(body2);
+      return;
+    }
+    const rule = effectiveShift(db, user.id);
+    const days = monthDays(db, month);
+    const records = new Map(
+      db.prepare(`${DAY_SELECT} WHERE a.user_id = ? AND a.work_date BETWEEN ? AND ?`).all(user.id, days[0].date, days[days.length - 1].date).map(mapDay).map((d) => [d.workDate, d])
+    );
+    const todayRow = db.prepare(`${DAY_SELECT} WHERE a.user_id = ? AND a.work_date = ?`).get(user.id, toVnDate(ctx.now()));
+    const me = { id: user.id, code: user.code, name: user.name, departmentName: user.departmentName, createdAt: user.createdAt };
+    const body = {
+      tracked: true,
+      profile: {
+        code: user.code,
+        name: user.name,
+        departmentName: user.departmentName,
+        position: user.position,
+        shift: { name: rule.name, workStart: hhmm2(rule.workStart), workEnd: hhmm2(rule.workEnd), workDays: rule.workDays }
+      },
+      today: todayRow ? mapDay(todayRow) : null,
+      report: buildRows(db, [me], month, ctx.now())[0],
+      lock: lockOf(db, month),
+      days: days.map((d) => ({ ...d, workday: isWorkday(db, rule, d.date), record: records.get(d.date) ?? null }))
+    };
+    res.json(body);
+  });
+  return r;
+}
+
 // server/app.ts
 function createApp(ctx) {
   const app = express();
@@ -4423,6 +5197,9 @@ function createApp(ctx) {
   api.use(settingsRoutes(ctx));
   api.use(mailRoutes(ctx));
   api.use(requestRoutes(ctx));
+  api.use(auditRoutes(ctx));
+  api.use(monthLockRoutes(ctx));
+  api.use(reportRoutes(ctx));
   api.use(hanetRoutes(ctx));
   api.use(adminRoutes(ctx));
   app.use("/api", api);
