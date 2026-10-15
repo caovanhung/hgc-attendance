@@ -7,6 +7,7 @@ import {
   FileText,
   LogOut,
   Palmtree,
+  Percent,
   Sunrise,
   UserMinus,
   UserX,
@@ -34,18 +35,21 @@ interface StatsCardsProps {
 interface Card {
   label: string;
   value: number;
+  displayValue?: string;
+  sublabel?: string;
   icon: LucideIcon;
   tone: string;
   /** Màu số khi lớn hơn 0, cho các chỉ số cần chú ý. */
   alert?: string;
   detail: StatsDetailType | 'requests';
+  primary?: boolean;
 }
 
 const cardsBaseClass =
-  'group min-w-0 items-center gap-2.5 sm:gap-3 rounded-xl sm:rounded-card border ' +
-  'border-border bg-surface p-2.5 sm:p-4 text-left shadow-[var(--shadow-card)] ' +
-  'transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-200 ' +
-  'hover:shadow-md focus-visible:outline-2 focus-visible:outline-brand-600';
+  'group relative min-w-0 flex items-center gap-2 sm:gap-2.5 rounded-lg border ' +
+  'border-border bg-surface py-2 sm:py-2.5 px-2.5 sm:px-3 text-left shadow-xs ' +
+  'transition-all duration-150 hover:border-brand-300 hover:bg-slate-50/70 ' +
+  'focus-visible:outline-2 focus-visible:outline-brand-600 cursor-pointer';
 
 export const StatsCards: React.FC<StatsCardsProps> = ({
   stats,
@@ -56,7 +60,24 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
     type: StatsDetailType;
     label: string;
   } | null>(null);
+  const [viewMode, setViewMode] = useState<'compact' | 'full'>(() => {
+    try {
+      const saved = localStorage.getItem('stats_cards_mode');
+      if (saved === 'compact' || saved === 'full') return saved;
+    } catch {
+      // ignore
+    }
+    return 'compact';
+  });
   const [showAllMobile, setShowAllMobile] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('stats_cards_mode', viewMode);
+    } catch {
+      // ignore
+    }
+  }, [viewMode]);
 
   if (!stats) return null;
 
@@ -69,6 +90,11 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
           ? `Phòng ${currentUser.departmentName ?? ''}`
           : 'Cá nhân';
 
+  const attendanceRate =
+    stats.totalEmployees > 0
+      ? Math.round((stats.presentCount / stats.totalEmployees) * 100)
+      : 0;
+
   const cards: Card[] = [
     {
       label: 'Nhân sự đang làm',
@@ -76,13 +102,25 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
       icon: Users,
       tone: 'bg-brand-50 text-brand-600',
       detail: 'total',
+      primary: true,
     },
     {
       label: 'Có mặt hôm nay',
       value: stats.presentCount,
+      sublabel: `(${attendanceRate}%)`,
       icon: CheckCircle,
       tone: 'bg-emerald-50 text-emerald-700',
       detail: 'present',
+      primary: true,
+    },
+    {
+      label: 'Tỷ lệ có mặt',
+      value: attendanceRate,
+      displayValue: `${attendanceRate}%`,
+      icon: Percent,
+      tone: 'bg-emerald-50 text-emerald-700',
+      detail: 'present',
+      primary: false,
     },
     {
       label: 'Vào đúng giờ',
@@ -90,6 +128,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
       icon: Clock,
       tone: 'bg-blue-50 text-blue-700',
       detail: 'on_time',
+      primary: false,
     },
     {
       label: 'Đến sớm',
@@ -97,6 +136,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
       icon: Sunrise,
       tone: 'bg-teal-50 text-teal-700',
       detail: 'early_arrival',
+      primary: false,
     },
     {
       label: 'Đi muộn',
@@ -105,20 +145,25 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
       tone: 'bg-amber-50 text-amber-700',
       alert: 'text-amber-700',
       detail: 'late',
+      primary: true,
     },
     {
       label: 'Chưa có giờ ra',
       value: stats.missingOutCount,
       icon: LogOut,
       tone: 'bg-slate-100 text-slate-600',
+      alert: stats.missingOutCount > 0 ? 'text-slate-800' : undefined,
       detail: 'missing_out',
+      primary: true,
     },
     {
       label: 'Chưa điểm danh',
       value: stats.notCheckedInCount,
       icon: UserX,
       tone: 'bg-slate-100 text-slate-600',
+      alert: stats.notCheckedInCount > 0 ? 'text-amber-800' : undefined,
       detail: 'not_checked_in',
+      primary: true,
     },
     {
       label: 'Vắng',
@@ -127,6 +172,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
       tone: 'bg-rose-50 text-rose-700',
       alert: 'text-rose-700',
       detail: 'absent',
+      primary: false,
     },
     {
       label: 'Nghỉ phép',
@@ -134,6 +180,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
       icon: Palmtree,
       tone: 'bg-violet-50 text-violet-700',
       detail: 'leave',
+      primary: false,
     },
     {
       label: 'Công tác',
@@ -141,43 +188,83 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
       icon: Briefcase,
       tone: 'bg-sky-50 text-sky-700',
       detail: 'business_trip',
+      primary: false,
     },
     {
       label: 'Đơn chờ duyệt',
       value: stats.pendingRequests,
       icon: FileText,
       tone: 'bg-brand-100 text-brand-700',
-      alert: 'text-brand-700',
+      alert: stats.pendingRequests > 0 ? 'text-brand-700' : undefined,
       detail: 'requests',
+      primary: true,
     },
   ];
 
+  const displayCards = viewMode === 'compact' ? cards.filter((c) => c.primary) : cards;
   const dateLabel = stats.date.split('-').reverse().join('/');
 
   return (
-    <section className="mb-6" aria-label="Thống kê điểm danh">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+    <section className="mb-4 sm:mb-5" aria-label="Thống kê điểm danh">
+      <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="text-xs font-bold uppercase tracking-wide text-brand-700">
             Hôm nay {dateLabel}
           </span>
-          <span className="hidden text-slate-300 sm:inline">/</span>
+          <span className="text-slate-300">·</span>
           <span className="text-xs font-medium text-text-secondary">
             {scopeLabel}
           </span>
         </div>
 
-        <span className="text-xs text-text-muted">
-          Nhấn vào chỉ số để xem chi tiết
-        </span>
+        <div className="flex items-center gap-2.5">
+          <span className="hidden text-xs text-text-muted xl:inline">
+            Nhấn vào chỉ số để xem chi tiết
+          </span>
+
+          <div
+            role="group"
+            aria-label="Chế độ hiển thị thống kê"
+            className="inline-flex items-center rounded-lg bg-slate-100 p-0.5 border border-slate-200/80 text-xs"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setViewMode('compact');
+                setShowAllMobile(false);
+              }}
+              className={`px-2.5 py-1 rounded-md font-medium transition-all cursor-pointer ${
+                viewMode === 'compact'
+                  ? 'bg-white text-brand-700 shadow-xs'
+                  : 'text-text-secondary hover:text-text-primary'
+              }`}
+              title="Chỉ hiển thị 6 chỉ số chính (gọn gàng 1 dòng)"
+            >
+              Gọn gàng
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('full')}
+              className={`px-2.5 py-1 rounded-md font-medium transition-all cursor-pointer ${
+                viewMode === 'full'
+                  ? 'bg-white text-brand-700 shadow-xs'
+                  : 'text-text-secondary hover:text-text-primary'
+              }`}
+              title="Hiển thị tất cả 12 chỉ số điểm danh"
+            >
+              Đầy đủ (12)
+            </button>
+          </div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-6 2xl:grid-cols-11">
-        {cards.map((card, idx) => {
+      <div className="grid grid-cols-2 gap-2 sm:gap-2.5 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-6">
+        {displayCards.map((card, idx) => {
           const Icon = card.icon;
           const isRequests = card.detail === 'requests';
-          // On mobile, show top 4 primary cards by default, or all if expanded
-          const isHiddenOnMobile = !showAllMobile && idx >= 4;
+          // On mobile, show top 4 by default unless expanded or in compact mode
+          const isHiddenOnMobile =
+            !showAllMobile && viewMode === 'full' && idx >= 6;
 
           return (
             <button
@@ -195,17 +282,30 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
               className={`${cardsBaseClass} ${isHiddenOnMobile ? 'hidden sm:flex' : 'flex'}`}
             >
               <span
-                className={`flex size-8 sm:size-10 shrink-0 items-center justify-center rounded-lg sm:rounded-xl ${card.tone}`}
+                className={`flex size-7 sm:size-8 shrink-0 items-center justify-center rounded-lg ${card.tone}`}
               >
-                <Icon className="size-4 sm:size-5" strokeWidth={1.9} />
+                <Icon className="size-3.5 sm:size-4" strokeWidth={2} />
               </span>
 
               <span className="min-w-0 flex-1">
-                <span className={`block text-lg sm:text-2xl font-bold leading-tight tracking-tight tabular-nums ${card.alert && card.value > 0 ? card.alert : 'text-text-primary'}`}>
-                  {card.value.toLocaleString('vi-VN')}
+                <span className="flex items-baseline gap-1">
+                  <span
+                    className={`block text-base sm:text-lg font-bold leading-none tabular-nums ${
+                      card.alert && card.value > 0
+                        ? card.alert
+                        : 'text-text-primary'
+                    }`}
+                  >
+                    {card.displayValue ?? card.value.toLocaleString('vi-VN')}
+                  </span>
+                  {card.sublabel && (
+                    <span className="text-[11px] text-emerald-700 font-semibold leading-none">
+                      {card.sublabel}
+                    </span>
+                  )}
                 </span>
 
-                <span className="mt-0.5 sm:mt-1 block text-[11px] sm:text-xs font-medium leading-tight sm:leading-4 text-text-secondary truncate">
+                <span className="mt-1 block text-[11px] sm:text-xs font-medium leading-tight text-text-secondary truncate">
                   {card.label}
                 </span>
               </span>
@@ -214,15 +314,21 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
         })}
       </div>
 
-      {/* Mobile toggle to expand/collapse full cards */}
-      <button
-        type="button"
-        onClick={() => setShowAllMobile(!showAllMobile)}
-        className="sm:hidden w-full mt-2.5 py-2 px-3 text-xs font-semibold text-brand-700 bg-brand-50/90 hover:bg-brand-100 rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-brand-200/50"
-      >
-        <span>{showAllMobile ? 'Thu gọn chỉ số' : `Xem thêm ${cards.length - 4} chỉ số khác`}</span>
-        <span className="text-[10px]">{showAllMobile ? '▲' : '▼'}</span>
-      </button>
+      {/* Mobile toggle to expand/collapse if in full mode */}
+      {viewMode === 'full' && (
+        <button
+          type="button"
+          onClick={() => setShowAllMobile(!showAllMobile)}
+          className="sm:hidden w-full mt-2 py-1.5 px-3 text-xs font-semibold text-brand-700 bg-brand-50/90 hover:bg-brand-100 rounded-lg flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-brand-200/50"
+        >
+          <span>
+            {showAllMobile
+              ? 'Thu gọn chỉ số'
+              : `Xem thêm ${displayCards.length - 6} chỉ số khác`}
+          </span>
+          <span className="text-[10px]">{showAllMobile ? '▲' : '▼'}</span>
+        </button>
+      )}
 
       {open && (
         <StatsDetailModal
