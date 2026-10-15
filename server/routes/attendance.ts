@@ -209,6 +209,8 @@ export function attendanceRoutes(ctx: AppContext): Router {
       if (b.kind === 'times') {
         if (!after || after.firstIn === null) throw new HttpError(400, 'Ngày này chưa có giờ vào: hãy nhập giờ vào');
         if (after.lastOut !== null && after.lastOut <= after.firstIn) throw new HttpError(400, 'Giờ ra phải sau giờ vào');
+        // Chỉ sửa giờ vào mà giờ ra đang có bị mất (giờ vào sửa muộn hơn lần quẹt cuối): sai, không âm thầm thành thiếu giờ ra
+        if (lastOut === null && before?.lastOut != null && after.lastOut === null) throw new HttpError(400, 'Giờ ra phải sau giờ vào');
       }
       writeAudit(db, ctx.now(), {
         ...a,

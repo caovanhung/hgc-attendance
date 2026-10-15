@@ -77,3 +77,18 @@ test('GET /api/audit: HR thấy tất cả, quản trị khu chỉ dòng của k
     await app.close();
   }
 });
+
+test('chuỗi đăng nhập quá dài ⇒ 400, không ghi nhật ký; tài khoản lạ ghi nhãn tối đa 64 ký tự', async () => {
+  const { app } = await setup();
+  try {
+    const c = new Client(app.baseUrl);
+    assert.equal((await c.post('/api/auth/login', { code: 'X'.repeat(1000), password: 'x' })).status, 400);
+    assert.equal(rows(app).length, 0);
+    assert.equal((await c.post('/api/auth/login', { code: 'Y'.repeat(200), password: 'x' })).status, 401);
+    const r = rows(app);
+    assert.equal(r.length, 1);
+    assert.equal(r[0].actor_label.length, 64);
+  } finally {
+    await app.close();
+  }
+});

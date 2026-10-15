@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AlertCircle, Download, Eye, Lock, Search } from 'lucide-react';
-import type { AttendanceDay, Department, User } from '../types';
+import type { AttendanceDay, Department, MonthLock, User } from '../types';
+import { api } from '../api';
 import { DAY_STATUS_LABEL, DAY_STATUS_STYLE, fmtTime } from '../format';
 import { inputCls } from './ui';
 import { DayDetailModal } from './DayDetailModal';
@@ -33,6 +34,15 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
   onRefresh,
 }) => {
   const [detail, setDetail] = useState<AttendanceDay | null>(null);
+  const [lockedMonths, setLockedMonths] = useState<string[]>([]);
+  const year = selectedDate.slice(0, 4);
+  // Tháng đã khóa sổ: hộp chi tiết ẩn nút Điều chỉnh (chỉ HR / quản trị khu điều chỉnh được)
+  useEffect(() => {
+    if (currentUser.role !== 'hr' && currentUser.role !== 'area_admin') return;
+    api<{ locks: MonthLock[] }>(`/api/month-locks?year=${year}`)
+      .then((r) => setLockedMonths(r.locks.map((l) => l.month)))
+      .catch(() => setLockedMonths([]));
+  }, [year, currentUser.role]);
   const role = currentUser.role;
 
 
@@ -204,7 +214,7 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
           date={detail.workDate}
           day={detail}
           currentUser={currentUser}
-          locked={false}
+          locked={lockedMonths.includes(detail.workDate.slice(0, 7))}
           onClose={() => setDetail(null)}
           onChanged={() => onRefresh()}
         />

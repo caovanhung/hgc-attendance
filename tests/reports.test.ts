@@ -124,3 +124,18 @@ test('/me/attendance: chỉ dữ liệu của mình, đủ ngày, hôm nay, ca; 
     await app.close();
   }
 });
+
+test('nhãn phạm vi không lặp chữ "Phòng"; báo cáo tháng cũ không có người tạo sau tháng đó', async () => {
+  const { app, a1 } = await setup();
+  try {
+    const dp = seedDepartment(app.db, 'PB3', 'Phòng Tổ chức', a1);
+    const late = seedUser(app.db, { code: 'NV10', departmentId: dp });
+    app.db.prepare("UPDATE users SET created_at = '2026-11-02' WHERE id = ?").run(late);
+    const hr = await loginAs(app, 'HR01');
+    assert.equal((await hr.get(`/api/reports/monthly?month=2026-10&department=${dp}`)).body.scopeLabel, 'Phòng Tổ chức');
+    const codes = (await hr.get('/api/reports/monthly?month=2026-10')).body.rows.map((x: Row) => x.employeeCode);
+    assert.ok(!codes.includes('NV10'), 'người tạo tháng 11 không có trong báo cáo tháng 10');
+  } finally {
+    await app.close();
+  }
+});

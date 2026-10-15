@@ -8,6 +8,9 @@ import { isValidMonth, lockOf } from './month-lock';
 import { addDays, toVnDate } from './vntime';
 import type { DayStatus, MonthlyDay, MonthlyReport, MonthlyRow, MonthlySymbol } from '../shared/types';
 
+/** "Phòng Kế toán" giữ nguyên, "Kế toán" thành "Phòng Kế toán". */
+const deptLabel = (name: string): string => (/^phòng\s/i.test(name) ? name : `Phòng ${name}`);
+
 export interface ReportUser {
   id: string;
   code: string;
@@ -146,10 +149,10 @@ export function buildMonthlyReport(db: Db, viewer: AuthUser, q: { month: string;
     if (!dept) throw notFound('phòng ban');
     deptSql = 'u.department_id = ?';
     deptParams.push(q.department);
-    scopeLabel = `Phòng ${dept.name}`;
+    scopeLabel = deptLabel(dept.name);
   } else if (viewer.role === 'dept_manager' && viewer.departmentId) {
     const dept = db.prepare('SELECT name FROM departments WHERE id = ?').get(viewer.departmentId) as { name: string } | undefined;
-    if (dept) scopeLabel = `Phòng ${dept.name}`;
+    if (dept) scopeLabel = deptLabel(dept.name);
   }
   const days = monthDays(db, month);
   const users = (
@@ -157,11 +160,11 @@ export function buildMonthlyReport(db: Db, viewer: AuthUser, q: { month: string;
       .prepare(
         `SELECT u.id, u.code, u.name, u.created_at, d.name AS department_name
          FROM users u LEFT JOIN departments d ON d.id = u.department_id
-         WHERE ${NOT_SYSTEM_ADMIN} AND ${w.sql} AND ${f.sql} AND ${deptSql}
+         WHERE ${NOT_SYSTEM_ADMIN} AND ${w.sql} AND ${f.sql} AND ${deptSql} AND substr(u.created_at, 1, 10) <= ?
            AND (u.status = 'active' OR EXISTS (SELECT 1 FROM attendance_days a WHERE a.user_id = u.id AND a.work_date BETWEEN ? AND ?))
          ORDER BY d.name IS NULL, d.name, u.code`,
       )
-      .all(...w.params, ...f.params, ...deptParams, days[0].date, days[days.length - 1].date) as {
+      .all(...w.params, ...f.params, ...deptParams, days[days.length - 1].date, days[0].date, days[days.length - 1].date) as {
       id: string;
       code: string;
       name: string;

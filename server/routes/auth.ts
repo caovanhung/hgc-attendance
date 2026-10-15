@@ -14,6 +14,8 @@ import type { MeResponse } from '../../shared/types';
 
 /** Đăng nhập của các vai trò quản trị được ghi nhật ký (spec đợt C §5). */
 const AUDITED_ROLES = new Set(['hr', 'area_admin']);
+/** Mã nhân viên hoặc email dài nhất có thể (giới hạn độ dài email). */
+const MAX_LOGIN_LENGTH = 254;
 
 export function authPublicRoutes(ctx: AppContext): Router {
   const { db } = ctx;
@@ -24,6 +26,8 @@ export function authPublicRoutes(ctx: AppContext): Router {
     const raw = typeof b.login === 'string' ? b.login : typeof b.code === 'string' ? b.code : '';
     const login = raw.includes('@') ? raw.trim().toLowerCase() : raw.trim().toUpperCase();
     const password = typeof b.password === 'string' ? b.password : '';
+    // Chuỗi đăng nhập bất thường: từ chối trước khi tra cứu, không ghi nhật ký (chặn làm phình bảng nhật ký)
+    if (login.length > MAX_LOGIN_LENGTH) throw new HttpError(400, 'Mã nhân viên/email không hợp lệ');
     const key = `${login}|${req.ip}`;
     const now = ctx.now();
     // Tài khoản lạ hoặc tài khoản quản trị: ghi nhật ký đăng nhập thất bại
@@ -31,7 +35,7 @@ export function authPublicRoutes(ctx: AppContext): Router {
       if (u && !AUDITED_ROLES.has(u.role)) return;
       writeAudit(db, now, {
         actorId: u?.id ?? null,
-        actorLabel: u ? personLabel(u.name, u.code) : login || '(trống)',
+        actorLabel: u ? personLabel(u.name, u.code) : login.slice(0, 64) || '(trống)',
         ip: req.ip ?? null,
         action: 'auth.login_failed',
         reason,

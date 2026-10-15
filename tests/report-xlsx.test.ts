@@ -60,7 +60,7 @@ test('Excel 2 sheet, tiêu đề, số liệu khớp JSON, phòng rỗng vẫn r
     const none = await download(app, hr, `month=2026-10&department=${empty}`);
     assert.equal(none.status, 200);
     const noneSum = none.wb!.getWorksheet('Tổng hợp')!;
-    assert.match(String(noneSum.getCell('A3').value), /^Phòng Phòng rỗng/);
+    assert.match(String(noneSum.getCell('A3').value), /^Phòng rỗng ·/);
     assert.equal(noneSum.getRow(7).cellCount, 0);
     assert.equal((await download(app, await loginAs(app, 'NV01'), 'month=2026-10')).status, 403);
     assert.equal((await download(app, hr, 'month=2026-13')).status, 400);

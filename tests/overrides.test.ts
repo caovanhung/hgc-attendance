@@ -153,3 +153,18 @@ test('xóa tài khoản HR đã điều chỉnh và khóa sổ vẫn được; d
     await app.close();
   }
 });
+
+test('chỉ sửa giờ vào sau lần quẹt cuối ⇒ 400 "Giờ ra phải sau giờ vào", không âm thầm bỏ giờ ra', async () => {
+  const { app, ids } = await setup();
+  try {
+    addDetection(app.db, ids.nv1, at(D, '08:00'));
+    addDetection(app.db, ids.nv1, at(D, '17:00'));
+    const hr = await loginAs(app, 'HR01');
+    const r = await hr.put(path(ids.nv1), { kind: 'times', firstIn: '18:00', reason: 'Nhập nhầm giờ' });
+    assert.equal(r.status, 400);
+    assert.match(r.body.error, /Giờ ra phải sau giờ vào/);
+    assert.equal(row(app, ids.nv1)?.status, 'on_time');
+  } finally {
+    await app.close();
+  }
+});
