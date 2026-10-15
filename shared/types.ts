@@ -343,6 +343,7 @@ export interface FaceResult {
 export interface FaceCandidates {
   detections: { id: number; ts: number; imageUrl: string; deviceName: string }[];
   strangers: FaceSighting[];
+  unlinked: FaceSighting[]; // người đã có trên Camera AI chưa khớp nhân sự nào (chỉ khi nhân sự này chưa liên kết)
 }
 
 export interface ImportedUser {

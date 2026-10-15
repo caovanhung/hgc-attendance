@@ -158,3 +158,21 @@ test('tạo nhân sự kèm Person ID (liên kết người đã có trên Hanet
     await app.close();
   }
 });
+
+test('sửa nhân sự chưa có FaceID: "Lấy từ camera" trả cả người đã có trên Camera AI để liên kết; đã liên kết thì không trả', async () => {
+  const { app, hr } = await setup({});
+  try {
+    const id = seedUser(app.db, { code: 'NV20', name: 'Cao Văn Hùng' });
+    recordSighting(
+      app.db,
+      { kind: 'unlinked', personId: 'P99', aliasId: 'NV99', personName: 'Cao Văn Hùng', deviceId: 'C1', deviceName: 'Cửa chính', ts: Date.now(), imageUrl: IMG },
+      Date.now(),
+    );
+    const c = (await hr.get(`/api/users/${id}/face-candidates`)).body;
+    assert.deepEqual(c.unlinked.map((s: { personId: string }) => s.personId), ['P99']);
+    app.db.prepare("UPDATE users SET hanet_person_id = 'P77', face_registered = 1 WHERE id = ?").run(id);
+    assert.deepEqual((await hr.get(`/api/users/${id}/face-candidates`)).body.unlinked, []);
+  } finally {
+    await app.close();
+  }
+});

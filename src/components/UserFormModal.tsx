@@ -175,7 +175,7 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, me, isSystem
   };
 
   const strangers = (isEdit ? candidates?.strangers : sightings?.filter((s) => s.kind === 'stranger')) ?? [];
-  const unlinked = isEdit ? [] : (sightings?.filter((s) => s.kind === 'unlinked') ?? []);
+  const unlinked = (isEdit ? candidates?.unlinked : sightings?.filter((s) => s.kind === 'unlinked')) ?? [];
   const loaded = isEdit ? candidates !== null : sightings !== null;
   const nothing = loaded && strangers.length === 0 && unlinked.length === 0 && (candidates?.detections.length ?? 0) === 0;
 
@@ -260,6 +260,11 @@ export const UserFormModal: React.FC<Props> = ({ user, departments, me, isSystem
           {!isEdit && hanetPersonId && (
             <p className="text-[11px] text-emerald-700">
               ✓ Đã liên kết với người trên Camera AI (Person ID <span className="font-mono">{hanetPersonId}</span>)
+            </p>
+          )}
+          {isEdit && hanetPersonId && hanetPersonId !== (user?.hanetPersonId ?? '') && (
+            <p className="text-[11px] text-emerald-700">
+              ✓ Sẽ liên kết với người trên Camera AI (Person ID <span className="font-mono">{hanetPersonId}</span>) khi bấm Lưu.
             </p>
           )}
           {isEdit && (
