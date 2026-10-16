@@ -5,7 +5,8 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
-import { Navbar } from './components/Navbar';
+import { Header } from './components/Header';
+import { Sidebar } from './components/Sidebar';
 import { StatsCards } from './components/StatsCards';
 import { AttendanceTable } from './components/AttendanceTable';
 import { CamerasTab } from './components/CamerasTab';
@@ -65,6 +66,7 @@ export default function App() {
   const [stats, setStats] = useState<StatsData | null>(null);
 
   const [activeTab, setActiveTab] = useState('attendance');
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState(vnToday());
   const [selectedDept, setSelectedDept] = useState('');
@@ -210,63 +212,74 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-surface-muted flex flex-col text-slate-900 font-sans antialiased">
-      <Navbar
+      <Header
         currentUser={currentUser}
-        totalCameraCount={cameras.length}
         showSimulator={me.simulatorEnabled && currentUser.role === 'hr'}
         onOpenSimulator={() => setIsSimulatorOpen(true)}
         onChangePassword={() => setChangingPassword(true)}
         onLogout={logout}
-        activeTab={tab}
-        setActiveTab={setActiveTab}
-        extra={<AreaSelect me={me} value={activeArea} onChange={setArea} />}
+        onToggleMobileSidebar={() => setIsMobileSidebarOpen((prev) => !prev)}
+        areaSelector={<AreaSelect me={me} value={activeArea} onChange={setArea} />}
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
-          {loadError ? (
-            <span className="flex items-center gap-1.5 text-rose-600">
-              <AlertCircle className="w-4 h-4" /> {loadError}
-            </span>
-          ) : (
-            <span />
-          )}
-          <button onClick={() => fetchData()} className="flex items-center gap-1.5 text-slate-600 hover:text-slate-900 font-medium cursor-pointer">
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-brand-500' : ''}`} />
-            <span>Cập nhật ({lastRefreshed || 'mới nhất'})</span>
-          </button>
-        </div>
+      <div className="flex-1 flex min-h-0">
+        <Sidebar
+          currentUser={currentUser}
+          activeTab={tab}
+          setActiveTab={setActiveTab}
+          totalCameraCount={cameras.length}
+          isOpenMobile={isMobileSidebarOpen}
+          onCloseMobile={() => setIsMobileSidebarOpen(false)}
+        />
 
-        {tab === 'attendance' && <StatsCards stats={stats} currentUser={currentUser} onOpenRequests={() => setActiveTab('requests')} />}
+        <main className="flex-1 min-w-0 overflow-y-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
+          <div className="max-w-7xl mx-auto w-full">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
+              {loadError ? (
+                <span className="flex items-center gap-1.5 text-rose-600">
+                  <AlertCircle className="w-4 h-4" /> {loadError}
+                </span>
+              ) : (
+                <span />
+              )}
+              <button onClick={() => fetchData()} className="flex items-center gap-1.5 text-slate-600 hover:text-slate-900 font-medium cursor-pointer">
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-brand-500' : ''}`} />
+                <span>Cập nhật ({lastRefreshed || 'mới nhất'})</span>
+              </button>
+            </div>
 
-        {tab === 'mine' && <MyAttendanceTab me={me} />}
+            {tab === 'attendance' && <StatsCards stats={stats} currentUser={currentUser} onOpenRequests={() => setActiveTab('requests')} />}
 
-        {tab === 'attendance' && (
-          <AttendanceTable
-            records={records}
-            currentUser={currentUser}
-            departments={departments}
-            selectedDate={selectedDate}
-            setSelectedDate={setSelectedDate}
-            selectedDept={selectedDept}
-            setSelectedDept={setSelectedDept}
-            searchQuery={searchQuery}
-            setSearchQuery={setSearchQuery}
-            onRefresh={fetchData}
-          />
-        )}
-        {tab === 'report' && <MonthlyReportTab me={me} departments={departments} area={activeArea} />}
-        {tab === 'requests' && <RequestsTab requests={requests} currentUser={currentUser} onRefresh={fetchData} />}
-        {tab === 'cameras' && <CamerasTab cameras={cameras} currentUser={currentUser} areas={me.areas} onRefresh={fetchData} />}
-        {tab === 'departments' && <DepartmentsTab departments={departments} users={users} currentUser={currentUser} areas={me.areas} onRefresh={refreshAll} />}
-        {tab === 'shifts' && <ShiftsTab me={me} area={activeArea} onChanged={refreshAll} />}
-        {tab === 'employees' && (
-          <EmployeesTab users={users} departments={departments} currentUser={currentUser} isSystemAdmin={me.isSystemAdmin} areas={me.areas} onRefresh={refreshAll} />
-        )}
-        {tab === 'areas' && <AreasTab onChanged={refreshAll} />}
-        {tab === 'audit' && <AuditLogTab />}
-        {tab === 'hanet_config' && <HanetConfigTab isSystemAdmin={me.isSystemAdmin} onRefresh={fetchData} />}
-      </main>
+            {tab === 'mine' && <MyAttendanceTab me={me} />}
+
+            {tab === 'attendance' && (
+              <AttendanceTable
+                records={records}
+                currentUser={currentUser}
+                departments={departments}
+                selectedDate={selectedDate}
+                setSelectedDate={setSelectedDate}
+                selectedDept={selectedDept}
+                setSelectedDept={setSelectedDept}
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
+                onRefresh={fetchData}
+              />
+            )}
+            {tab === 'report' && <MonthlyReportTab me={me} departments={departments} area={activeArea} />}
+            {tab === 'requests' && <RequestsTab requests={requests} currentUser={currentUser} onRefresh={fetchData} />}
+            {tab === 'cameras' && <CamerasTab cameras={cameras} currentUser={currentUser} areas={me.areas} onRefresh={fetchData} />}
+            {tab === 'departments' && <DepartmentsTab departments={departments} users={users} currentUser={currentUser} areas={me.areas} onRefresh={refreshAll} />}
+            {tab === 'shifts' && <ShiftsTab me={me} area={activeArea} onChanged={refreshAll} />}
+            {tab === 'employees' && (
+              <EmployeesTab users={users} departments={departments} currentUser={currentUser} isSystemAdmin={me.isSystemAdmin} areas={me.areas} onRefresh={refreshAll} />
+            )}
+            {tab === 'areas' && <AreasTab onChanged={refreshAll} />}
+            {tab === 'audit' && <AuditLogTab />}
+            {tab === 'hanet_config' && <HanetConfigTab isSystemAdmin={me.isSystemAdmin} onRefresh={fetchData} />}
+          </div>
+        </main>
+      </div>
 
       {me.simulatorEnabled && currentUser.role === 'hr' && (
         <HanetSimulatorModal
