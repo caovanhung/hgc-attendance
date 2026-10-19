@@ -28,6 +28,13 @@ const ROLE_BADGE: Record<User['role'], string> = {
   employee: 'bg-slate-100 text-slate-700 ring-slate-200',
 };
 
+const BG_THEMES = [
+  { id: '#F5F7FC', name: 'Xanh xám', label: 'Xanh xám sương nhẹ', desc: 'Khuyên dùng' },
+  { id: '#F8F5F0', name: 'Kem ấm', label: 'Kem ấm thanh lịch', desc: 'Thân thiện' },
+  { id: '#F1F7F5', name: 'Xanh mint', label: 'Xanh mint cực nhạt', desc: 'Tươi mới' },
+  { id: '#F7F4FA', name: 'Tím xám', label: 'Tím xám pastel', desc: 'Mềm mại' },
+] as const;
+
 export const Header: React.FC<HeaderProps> = ({
   currentUser,
   showSimulator,
@@ -39,6 +46,23 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
+
+  const [currentBg, setCurrentBg] = useState<string>(() => {
+    try {
+      return localStorage.getItem('petrolimex_bg_tone') || '#F5F7FC';
+    } catch {
+      return '#F5F7FC';
+    }
+  });
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--app-bg', currentBg);
+    try {
+      localStorage.setItem('petrolimex_bg_tone', currentBg);
+    } catch {
+      // ignore
+    }
+  }, [currentBg]);
 
   // Đóng dropdown khi click ra ngoài
   useEffect(() => {
@@ -182,6 +206,42 @@ export const Header: React.FC<HeaderProps> = ({
                     <KeyRound className="size-4 text-slate-500" />
                     <span>Đổi mật khẩu</span>
                   </button>
+
+                  {/* Tùy chọn 4 tông màu nền theo đề xuất */}
+                  <div className="border-t border-slate-100 my-1 pt-2 px-1 pb-1">
+                    <div className="text-[11px] font-semibold text-slate-500 mb-1.5 flex items-center justify-between px-1.5">
+                      <span>Tông nền trang</span>
+                      {currentBg === '#F5F7FC' && (
+                        <span className="text-[10px] text-brand-700 font-semibold bg-[#FFF1E8] px-1.5 py-0.2 rounded">
+                          Khuyên dùng
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {BG_THEMES.map((theme) => {
+                        const isSelected = currentBg === theme.id;
+                        return (
+                          <button
+                            key={theme.id}
+                            type="button"
+                            onClick={() => setCurrentBg(theme.id)}
+                            className={`flex items-center gap-1.5 rounded-lg p-1.5 text-left border transition-all cursor-pointer ${
+                              isSelected
+                                ? 'border-brand-500 bg-[#FFF1E8] font-bold text-brand-900 shadow-xs ring-1 ring-brand-300'
+                                : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-white hover:bg-slate-50'
+                            }`}
+                            title={`${theme.label} (${theme.id}) — ${theme.desc}`}
+                          >
+                            <span
+                              className="size-3.5 rounded-full border border-slate-300/80 shrink-0 shadow-2xs"
+                              style={{ backgroundColor: theme.id }}
+                            />
+                            <span className="truncate text-[11px]">{theme.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
 
                   <button
                     type="button"
