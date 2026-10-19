@@ -28,17 +28,119 @@ export const DAY_STATUS_LABEL: Record<DayStatus, string> = {
   business_trip: 'Công tác',
 };
 
-/** Màu trạng thái ngày công dùng chung (bảng công, thẻ thống kê). Cam dành cho thương hiệu nên không dùng ở đây. */
+/** Màu trạng thái ngày công dùng chung (bảng công, thẻ thống kê). */
 export const DAY_STATUS_STYLE: Record<DayStatus, string> = {
   on_time: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  late: 'bg-amber-50 text-amber-800 border-amber-200',
-  early_leave: 'bg-amber-50 text-amber-800 border-amber-200',
+  late: 'bg-rose-50 text-rose-700 border-rose-200',
+  early_leave: 'bg-rose-50 text-rose-700 border-rose-200',
   late_and_early: 'bg-rose-50 text-rose-700 border-rose-200',
   missing_out: 'bg-slate-100 text-slate-700 border-slate-200',
   absent: 'bg-rose-50 text-rose-700 border-rose-200',
   leave: 'bg-violet-50 text-violet-700 border-violet-200',
   business_trip: 'bg-sky-50 text-sky-700 border-sky-200',
 };
+
+/**
+ * Trạng thái chấm công hiển thị theo yêu cầu:
+ * - Chỉ hiển thị: Đi đúng giờ / Đi muộn và Về đúng giờ / Về sớm.
+ * - Không quan tâm đến sớm hay về muộn (đến sớm = đi đúng giờ, về muộn = về đúng giờ).
+ * - Trong giờ làm việc (!final), không hiển thị "Thiếu giờ ra" mà hiển thị "Đi đúng giờ" hoặc "Đi muộn".
+ */
+export function getAttendanceStatusText(day: {
+  status: DayStatus;
+  final?: boolean;
+  lateMinutes?: number;
+  earlyMinutes?: number;
+  firstIn?: number | null;
+  lastOut?: number | null;
+}): {
+  label: string;
+  style: string;
+  isOk: boolean;
+} {
+  const { status, final, lateMinutes = 0, earlyMinutes = 0, firstIn, lastOut } = day;
+
+  if (status === 'absent') {
+    return { label: 'Vắng', style: 'bg-rose-50 text-rose-700 border-rose-200', isOk: false };
+  }
+  if (status === 'leave') {
+    return { label: 'Nghỉ phép', style: 'bg-violet-50 text-violet-700 border-violet-200', isOk: true };
+  }
+  if (status === 'business_trip') {
+    return { label: 'Công tác', style: 'bg-sky-50 text-sky-700 border-sky-200', isOk: true };
+  }
+
+  // Chưa điểm danh
+  if (firstIn === null || firstIn === undefined) {
+    return { label: 'Chưa điểm danh', style: 'bg-slate-100 text-slate-600 border-slate-200', isOk: false };
+  }
+
+  const isLate = lateMinutes > 0;
+  const isEarly = earlyMinutes > 0;
+
+  // Đang trong ca làm việc (chưa chốt ngày/chưa kết thúc ca):
+  if (!final) {
+    if (isLate) {
+      return {
+        label: `Đi muộn ${lateMinutes}'`,
+        style: 'bg-rose-50 text-rose-700 border-rose-200',
+        isOk: false,
+      };
+    }
+    return {
+      label: 'Đi đúng giờ',
+      style: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      isOk: true,
+    };
+  }
+
+  // Đã hết ca / chốt ngày:
+  if (lastOut === null) {
+    if (isLate) {
+      return {
+        label: `Đi muộn ${lateMinutes}'`,
+        style: 'bg-rose-50 text-rose-700 border-rose-200',
+        isOk: false,
+      };
+    }
+    return {
+      label: 'Đi đúng giờ',
+      style: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      isOk: true,
+    };
+  }
+
+  // Đã có cả giờ vào và giờ ra:
+  if (isLate && isEarly) {
+    return {
+      label: `Đi muộn ${lateMinutes}' · Về sớm ${earlyMinutes}'`,
+      style: 'bg-rose-50 text-rose-700 border-rose-200',
+      isOk: false,
+    };
+  }
+
+  if (isLate) {
+    return {
+      label: `Đi muộn ${lateMinutes}'`,
+      style: 'bg-rose-50 text-rose-700 border-rose-200',
+      isOk: false,
+    };
+  }
+
+  if (isEarly) {
+    return {
+      label: `Về sớm ${earlyMinutes}'`,
+      style: 'bg-rose-50 text-rose-700 border-rose-200',
+      isOk: false,
+    };
+  }
+
+  return {
+    label: 'Đi đúng giờ · Về đúng giờ',
+    style: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    isOk: true,
+  };
+}
 
 export const ROLE_LABEL: Record<UserRole, string> = {
   hr: 'HR toàn hệ thống',

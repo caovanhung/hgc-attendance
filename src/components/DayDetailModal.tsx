@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Video } from 'lucide-react';
 import type { AttendanceDay, Detection, User } from '../types';
 import { api, errorMessage } from '../api';
-import { canAdjust, fmtDate, fmtDateTime, fmtTime, OVERRIDE_KIND_LABEL } from '../format';
+import { canAdjust, fmtDate, fmtDateTime, fmtTime, getAttendanceStatusText, OVERRIDE_KIND_LABEL } from '../format';
 import { Field, Modal, dangerBtn, inputCls, secondaryBtn } from './ui';
 import { VideoModal } from './VideoModal';
 import { AdjustDayModal } from './AdjustDayModal';
@@ -71,6 +71,38 @@ export const DayDetailModal: React.FC<{
   return (
     <>
       <Modal title={`${userName} · ${fmtDate(date)}`} onClose={onClose} wide>
+        {day && (
+          <div className="mb-3.5 p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-4">
+              <div>
+                <span className="text-slate-400 block text-[11px]">Giờ vào</span>
+                <span className={`font-mono text-sm font-bold ${day.lateMinutes > 0 ? 'text-rose-600' : day.firstIn !== null ? 'text-emerald-600' : 'text-slate-500'}`}>
+                  {fmtTime(day.firstIn)}
+                  {day.lateMinutes > 0 && <span className="ml-1 text-[11px] font-sans font-medium text-rose-600">(muộn {day.lateMinutes}')</span>}
+                </span>
+              </div>
+              <div className="border-l border-slate-200 pl-4">
+                <span className="text-slate-400 block text-[11px]">{day.final ? 'Giờ ra' : 'Lần quẹt gần nhất'}</span>
+                <span className={`font-mono text-sm font-bold ${!day.final ? 'text-slate-800' : day.earlyMinutes > 0 ? 'text-rose-600' : day.lastOut !== null ? 'text-emerald-600' : 'text-slate-500'}`}>
+                  {fmtTime(day.lastOut)}
+                  {day.earlyMinutes > 0 && <span className="ml-1 text-[11px] font-sans font-medium text-rose-600">(sớm {day.earlyMinutes}')</span>}
+                  {!day.final && day.lastOut !== null && <span className="ml-1 text-[11px] font-sans font-medium text-sky-700">(đang làm)</span>}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              {(() => {
+                const st = getAttendanceStatusText(day);
+                return (
+                  <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold border ${st.style}`}>
+                    {st.label}
+                  </span>
+                );
+              })()}
+            </div>
+          </div>
+        )}
         {day?.override && (
           <div className="mb-3 rounded-xl border border-brand-200 bg-brand-50/60 p-3">
             <div className="font-semibold text-brand-800">Đã điều chỉnh: {OVERRIDE_KIND_LABEL[day.override.kind]}</div>

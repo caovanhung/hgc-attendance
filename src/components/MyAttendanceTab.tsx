@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, CalendarClock, Lock, UserRound } from 'lucide-react';
 import type { AttendanceDay, DayStatus, MeResponse, MyAttendance, RequestType } from '../types';
 import { api, errorMessage } from '../api';
-import { DAY_STATUS_LABEL, DAY_STATUS_STYLE, WEEKDAY_LABEL, fmtDate, fmtDateTime, fmtTime, formatWorkDays, thisMonth } from '../format';
+import { DAY_STATUS_LABEL, DAY_STATUS_STYLE, WEEKDAY_LABEL, fmtDate, fmtDateTime, fmtTime, formatWorkDays, getAttendanceStatusText, thisMonth } from '../format';
 import { inputCls, secondaryBtn } from './ui';
 import { DayDetailModal } from './DayDetailModal';
 import { OverrideBadge } from './OverrideBadge';
@@ -16,9 +16,14 @@ function requestTypeFor(day: AttendanceDay): RequestType | null {
   return null;
 }
 
-const StatusPill: React.FC<{ status: DayStatus }> = ({ status }) => (
-  <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold border ${DAY_STATUS_STYLE[status]}`}>{DAY_STATUS_LABEL[status]}</span>
-);
+const StatusPill: React.FC<{ day: AttendanceDay }> = ({ day }) => {
+  const st = getAttendanceStatusText(day);
+  return (
+    <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold border ${st.style}`}>
+      {st.label}
+    </span>
+  );
+};
 
 /** Tab "Của tôi": thông tin, hôm nay, lịch sử tháng của chính người đăng nhập. */
 export const MyAttendanceTab: React.FC<{ me: MeResponse }> = ({ me }) => {
@@ -108,7 +113,7 @@ export const MyAttendanceTab: React.FC<{ me: MeResponse }> = ({ me }) => {
               <div>
                 <div className="text-xs text-slate-500">Trạng thái</div>
                 <div className="mt-1">
-                  <StatusPill status={today.status} />
+                  <StatusPill day={today} />
                 </div>
               </div>
             </div>
@@ -171,7 +176,7 @@ export const MyAttendanceTab: React.FC<{ me: MeResponse }> = ({ me }) => {
                     <td className="py-2.5 px-4">
                       {r && (
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <StatusPill status={r.status} />
+                          <StatusPill day={r} />
                           {r.override && <OverrideBadge override={r.override} />}
                         </div>
                       )}
@@ -221,7 +226,7 @@ export const MyAttendanceTab: React.FC<{ me: MeResponse }> = ({ me }) => {
                   <div className="shrink-0 flex items-center gap-1.5">
                     {r ? (
                       <>
-                        <StatusPill status={r.status} />
+                        <StatusPill day={r} />
                         {r.override && <OverrideBadge override={r.override} />}
                       </>
                     ) : (

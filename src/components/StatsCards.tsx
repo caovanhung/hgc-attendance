@@ -23,7 +23,7 @@ import type {
 } from '../types';
 
 import { api, errorMessage } from '../api';
-import { DAY_STATUS_LABEL, fmtTime } from '../format';
+import { fmtTime, getAttendanceStatusText } from '../format';
 import { Modal } from './ui';
 
 interface StatsCardsProps {
@@ -97,14 +97,6 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
 
   const cards: Card[] = [
     {
-      label: 'Nhân sự đang làm',
-      value: stats.totalEmployees,
-      icon: Users,
-      tone: 'bg-brand-50 text-brand-600',
-      detail: 'total',
-      primary: true,
-    },
-    {
       label: 'Có mặt hôm nay',
       value: stats.presentCount,
       sublabel: `(${attendanceRate}%)`,
@@ -114,46 +106,20 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
       primary: true,
     },
     {
-      label: 'Tỷ lệ có mặt',
-      value: attendanceRate,
-      displayValue: `${attendanceRate}%`,
-      icon: Percent,
-      tone: 'bg-emerald-50 text-emerald-700',
-      detail: 'present',
-      primary: false,
-    },
-    {
-      label: 'Vào đúng giờ',
+      label: 'Đi đúng giờ',
       value: stats.onTimeCount,
       icon: Clock,
-      tone: 'bg-blue-50 text-blue-700',
+      tone: 'bg-emerald-50 text-emerald-700',
       detail: 'on_time',
-      primary: false,
-    },
-    {
-      label: 'Đến sớm',
-      value: stats.earlyArrivalCount,
-      icon: Sunrise,
-      tone: 'bg-teal-50 text-teal-700',
-      detail: 'early_arrival',
-      primary: false,
+      primary: true,
     },
     {
       label: 'Đi muộn',
       value: stats.lateCount,
       icon: AlertTriangle,
-      tone: 'bg-amber-50 text-amber-700',
-      alert: 'text-amber-700',
+      tone: 'bg-rose-50 text-rose-700',
+      alert: 'text-rose-700',
       detail: 'late',
-      primary: true,
-    },
-    {
-      label: 'Chưa có giờ ra',
-      value: stats.missingOutCount,
-      icon: LogOut,
-      tone: 'bg-slate-100 text-slate-600',
-      alert: stats.missingOutCount > 0 ? 'text-slate-800' : undefined,
-      detail: 'missing_out',
       primary: true,
     },
     {
@@ -164,6 +130,24 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
       alert: stats.notCheckedInCount > 0 ? 'text-amber-800' : undefined,
       detail: 'not_checked_in',
       primary: true,
+    },
+    {
+      label: 'Đơn chờ duyệt',
+      value: stats.pendingRequests,
+      icon: FileText,
+      tone: 'bg-brand-100 text-brand-700',
+      alert: stats.pendingRequests > 0 ? 'text-brand-700' : undefined,
+      detail: 'requests',
+      primary: true,
+    },
+    {
+      label: 'Tỷ lệ có mặt',
+      value: attendanceRate,
+      displayValue: `${attendanceRate}%`,
+      icon: Percent,
+      tone: 'bg-emerald-50 text-emerald-700',
+      detail: 'present',
+      primary: false,
     },
     {
       label: 'Vắng',
@@ -189,15 +173,6 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
       tone: 'bg-sky-50 text-sky-700',
       detail: 'business_trip',
       primary: false,
-    },
-    {
-      label: 'Đơn chờ duyệt',
-      value: stats.pendingRequests,
-      icon: FileText,
-      tone: 'bg-brand-100 text-brand-700',
-      alert: stats.pendingRequests > 0 ? 'text-brand-700' : undefined,
-      detail: 'requests',
-      primary: true,
     },
   ];
 
@@ -479,29 +454,21 @@ const StatsDetailModal: React.FC<{
                             Chưa điểm danh
                           </span>
                         ) : (
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="text-sm font-medium text-text-primary">
-                              {DAY_STATUS_LABEL[row.status]}
-                            </span>
-
-                            {row.earlyArrivalMinutes > 0 && (
-                              <span className="inline-flex whitespace-nowrap rounded-full bg-teal-50 px-2 py-0.5 text-xs font-semibold text-teal-800">
-                                Đến sớm {row.earlyArrivalMinutes}'
+                          (() => {
+                            const st = getAttendanceStatusText({
+                              status: row.status,
+                              final: row.final,
+                              lateMinutes: row.lateMinutes,
+                              earlyMinutes: row.earlyMinutes,
+                              firstIn: row.firstIn,
+                              lastOut: row.lastOut,
+                            });
+                            return (
+                              <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold border ${st.style}`}>
+                                {st.label}
                               </span>
-                            )}
-
-                            {row.lateMinutes > 0 && (
-                              <span className="inline-flex whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">
-                                Muộn {row.lateMinutes}'
-                              </span>
-                            )}
-
-                            {row.earlyMinutes > 0 && (
-                              <span className="inline-flex whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">
-                                Về sớm {row.earlyMinutes}'
-                              </span>
-                            )}
-                          </div>
+                            );
+                          })()
                         )}
                       </td>
                     </>

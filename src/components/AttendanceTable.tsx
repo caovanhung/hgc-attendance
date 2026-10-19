@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AlertCircle, Download, Eye, Lock, Search } from 'lucide-react';
 import type { AttendanceDay, Department, MonthLock, User } from '../types';
 import { api } from '../api';
-import { DAY_STATUS_LABEL, DAY_STATUS_STYLE, fmtTime } from '../format';
+import { DAY_STATUS_LABEL, DAY_STATUS_STYLE, fmtTime, getAttendanceStatusText } from '../format';
 import { inputCls } from './ui';
 import { DayDetailModal } from './DayDetailModal';
 import { OverrideBadge } from './OverrideBadge';
@@ -187,25 +187,25 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
                     )}
                   </td>
                   <td className="py-3 px-4">
-                    <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold border ${DAY_STATUS_STYLE[r.status]}`}>
-                      {DAY_STATUS_LABEL[r.status]}
-                      {r.status !== 'absent' && r.status !== 'leave' && r.status !== 'business_trip' && (
+                    {(() => {
+                      const st = getAttendanceStatusText(r);
+                      return (
                         <>
-                          {r.earlyArrivalMinutes > 0 && ` · đến sớm ${r.earlyArrivalMinutes}'`}
-                          {r.lateMinutes > 0 && ` · muộn ${r.lateMinutes}'`}
-                          {r.earlyMinutes > 0 && ` · sớm ${r.earlyMinutes}'`}
+                          <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold border ${st.style}`}>
+                            {st.label}
+                          </span>
+                          {!r.final && r.firstIn !== null && (
+                            <div className="text-[11px] text-sky-700 mt-0.5 font-medium">Đang trong giờ làm</div>
+                          )}
+                          {r.lateExcused && <div className="text-[11px] text-emerald-700 mt-0.5">Đã duyệt giải trình</div>}
+                          {r.override && (
+                            <div className="mt-1">
+                              <OverrideBadge override={r.override} />
+                            </div>
+                          )}
                         </>
-                      )}
-                    </span>
-                    {!r.final && (r.status === 'missing_out' || r.status === 'on_time' || r.status === 'late') && (
-                      <div className="text-[11px] text-sky-700 mt-0.5">Đang trong giờ làm</div>
-                    )}
-                    {r.lateExcused && <div className="text-[11px] text-emerald-700 mt-0.5">Đã duyệt giải trình</div>}
-                    {r.override && (
-                      <div className="mt-1">
-                        <OverrideBadge override={r.override} />
-                      </div>
-                    )}
+                      );
+                    })()}
                   </td>
                   <td className="py-3 px-4">
                     <button onClick={() => setDetail(r)} className="text-xs text-brand-700 font-semibold hover:underline flex items-center gap-1 cursor-pointer whitespace-nowrap">
@@ -246,16 +246,14 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
                   </div>
                 </div>
                 <div className="shrink-0 flex flex-col items-end gap-1">
-                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold border ${DAY_STATUS_STYLE[r.status]}`}>
-                    {DAY_STATUS_LABEL[r.status]}
-                    {r.status !== 'absent' && r.status !== 'leave' && r.status !== 'business_trip' && (
-                      <>
-                        {r.earlyArrivalMinutes > 0 && ` · sớm ${r.earlyArrivalMinutes}'`}
-                        {r.lateMinutes > 0 && ` · muộn ${r.lateMinutes}'`}
-                        {r.earlyMinutes > 0 && ` · về sớm ${r.earlyMinutes}'`}
-                      </>
-                    )}
-                  </span>
+                  {(() => {
+                    const st = getAttendanceStatusText(r);
+                    return (
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold border ${st.style}`}>
+                        {st.label}
+                      </span>
+                    );
+                  })()}
                   {r.override && <OverrideBadge override={r.override} />}
                 </div>
               </div>
@@ -289,7 +287,7 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
               </div>
 
               {/* Working state hint */}
-              {!r.final && (r.status === 'missing_out' || r.status === 'on_time' || r.status === 'late') && (
+              {!r.final && r.firstIn !== null && (
                 <div className="text-[11px] text-sky-700 mt-1.5 flex items-center gap-1 font-medium">
                   <span className="size-1.5 rounded-full bg-sky-500 animate-pulse" /> Đang trong giờ làm
                 </div>
