@@ -274,7 +274,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             : 'px-2.5 text-left'
                         } ${
                           isActive
-                            ? 'bg-brand-50 text-brand-700 font-semibold ring-1 ring-inset ring-brand-200/80 shadow-xs'
+                            ? 'bg-[#FFF1E8] text-brand-700 font-semibold ring-1 ring-inset ring-brand-300/70 shadow-xs'
                             : 'text-slate-600 font-medium hover:bg-slate-50 hover:text-slate-900'
                         }`}
                       >

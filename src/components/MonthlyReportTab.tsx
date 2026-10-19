@@ -116,15 +116,15 @@ export const MonthlyReportTab: React.FC<{ me: MeResponse; departments: Departmen
       )}
 
       {report?.lock && (
-        <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-          <Lock className="w-4 h-4" /> Tháng {monthText} đã khóa sổ lúc {fmtDateTime(report.lock.lockedAt)} bởi {report.lock.lockedByName}. Ngày công tháng này không
+        <div className="flex items-center gap-2 rounded-xl border border-brand-200 bg-[#FFF1E8] p-3 text-sm text-brand-900 font-medium">
+          <Lock className="w-4 h-4 text-brand-700" /> Tháng {monthText} đã khóa sổ lúc {fmtDateTime(report.lock.lockedAt)} bởi {report.lock.lockedByName}. Ngày công tháng này không
           thay đổi được nữa.
         </div>
       )}
 
       {report && (
         <div className="bg-white rounded-2xl border border-border shadow-card overflow-hidden">
-          <div className="px-4 py-3 border-b border-brand-100 bg-surface-tint flex flex-wrap items-center justify-between gap-2">
+          <div className="px-4 py-3 border-b border-blue-100/70 bg-[#EAF1FB]/50 flex flex-wrap items-center justify-between gap-2">
             <div className="inline-flex rounded-xl border border-slate-200 bg-white p-0.5">
               {(['summary', 'grid'] as const).map((v) => (
                 <button
@@ -145,7 +145,7 @@ export const MonthlyReportTab: React.FC<{ me: MeResponse; departments: Departmen
           ) : view === 'summary' ? (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
-                <thead className="bg-surface-muted border-b border-border">
+                <thead className="bg-[#EAF1FB]/50 border-b border-slate-200 text-slate-700">
                   <tr>
                     {['Mã NV', 'Họ tên', 'Phòng ban', 'Phải làm', 'Ngày công', 'Muộn (lần/phút)', 'Về sớm (lần/phút)', 'Thiếu giờ ra', 'Vắng', 'Phép', 'Công tác', 'Chuyên cần'].map(
                       (h) => (
@@ -185,8 +185,8 @@ export const MonthlyReportTab: React.FC<{ me: MeResponse; departments: Departmen
               <div className="overflow-x-auto">
                 <table className="text-xs border-collapse">
                   <thead>
-                    <tr className="bg-surface-muted border-b border-border">
-                      <th className="sticky left-0 z-10 bg-surface-muted py-2 px-3 text-left font-semibold text-slate-600 min-w-44">Nhân sự</th>
+                    <tr className="bg-[#EAF1FB]/50 border-b border-slate-200 text-slate-700">
+                      <th className="sticky left-0 z-10 bg-[#EAF1FB] py-2 px-3 text-left font-semibold text-slate-700 min-w-44">Nhân sự</th>
                       {report.days.map((d) => (
                         <th
                           key={d.date}

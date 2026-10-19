@@ -46,9 +46,9 @@ interface Card {
 }
 
 const cardsBaseClass =
-  'group relative min-w-0 flex items-center gap-2 sm:gap-2.5 rounded-lg border ' +
-  'border-border bg-surface py-2 sm:py-2.5 px-2.5 sm:px-3 text-left shadow-xs ' +
-  'transition-all duration-150 hover:border-brand-300 hover:bg-slate-50/70 ' +
+  'group relative min-w-0 flex items-center gap-2 sm:gap-2.5 rounded-xl border ' +
+  'border-slate-200/90 bg-white py-2 sm:py-2.5 px-2.5 sm:px-3 text-left shadow-xs ' +
+  'transition-all duration-150 hover:border-brand-300 hover:shadow-sm ' +
   'focus-visible:outline-2 focus-visible:outline-brand-600 cursor-pointer';
 
 export const StatsCards: React.FC<StatsCardsProps> = ({
@@ -200,7 +200,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
           <div
             role="group"
             aria-label="Chế độ hiển thị thống kê"
-            className="inline-flex items-center rounded-lg bg-slate-100 p-0.5 border border-slate-200/80 text-xs"
+            className="inline-flex items-center rounded-lg bg-[#EAF1FB] p-0.5 border border-blue-200/60 text-xs"
           >
             <button
               type="button"
@@ -211,9 +211,9 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
               className={`px-2.5 py-1 rounded-md font-medium transition-all cursor-pointer ${
                 viewMode === 'compact'
                   ? 'bg-white text-brand-700 shadow-xs'
-                  : 'text-text-secondary hover:text-text-primary'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
-              title="Chỉ hiển thị 6 chỉ số chính (gọn gàng 1 dòng)"
+              title="Chỉ hiển thị các chỉ số chính (gọn gàng 1 dòng)"
             >
               Gọn gàng
             </button>
@@ -223,11 +223,11 @@ export const StatsCards: React.FC<StatsCardsProps> = ({
               className={`px-2.5 py-1 rounded-md font-medium transition-all cursor-pointer ${
                 viewMode === 'full'
                   ? 'bg-white text-brand-700 shadow-xs'
-                  : 'text-text-secondary hover:text-text-primary'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
-              title="Hiển thị tất cả 12 chỉ số điểm danh"
+              title="Hiển thị tất cả chỉ số điểm danh"
             >
-              Đầy đủ (12)
+              Đầy đủ ({cards.length})
             </button>
           </div>
         </div>

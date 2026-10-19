@@ -151,7 +151,7 @@ export const DepartmentsTab: React.FC<DepartmentsTabProps> = ({ departments, use
           </div>
           <table className="w-full text-left text-sm">
             <thead>
-              <tr className="bg-surface-muted border-b border-border text-xs font-semibold text-slate-600 uppercase tracking-wide">
+              <tr className="bg-[#EAF1FB]/50 border-b border-slate-200 text-xs font-semibold text-slate-700 uppercase tracking-wide">
                 <th className="py-3 px-4">Nhân viên</th>
                 <th className="py-3 px-4">Chức vụ</th>
                 <th className="py-3 px-4">Vai trò</th>

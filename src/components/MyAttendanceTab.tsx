@@ -124,28 +124,28 @@ export const MyAttendanceTab: React.FC<{ me: MeResponse }> = ({ me }) => {
       </div>
 
       <div className="bg-white rounded-2xl border border-border shadow-card overflow-hidden">
-        <div className="px-4 py-3 border-b border-brand-100 bg-surface-tint flex flex-wrap items-center justify-between gap-3">
+        <div className="px-4 py-3 border-b border-blue-100/70 bg-[#EAF1FB]/50 flex flex-wrap items-center justify-between gap-3">
           <h3 className="font-bold text-sm text-brand-navy">Lịch sử điểm danh tháng {month.slice(5, 7)}/{month.slice(0, 4)}</h3>
-          <input type="month" className={`${inputCls} w-auto!`} value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} />
+          <input type="month" className={`${inputCls} w-auto! bg-white shadow-xs`} value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} />
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 p-4 border-b border-slate-100">
           {stats.map(([label, value, color]) => (
-            <div key={label} className="rounded-xl border border-slate-100 bg-surface-muted p-3">
+            <div key={label} className="rounded-xl border border-slate-200/80 bg-white shadow-xs p-3">
               <div className={`text-xl font-bold tabular-nums ${color}`}>{value}</div>
               <div className="text-xs text-slate-500 mt-0.5">{label}</div>
             </div>
           ))}
         </div>
         {data.lock && (
-          <div className="mx-4 mt-4 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-            <Lock className="w-4 h-4" /> Tháng này đã khóa sổ lúc {fmtDateTime(data.lock.lockedAt)}.
+          <div className="mx-4 mt-4 flex items-center gap-2 rounded-xl border border-brand-200 bg-[#FFF1E8] p-3 text-sm text-brand-900 font-medium">
+            <Lock className="w-4 h-4 text-brand-700" /> Tháng này đã khóa sổ lúc {fmtDateTime(data.lock.lockedAt)}.
           </div>
         )}
         {notice && <p className="mx-4 mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{notice}</p>}
         {/* Desktop: Table View */}
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead className="bg-surface-muted border-b border-border text-xs font-semibold text-slate-600 uppercase tracking-wide">
+            <thead className="bg-[#EAF1FB]/40 border-b border-slate-200 text-xs font-semibold text-slate-700 uppercase tracking-wide">
               <tr>
                 <th className="py-3 px-4">Ngày</th>
                 <th className="py-3 px-4">Giờ vào</th>
