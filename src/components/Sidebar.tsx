@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  BookOpen,
   Building2,
   CalendarClock,
   Camera,
@@ -27,6 +28,7 @@ export interface SidebarProps {
   totalCameraCount: number;
   isOpenMobile: boolean;
   onCloseMobile: () => void;
+  onOpenDocs?: () => void;
 }
 
 interface NavItem {
@@ -51,6 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   totalCameraCount,
   isOpenMobile,
   onCloseMobile,
+  onOpenDocs,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
     try {
@@ -319,6 +322,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             );
           })}
+        </div>
+
+        {/* Nút Hướng dẫn sử dụng */}
+        <div className="shrink-0 border-t border-border p-2">
+          <button
+            type="button"
+            onClick={onOpenDocs}
+            title={isCollapsed ? 'Tài liệu & Hướng dẫn sử dụng' : undefined}
+            className={`flex w-full items-center gap-2 rounded-lg py-2 px-2.5 text-xs font-semibold text-slate-700 hover:bg-[#FFF1E8] hover:text-brand-800 transition-colors cursor-pointer ${
+              isCollapsed ? 'justify-center px-2' : ''
+            }`}
+          >
+            <BookOpen className="size-4 shrink-0 text-brand-600" />
+            {!isCollapsed && <span className="truncate">Hướng dẫn sử dụng</span>}
+          </button>
         </div>
 
         {/* Footer Toggle Collapse Bar (Desktop only) */}

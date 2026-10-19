@@ -21,6 +21,7 @@ import { ShiftsTab } from './components/ShiftsTab';
 import { MonthlyReportTab } from './components/MonthlyReportTab';
 import { MyAttendanceTab } from './components/MyAttendanceTab';
 import { AuditLogTab } from './components/AuditLogTab';
+import { DocsModal } from './components/DocsModal';
 import { HanetSimulatorModal } from './components/HanetSimulatorModal';
 import { LoginScreen } from './components/LoginScreen';
 import { ForgotPasswordScreen } from './components/ForgotPasswordScreen';
@@ -68,6 +69,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('attendance');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
+  const [isDocsOpen, setIsDocsOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState(vnToday());
   const [selectedDept, setSelectedDept] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -230,6 +232,7 @@ export default function App() {
           totalCameraCount={cameras.length}
           isOpenMobile={isMobileSidebarOpen}
           onCloseMobile={() => setIsMobileSidebarOpen(false)}
+          onOpenDocs={() => setIsDocsOpen(true)}
         />
 
         <main className="flex-1 min-w-0 overflow-y-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
@@ -290,6 +293,8 @@ export default function App() {
           onSimulateSuccess={fetchData}
         />
       )}
+
+      {isDocsOpen && <DocsModal onClose={() => setIsDocsOpen(false)} />}
 
       <footer className="mt-auto border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-500">
         Hệ thống Điểm danh Camera AI do HGC phát triển
